@@ -55,9 +55,11 @@ async function startEmbeddedDb() {
   require('ts-node').register({ transpileOnly: true });
   const { AppDataSource } = require('../../src/database/data-source');
   const { provisionAppRole } = require('../../src/database/app-role');
+  const { seedCatalogue } = require('../../src/database/seeds/catalogue.seed');
   await AppDataSource.initialize();
   await AppDataSource.runMigrations();
   await provisionAppRole(AppDataSource, CONN.appUser, CONN.appPassword);
+  await seedCatalogue(AppDataSource);
   await AppDataSource.destroy();
 
   // Share connection info with the test workers.

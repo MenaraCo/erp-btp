@@ -15,6 +15,7 @@
     "test:e2e": "pnpm --filter @erp-btp/api test:e2e",
     "migrate": "pnpm --filter @erp-btp/api migration:run",
     "migrate:revert": "pnpm --filter @erp-btp/api migration:revert",
+    "seed": "pnpm --filter @erp-btp/api seed",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:local": "pnpm --filter @erp-btp/api db:local"
