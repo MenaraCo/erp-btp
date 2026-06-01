@@ -7,6 +7,7 @@ import { TenancyModule } from './core/tenancy/tenancy.module';
 import { TenantMiddleware } from './core/tenancy/tenant.middleware';
 import { CatalogModule } from './core/catalog/catalog.module';
 import { EntitlementsModule } from './core/entitlements/entitlements.module';
+import { SubscriptionsModule } from './core/subscriptions/subscriptions.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -19,6 +20,7 @@ import { HealthModule } from './health/health.module';
     TenancyModule,
     CatalogModule,
     EntitlementsModule,
+    SubscriptionsModule,
     HealthModule,
   ],
 })

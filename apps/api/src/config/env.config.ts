@@ -18,6 +18,8 @@ export interface AppConfig {
   nodeEnv: string;
   port: number;
   tenantBaseDomain: string;
+  /** Whether a payment method is required to start the trial (cahier §3.3, default false). */
+  trialRequiresPaymentMethod: boolean;
   database: DatabaseConfig;
 }
 
@@ -26,6 +28,8 @@ export function loadAppConfig(): AppConfig {
     nodeEnv: process.env.NODE_ENV ?? 'development',
     port: Number(process.env.API_PORT ?? 3001),
     tenantBaseDomain: process.env.TENANT_BASE_DOMAIN ?? 'localhost',
+    trialRequiresPaymentMethod:
+      process.env.TRIAL_REQUIRES_PAYMENT_METHOD === 'true',
     database: {
       host: process.env.DATABASE_HOST ?? 'localhost',
       port: Number(process.env.DATABASE_PORT ?? 5432),

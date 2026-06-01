@@ -57,7 +57,14 @@ pour que la RLS s'applique réellement ; les migrations tournent avec le rôle p
 - **Phase 0.2** — multi-tenant + RLS + tests d'isolation. ✅
 - **Phase 0.3** — catalogue modules / capacités / packs (config + seed). ✅
 - **Phase 0.4** — garde `@RequiresCapability` + jetons + quotas. ✅
-- **Phase 0.5** — cycle de vie des souscriptions (essai 30 j). ⏳
+- **Phase 0.5** — cycle de vie des souscriptions (essai 30 j). ✅
+- **Phase 0.6** — RBAC (rôles / permissions). ⏳
+
+La souscription (`subscription` / `module_subscription`) est la source de vérité ; elle est
+**projetée** sur les tables d'enforcement (`tenant_module` / `tenant_quota`) lues par la garde.
+L'essai de 30 jours ouvre tous les modules ; à l'échéance non convertie, les modules passent en
+**lecture seule** (jamais de suppression de données). CB non exigée par défaut
+(`TRIAL_REQUIRES_PAYMENT_METHOD`, flag de config).
 
 Le catalogue commercial (modules, capacités, packs, quotas) est piloté par configuration
 ([catalog.config.ts](apps/api/src/core/catalog/catalog.config.ts)) et chargé en base via
