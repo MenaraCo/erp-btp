@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: erp_btp_postgres
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-erp}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-erp}
+      POSTGRES_DB: ${DATABASE_NAME:-erp_btp}
+    ports:
+      - "${DATABASE_PORT:-5432}:5432"
+    volumes:
+      - erp_btp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-erp} -d ${DATABASE_NAME:-erp_btp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  erp_btp_pgdata:

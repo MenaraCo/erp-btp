@@ -1,0 +1,21 @@
+{
+  "name": "erp-btp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ERP SaaS multi-tenant pour le BTP",
+  "packageManager": "pnpm@11.5.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @erp-btp/api start:dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @erp-btp/api test:e2e",
+    "migrate": "pnpm --filter @erp-btp/api migration:run",
+    "migrate:revert": "pnpm --filter @erp-btp/api migration:revert",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down"
+  }
+}
