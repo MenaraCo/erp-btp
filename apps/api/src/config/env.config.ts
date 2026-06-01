@@ -20,6 +20,10 @@ export interface AppConfig {
   tenantBaseDomain: string;
   /** Whether a payment method is required to start the trial (cahier §3.3, default false). */
   trialRequiresPaymentMethod: boolean;
+  /** Secret for signing first-party JWTs. MUST be set via env in production. */
+  jwtSecret: string;
+  /** Access-token lifetime in seconds. */
+  accessTokenTtlSec: number;
   database: DatabaseConfig;
 }
 
@@ -30,6 +34,12 @@ export function loadAppConfig(): AppConfig {
     tenantBaseDomain: process.env.TENANT_BASE_DOMAIN ?? 'localhost',
     trialRequiresPaymentMethod:
       process.env.TRIAL_REQUIRES_PAYMENT_METHOD === 'true',
+    jwtSecret:
+      process.env.JWT_SECRET ??
+      ((process.env.NODE_ENV ?? 'development') === 'production'
+        ? ''
+        : 'dev-insecure-jwt-secret-change-me'),
+    accessTokenTtlSec: Number(process.env.ACCESS_TOKEN_TTL_SEC ?? 3600),
     database: {
       host: process.env.DATABASE_HOST ?? 'localhost',
       port: Number(process.env.DATABASE_PORT ?? 5432),

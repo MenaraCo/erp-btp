@@ -9,6 +9,7 @@ import { CatalogModule } from './core/catalog/catalog.module';
 import { EntitlementsModule } from './core/entitlements/entitlements.module';
 import { SubscriptionsModule } from './core/subscriptions/subscriptions.module';
 import { RbacModule } from './core/rbac/rbac.module';
+import { AuthModule } from './core/auth/auth.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -23,6 +24,7 @@ import { HealthModule } from './health/health.module';
     EntitlementsModule,
     SubscriptionsModule,
     RbacModule,
+    AuthModule,
     HealthModule,
   ],
 })

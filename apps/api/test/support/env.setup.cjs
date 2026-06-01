@@ -16,3 +16,6 @@ if (fs.existsSync(CONN_FILE)) {
   process.env.DATABASE_APP_USER = c.appUser;
   process.env.DATABASE_APP_PASSWORD = c.appPassword;
 }
+
+// Deterministic JWT secret for the test run.
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret';
