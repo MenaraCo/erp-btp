@@ -11,6 +11,7 @@ import { SubscriptionsModule } from './core/subscriptions/subscriptions.module';
 import { RbacModule } from './core/rbac/rbac.module';
 import { AuthModule } from './core/auth/auth.module';
 import { DirectoryModule } from './modules/directory/directory.module';
+import { EstimatingModule } from './modules/estimating/estimating.module';
 import { SearchModule } from './core/common/search/search.module';
 import { HealthModule } from './health/health.module';
 
@@ -28,6 +29,7 @@ import { HealthModule } from './health/health.module';
     RbacModule,
     AuthModule,
     DirectoryModule,
+    EstimatingModule,
     SearchModule,
     HealthModule,
   ],

@@ -16,6 +16,7 @@ import { EntitlementsService } from '../../src/core/entitlements/entitlements.se
 import { RbacModule } from '../../src/core/rbac/rbac.module';
 import { RbacService } from '../../src/core/rbac/rbac.service';
 import { DirectoryModule } from '../../src/modules/directory/directory.module';
+import { EstimatingModule } from '../../src/modules/estimating/estimating.module';
 import { SearchModule } from '../../src/core/common/search/search.module';
 import { createTenant } from './datasource';
 import { createUser, activateModule } from './entitlements.helpers';
@@ -28,6 +29,7 @@ import { createUser, activateModule } from './entitlements.helpers';
     EntitlementsModule,
     RbacModule,
     DirectoryModule,
+    EstimatingModule,
     SearchModule,
   ],
 })
@@ -47,19 +49,21 @@ export async function buildSocleApp(): Promise<INestApplication> {
 }
 
 /**
- * Creates a tenant + user fully entitled to the `directory` capability (core module + seat)
- * with the given role. Returns ids for use as X-Tenant-Id / X-User-Id headers.
+ * Creates a tenant + user fully entitled to the given module (active + seat) with the given
+ * role. Defaults to the `core` module (directory capability). Returns ids for use as
+ * X-Tenant-Id / X-User-Id headers.
  */
 export async function entitleUser(
   app: INestApplication,
   ds: DataSource,
   name: string,
   roleCode = 'admin',
+  moduleCode = 'core',
 ): Promise<{ tenantId: string; userId: string }> {
   const tenant = await createTenant(ds, name);
   const userId = await createUser(ds, tenant.id, `u@${tenant.slug}.test`);
-  await activateModule(ds, tenant.id, 'core', 5);
-  await app.get(EntitlementsService).assignSeat(tenant.id, 'core', userId);
+  await activateModule(ds, tenant.id, moduleCode, 5);
+  await app.get(EntitlementsService).assignSeat(tenant.id, moduleCode, userId);
   await app.get(RbacService).provisionSystemRoles(tenant.id);
   await app.get(RbacService).assignRole(tenant.id, userId, roleCode);
   return { tenantId: tenant.id, userId };
