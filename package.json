@@ -16,6 +16,7 @@
     "migrate": "pnpm --filter @erp-btp/api migration:run",
     "migrate:revert": "pnpm --filter @erp-btp/api migration:revert",
     "db:up": "docker compose up -d postgres",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "db:local": "pnpm --filter @erp-btp/api db:local"
   }
 }

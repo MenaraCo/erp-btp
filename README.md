@@ -14,14 +14,20 @@ ERP SaaS multi-tenant pour les entreprises du BTP. Voir [`CAHIER_DES_CHARGES.md`
 
 - Node.js >= 20
 - pnpm 11 (via `corepack`, ou `~/.local/bin/pnpm`)
-- PostgreSQL 16 — via Docker (`docker compose up -d postgres`) ou une instance locale
+- PostgreSQL — **aucune installation système requise** : `pnpm db:local` lance un PostgreSQL
+  embarqué (binaire dans `node_modules`, données dans `apps/api/.pgdata`). Docker reste une
+  alternative (`pnpm db:up`) si tu le préfères.
 
 ## Démarrage
 
 ```bash
 cp .env.example .env          # ajuster si besoin
 pnpm install
-pnpm db:up                    # démarre PostgreSQL (Docker)
+
+# PostgreSQL local, au choix :
+pnpm db:local                 # embarqué, sans Docker (laisser tourner dans un terminal)
+# ou : pnpm db:up             # via Docker
+
 pnpm migrate                  # applique les migrations
 pnpm dev                      # API sur http://localhost:3001 ; GET /health
 ```

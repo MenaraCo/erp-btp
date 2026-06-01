@@ -7,6 +7,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# local embedded postgres data (apps/api/.pgdata)
+.pgdata/
+
 # env & secrets
 .env
 .env.*
