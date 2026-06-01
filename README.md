@@ -60,7 +60,13 @@ pour que la RLS s'applique réellement ; les migrations tournent avec le rôle p
 - **Phase 0.5** — cycle de vie des souscriptions (essai 30 j). ✅
 - **Phase 0.6** — RBAC (rôles / permissions). ✅
 - **Phase 0.7** — authentification (mot de passe + JWT + MFA TOTP). ✅
-- **Phase 0.8** — référentiel + data-grid + recherche universelle. ⏳
+- **Phase 0.8** — référentiel + data-grid + recherche universelle. ✅ — **socle Phase 0 terminé**
+- **Phase 1** — Études de prix (ouvrages composés, recalcul ascendant). ⏳
+
+Référentiel `client` / `supplier` (RLS) avec data-grid réutilisable (pagination / tri / filtre,
+colonnes de tri sur liste blanche) et recherche universelle extensible par providers. Les
+endpoints du référentiel portent **les deux gardes** (`@RequiresCapability('directory')` +
+`@RequiresPermission('directory.read|write')`).
 
 Authentification first-party **sans dépendance externe** : mot de passe (scrypt), token d'accès
 HS256 et MFA TOTP (RFC 6238) via `node:crypto`. Le **token vérifié** porte le contexte
