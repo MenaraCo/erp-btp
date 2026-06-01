@@ -1,25 +1,10 @@
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
-import { loadAppConfig } from '../config/env.config';
+import { buildTypeOrmOptions } from './typeorm.config';
 
 /**
  * Stand-alone DataSource used by the TypeORM CLI (migration:run / generate / revert).
- * The running application builds its own DataSource via TypeOrmModule (added in phase 0.2);
- * both read the same env configuration so they stay in sync.
+ * The running application builds its own connection via TypeOrmModule (app.module.ts);
+ * both share buildTypeOrmOptions() so they never drift apart.
  */
-const { database } = loadAppConfig();
-
-export const AppDataSource = new DataSource({
-  type: 'postgres',
-  host: database.host,
-  port: database.port,
-  username: database.username,
-  password: database.password,
-  database: database.database,
-  entities: [__dirname + '/../**/*.entity.{ts,js}'],
-  migrations: [__dirname + '/migrations/*.{ts,js}'],
-  synchronize: false,
-  logging: false,
-});
-
-export default AppDataSource;
+export const AppDataSource = new DataSource(buildTypeOrmOptions('owner'));

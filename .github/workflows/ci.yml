@@ -9,28 +9,6 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: erp
-          POSTGRES_PASSWORD: erp
-          POSTGRES_DB: erp_btp
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U erp -d erp_btp"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      DATABASE_HOST: localhost
-      DATABASE_PORT: 5432
-      DATABASE_USER: erp
-      DATABASE_PASSWORD: erp
-      DATABASE_NAME: erp_btp
-
     steps:
       - uses: actions/checkout@v4
 
@@ -47,4 +25,5 @@ jobs:
       - run: pnpm lint
       - run: pnpm build
       - run: pnpm test
+      # e2e boots its own embedded PostgreSQL (test/support/global-setup.cjs); no DB service needed.
       - run: pnpm test:e2e

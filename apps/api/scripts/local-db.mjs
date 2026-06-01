@@ -10,6 +10,7 @@
  * In CI we use a real PostgreSQL service instead (see .github/workflows/ci.yml).
  */
 import EmbeddedPostgres from 'embedded-postgres';
+import { Client } from 'pg';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -21,6 +22,8 @@ const port = Number(process.env.DATABASE_PORT ?? 5432);
 const user = process.env.DATABASE_USER ?? 'erp';
 const password = process.env.DATABASE_PASSWORD ?? 'erp';
 const database = process.env.DATABASE_NAME ?? 'erp_btp';
+const appUser = process.env.DATABASE_APP_USER ?? 'erp_app';
+const appPassword = process.env.DATABASE_APP_PASSWORD ?? 'erp_app';
 
 const pg = new EmbeddedPostgres({
   databaseDir: dataDir,
@@ -31,6 +34,37 @@ const pg = new EmbeddedPostgres({
 });
 
 const firstRun = !existsSync(dataDir);
+
+async function provisionAppRole() {
+  const admin = new Client({ host: 'localhost', port, user, password, database });
+  await admin.connect();
+  try {
+    await admin.query(`
+      DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${appUser}') THEN
+            CREATE ROLE ${appUser} LOGIN PASSWORD '${appPassword.replace(/'/g, "''")}' NOSUPERUSER NOBYPASSRLS;
+          END IF;
+        END
+      $$;`);
+    await admin.query(`GRANT USAGE ON SCHEMA public TO ${appUser};`);
+    await admin.query(
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${appUser};`,
+    );
+    await admin.query(
+      `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${appUser};`,
+    );
+    await admin.query(
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${appUser};`,
+    );
+    await admin.query(
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${appUser};`,
+    );
+    console.log(`[local-db] application role "${appUser}" ready.`);
+  } finally {
+    await admin.end();
+  }
+}
 
 async function main() {
   if (firstRun) {
@@ -45,6 +79,10 @@ async function main() {
     console.log(`[local-db] creating database "${database}"...`);
     await pg.createDatabase(database);
   }
+
+  // Provision the non-privileged application role (idempotent). Mirrors
+  // src/database/app-role.ts; default privileges cover tables created later by migrations.
+  await provisionAppRole();
 
   console.log(
     `[local-db] ready -> postgres://${user}:***@localhost:${port}/${database}`,

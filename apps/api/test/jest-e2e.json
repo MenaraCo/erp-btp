@@ -5,5 +5,10 @@
   "testRegex": ".e2e-spec.ts$",
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
-  }
+  },
+  "globalSetup": "<rootDir>/support/global-setup.cjs",
+  "globalTeardown": "<rootDir>/support/global-teardown.cjs",
+  "setupFiles": ["<rootDir>/support/env.setup.cjs"],
+  "maxWorkers": 1,
+  "testTimeout": 60000
 }

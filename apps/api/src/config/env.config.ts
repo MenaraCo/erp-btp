@@ -5,9 +5,13 @@
 export interface DatabaseConfig {
   host: string;
   port: number;
+  /** Owner/superuser role — used for DDL and migrations. */
   username: string;
   password: string;
   database: string;
+  /** Non-privileged application role (NOBYPASSRLS) — used by the runtime app, subject to RLS. */
+  appUsername: string;
+  appPassword: string;
 }
 
 export interface AppConfig {
@@ -28,6 +32,8 @@ export function loadAppConfig(): AppConfig {
       username: process.env.DATABASE_USER ?? 'erp',
       password: process.env.DATABASE_PASSWORD ?? 'erp',
       database: process.env.DATABASE_NAME ?? 'erp_btp',
+      appUsername: process.env.DATABASE_APP_USER ?? 'erp_app',
+      appPassword: process.env.DATABASE_APP_PASSWORD ?? 'erp_app',
     },
   };
 }

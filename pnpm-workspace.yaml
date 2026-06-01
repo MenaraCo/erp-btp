@@ -3,4 +3,7 @@ packages:
   - "packages/*"
 allowBuilds:
   '@embedded-postgres/darwin-arm64': true
+  '@embedded-postgres/darwin-x64': true
+  '@embedded-postgres/linux-x64': true
+  '@embedded-postgres/linux-arm64': true
   '@nestjs/core': true
