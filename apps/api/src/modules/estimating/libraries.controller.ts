@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -58,5 +59,19 @@ export class LibrariesController {
   @RequiresPermission('estimating.devis.read')
   listResources(@Param('libraryId') libraryId: string, @Query() query: DataGridQuery) {
     return this.libraries.listResources(libraryId, query);
+  }
+
+  @Patch(':libraryId/resources/:resourceId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  updateResourceCost(
+    @Param('libraryId') libraryId: string,
+    @Param('resourceId') resourceId: string,
+    @Body() body: { unitCost?: string | number },
+  ) {
+    if (body?.unitCost == null || Number.isNaN(Number(body.unitCost))) {
+      throw new BadRequestException('unitCost is required');
+    }
+    return this.libraries.updateResourceCost(libraryId, resourceId, body.unitCost);
   }
 }

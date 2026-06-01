@@ -10,6 +10,7 @@ import {
 } from '../../core/common/data-grid/data-grid';
 import { LibraryEntity } from './entities/library.entity';
 import { ResourceEntity, ResourceNature } from './entities/resource.entity';
+import { OuvragesService } from './ouvrages.service';
 
 export interface LibraryInput {
   code: string;
@@ -31,7 +32,30 @@ export class LibrariesService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
+    private readonly ouvrages: OuvragesService,
   ) {}
+
+  /** Updates a resource's déboursé unitaire and recomputes every dependent ouvrage (rule #1). */
+  async updateResourceCost(
+    libraryId: string,
+    resourceId: string,
+    unitCost: string | number,
+  ): Promise<ResourceEntity> {
+    const tenantId = this.context.requireTenantId();
+    const updated = await runInTenant(this.dataSource, tenantId, async (em) => {
+      const result = await em.query(
+        `UPDATE resource SET unit_cost = $1, updated_at = now()
+          WHERE id = $2 AND library_id = $3 RETURNING *`,
+        [String(unitCost), resourceId, libraryId],
+      );
+      if (result.length === 0) {
+        throw new NotFoundException(`Unknown resource "${resourceId}"`);
+      }
+      return result[0];
+    });
+    await this.ouvrages.recomputeTenant();
+    return updated;
+  }
 
   createLibrary(input: LibraryInput): Promise<LibraryEntity> {
     const tenantId = this.context.requireTenantId();
