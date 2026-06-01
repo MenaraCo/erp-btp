@@ -56,9 +56,19 @@ pour que la RLS s'applique réellement ; les migrations tournent avec le rôle p
 - **Phase 0.1** — socle infra (monorepo, API NestJS, Docker/embedded Postgres, CI). ✅
 - **Phase 0.2** — multi-tenant + RLS + tests d'isolation. ✅
 - **Phase 0.3** — catalogue modules / capacités / packs (config + seed). ✅
-- **Phase 0.4** — garde `@RequiresCapability` + jetons + quotas. ⏳
+- **Phase 0.4** — garde `@RequiresCapability` + jetons + quotas. ✅
+- **Phase 0.5** — cycle de vie des souscriptions (essai 30 j). ⏳
 
 Le catalogue commercial (modules, capacités, packs, quotas) est piloté par configuration
 ([catalog.config.ts](apps/api/src/core/catalog/catalog.config.ts)) et chargé en base via
 `pnpm seed` (idempotent). Le code teste toujours une **capacité** (`estimating.bid`…),
 jamais un nom de module ou de pack.
+
+## Gating (capacités + jetons + quotas)
+
+Tout endpoint sensible porte `@RequiresCapability('…')`. La garde globale
+([capability.guard.ts](apps/api/src/core/entitlements/capability.guard.ts)) vérifie, pour le
+tenant + l'utilisateur courants : (a) qu'un module débloquant cette capacité est **actif**
+(`tenant_module`) et (b) que l'utilisateur détient un **jeton** (`seat_assignment`, affectés ≤
+achetés). Les **quotas** (`tenant_quota` / `usage_counter`) se vérifient via `QuotaService`
+avant chaque création. Le backend est la seule source de vérité ; le frontend ne décide jamais.

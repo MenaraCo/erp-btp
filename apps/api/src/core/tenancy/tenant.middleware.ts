@@ -22,6 +22,9 @@ export class TenantMiddleware implements NestMiddleware {
         'Tenant could not be resolved. Use a tenant sub-domain or the X-Tenant-Id header.',
       );
     }
-    this.context.run(tenantId, () => next());
+    // Current user (dev): X-User-Id header. Replaced by the auth token subject in phase 0.7.
+    const rawUser = req.headers['x-user-id'];
+    const userId = Array.isArray(rawUser) ? rawUser[0] : rawUser;
+    this.context.run({ tenantId, userId }, () => next());
   }
 }

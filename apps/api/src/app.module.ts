@@ -6,6 +6,7 @@ import { buildTypeOrmOptions } from './database/typeorm.config';
 import { TenancyModule } from './core/tenancy/tenancy.module';
 import { TenantMiddleware } from './core/tenancy/tenant.middleware';
 import { CatalogModule } from './core/catalog/catalog.module';
+import { EntitlementsModule } from './core/entitlements/entitlements.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -17,6 +18,7 @@ import { HealthModule } from './health/health.module';
     TypeOrmModule.forRootAsync({ useFactory: () => buildTypeOrmOptions() }),
     TenancyModule,
     CatalogModule,
+    EntitlementsModule,
     HealthModule,
   ],
 })

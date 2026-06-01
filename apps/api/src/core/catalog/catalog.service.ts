@@ -53,6 +53,19 @@ export class CatalogService {
     return new Set(rows.map((r) => r.key));
   }
 
+  /** Active module codes that unlock a given capability key (reverse mapping). */
+  async getModuleCodesForCapability(capabilityKey: string): Promise<string[]> {
+    const rows = await this.moduleCapabilities
+      .createQueryBuilder('mc')
+      .innerJoin(ModuleEntity, 'm', 'm.id = mc.module_id')
+      .innerJoin(CapabilityEntity, 'c', 'c.id = mc.capability_id')
+      .select('m.code', 'code')
+      .where('c.key = :capabilityKey', { capabilityKey })
+      .andWhere('m.active = true')
+      .getRawMany<{ code: string }>();
+    return rows.map((r) => r.code);
+  }
+
   /** Module codes bundled by a pack. */
   async getModuleCodesForPack(packCode: string): Promise<string[]> {
     const rows = await this.packModules
