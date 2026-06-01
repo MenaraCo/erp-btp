@@ -58,7 +58,13 @@ pour que la RLS s'applique réellement ; les migrations tournent avec le rôle p
 - **Phase 0.3** — catalogue modules / capacités / packs (config + seed). ✅
 - **Phase 0.4** — garde `@RequiresCapability` + jetons + quotas. ✅
 - **Phase 0.5** — cycle de vie des souscriptions (essai 30 j). ✅
-- **Phase 0.6** — RBAC (rôles / permissions). ⏳
+- **Phase 0.6** — RBAC (rôles / permissions). ✅
+- **Phase 0.7** — authentification réelle (OIDC / MFA). ⏳
+
+**Deux axes d'autorisation orthogonaux** : `@RequiresCapability` (commercial : module acheté +
+jeton) et `@RequiresPermission` (organisationnel : le rôle de l'utilisateur l'autorise). Un
+endpoint sensible peut porter les deux — les deux gardes doivent passer. Permissions = catalogue
+global seedé ; rôles tenant-scopés et cumulables (`role` / `role_permission` / `user_role`, RLS).
 
 La souscription (`subscription` / `module_subscription`) est la source de vérité ; elle est
 **projetée** sur les tables d'enforcement (`tenant_module` / `tenant_quota`) lues par la garde.

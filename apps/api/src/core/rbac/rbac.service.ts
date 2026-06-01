@@ -1,0 +1,82 @@
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { runInTenant } from '../tenancy/tenant-transaction';
+import { SYSTEM_ROLES } from './rbac.config';
+
+/**
+ * Role-based access control. Roles are tenant-scoped and cumulable; permissions come from the
+ * global catalogue. This is the second enforcement axis, orthogonal to entitlements.
+ */
+@Injectable()
+export class RbacService {
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  /** Creates/updates the system roles for a tenant from config (idempotent, reconciling). */
+  provisionSystemRoles(tenantId: string): Promise<void> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      for (const def of SYSTEM_ROLES) {
+        const roleRows = await em.query(
+          `INSERT INTO role (tenant_id, code, label, is_system)
+           VALUES ($1, $2, $3, true)
+           ON CONFLICT (tenant_id, code) DO UPDATE SET label = EXCLUDED.label, updated_at = now()
+           RETURNING id`,
+          [tenantId, def.code, def.label],
+        );
+        const roleId = roleRows[0].id;
+
+        // Reconcile this role's permissions with config.
+        await em.query(`DELETE FROM role_permission WHERE role_id = $1`, [roleId]);
+        for (const key of def.permissions) {
+          await em.query(
+            `INSERT INTO role_permission (tenant_id, role_id, permission_id)
+             SELECT $1, $2, p.id FROM permission p WHERE p.key = $3`,
+            [tenantId, roleId, key],
+          );
+        }
+      }
+    });
+  }
+
+  /** Assigns a role (by code) to a user. Roles are cumulable. */
+  assignRole(tenantId: string, userId: string, roleCode: string): Promise<void> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const roleRows = await em.query(
+        `SELECT id FROM role WHERE code = $1`,
+        [roleCode],
+      );
+      if (roleRows.length === 0) {
+        throw new BadRequestException(`Unknown role "${roleCode}"`);
+      }
+      await em.query(
+        `INSERT INTO user_role (tenant_id, user_id, role_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING`,
+        [tenantId, userId, roleRows[0].id],
+      );
+    });
+  }
+
+  /** True if the user holds any role granting the given permission key. */
+  hasPermission(
+    tenantId: string,
+    userId: string | undefined,
+    permissionKey: string,
+  ): Promise<boolean> {
+    if (!userId) {
+      return Promise.resolve(false);
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT 1
+           FROM user_role ur
+           JOIN role_permission rp ON rp.role_id = ur.role_id
+           JOIN permission p ON p.id = rp.permission_id
+          WHERE ur.user_id = $1 AND p.key = $2
+          LIMIT 1`,
+        [userId, permissionKey],
+      );
+      return rows.length > 0;
+    });
+  }
+}

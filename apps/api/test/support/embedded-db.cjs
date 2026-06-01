@@ -56,10 +56,12 @@ async function startEmbeddedDb() {
   const { AppDataSource } = require('../../src/database/data-source');
   const { provisionAppRole } = require('../../src/database/app-role');
   const { seedCatalogue } = require('../../src/database/seeds/catalogue.seed');
+  const { seedPermissions } = require('../../src/database/seeds/rbac.seed');
   await AppDataSource.initialize();
   await AppDataSource.runMigrations();
   await provisionAppRole(AppDataSource, CONN.appUser, CONN.appPassword);
   await seedCatalogue(AppDataSource);
+  await seedPermissions(AppDataSource);
   await AppDataSource.destroy();
 
   // Share connection info with the test workers.
