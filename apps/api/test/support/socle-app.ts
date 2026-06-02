@@ -17,6 +17,7 @@ import { RbacModule } from '../../src/core/rbac/rbac.module';
 import { RbacService } from '../../src/core/rbac/rbac.service';
 import { DirectoryModule } from '../../src/modules/directory/directory.module';
 import { EstimatingModule } from '../../src/modules/estimating/estimating.module';
+import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { SearchModule } from '../../src/core/common/search/search.module';
 import { createTenant } from './datasource';
 import { createUser, activateModule } from './entitlements.helpers';
@@ -30,6 +31,7 @@ import { createUser, activateModule } from './entitlements.helpers';
     RbacModule,
     DirectoryModule,
     EstimatingModule,
+    InvoicingModule,
     SearchModule,
   ],
 })
@@ -58,12 +60,15 @@ export async function entitleUser(
   ds: DataSource,
   name: string,
   roleCode = 'admin',
-  moduleCode = 'core',
+  moduleCode: string | string[] = 'core',
 ): Promise<{ tenantId: string; userId: string }> {
   const tenant = await createTenant(ds, name);
   const userId = await createUser(ds, tenant.id, `u@${tenant.slug}.test`);
-  await activateModule(ds, tenant.id, moduleCode, 5);
-  await app.get(EntitlementsService).assignSeat(tenant.id, moduleCode, userId);
+  const modules = Array.isArray(moduleCode) ? moduleCode : [moduleCode];
+  for (const code of modules) {
+    await activateModule(ds, tenant.id, code, 5);
+    await app.get(EntitlementsService).assignSeat(tenant.id, code, userId);
+  }
   await app.get(RbacService).provisionSystemRoles(tenant.id);
   await app.get(RbacService).assignRole(tenant.id, userId, roleCode);
   return { tenantId: tenant.id, userId };

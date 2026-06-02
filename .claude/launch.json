@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.local/bin:$PATH\"; cd /Users/menco/Desktop/erp-btp; exec pnpm -C apps/api start:dev"
+      ],
+      "port": 3001
+    },
+    {
+      "name": "db-local",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.local/bin:$PATH\"; cd /Users/menco/Desktop/erp-btp; exec pnpm -C apps/api db:local"
+      ],
+      "port": 5432
+    }
+  ]
+}

@@ -28,6 +28,8 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'directory.write', label: 'Modifier le référentiel' },
   { key: 'estimating.devis.read', label: 'Consulter les devis' },
   { key: 'estimating.devis.write', label: 'Modifier les devis' },
+  { key: 'invoicing.read', label: 'Consulter la facturation' },
+  { key: 'invoicing.write', label: 'Gérer la facturation (marchés, situations, factures)' },
 ];
 
 const ALL_PERMISSION_KEYS = PERMISSIONS.map((p) => p.key);

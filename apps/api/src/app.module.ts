@@ -12,6 +12,7 @@ import { RbacModule } from './core/rbac/rbac.module';
 import { AuthModule } from './core/auth/auth.module';
 import { DirectoryModule } from './modules/directory/directory.module';
 import { EstimatingModule } from './modules/estimating/estimating.module';
+import { InvoicingModule } from './modules/invoicing/invoicing.module';
 import { SearchModule } from './core/common/search/search.module';
 import { HealthModule } from './health/health.module';
 
@@ -30,6 +31,7 @@ import { HealthModule } from './health/health.module';
     AuthModule,
     DirectoryModule,
     EstimatingModule,
+    InvoicingModule,
     SearchModule,
     HealthModule,
   ],
