@@ -5,12 +5,14 @@ import { AcceptanceService } from './acceptance.service';
 import { AcceptanceController } from './acceptance.controller';
 import { SituationsService } from './situations.service';
 import { SituationsController } from './situations.controller';
+import { AvenantService } from './avenant.service';
+import { AvenantController } from './avenant.controller';
 
-/** Invoicing (Facturation) — 2.1 acceptation (marché), 2.2 situations à l'avancement. */
+/** Invoicing (Facturation) — 2.1 acceptation, 2.2 situations à l'avancement, 2.3 avenants. */
 @Module({
   imports: [TenancyModule, EstimatingModule],
-  providers: [AcceptanceService, SituationsService],
-  controllers: [AcceptanceController, SituationsController],
-  exports: [AcceptanceService, SituationsService],
+  providers: [AcceptanceService, SituationsService, AvenantService],
+  controllers: [AcceptanceController, SituationsController, AvenantController],
+  exports: [AcceptanceService, SituationsService, AvenantService],
 })
 export class InvoicingModule {}
