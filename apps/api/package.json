@@ -11,6 +11,7 @@
     "test": "jest --passWithNoTests",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "ts-node src/database/seeds/run-seed.ts",
+    "seed:demo": "ts-node src/database/seeds/demo-seed.run.ts",
     "typeorm": "typeorm-ts-node-commonjs -d src/database/data-source.ts",
     "migration:run": "pnpm typeorm migration:run",
     "migration:revert": "pnpm typeorm migration:revert",

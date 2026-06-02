@@ -29,8 +29,13 @@ pnpm db:local                 # embarqué, sans Docker (laisser tourner dans un 
 # ou : pnpm db:up             # via Docker
 
 pnpm migrate                  # applique les migrations
+pnpm seed                     # catalogue (modules/capacités/packs) + permissions
+pnpm seed:demo                # jeu de démo : tenant "demo", biblio + affaire chiffrée
 pnpm dev                      # API sur http://localhost:3001 ; GET /health
 ```
+
+Le jeu de démo crée un tenant `demo` (login `admin@demo.test` / `demo1234`) avec une bibliothèque
+réaliste, des ouvrages composés et une affaire chiffrée complète (devis + métré + feuille de vente).
 
 ## Scripts
 
@@ -41,6 +46,8 @@ pnpm dev                      # API sur http://localhost:3001 ; GET /health
 | `pnpm test` | Tests unitaires |
 | `pnpm test:e2e` | Tests end-to-end |
 | `pnpm migrate` | Applique les migrations |
+| `pnpm seed` | Seed catalogue + permissions (global) |
+| `pnpm seed:demo` | Jeu de démonstration (tenant `demo`) |
 | `pnpm migrate:revert` | Annule la dernière migration |
 
 ## Multi-tenant (RLS)
@@ -61,7 +68,11 @@ pour que la RLS s'applique réellement ; les migrations tournent avec le rôle p
 - **Phase 0.6** — RBAC (rôles / permissions). ✅
 - **Phase 0.7** — authentification (mot de passe + JWT + MFA TOTP). ✅
 - **Phase 0.8** — référentiel + data-grid + recherche universelle. ✅ — **socle Phase 0 terminé**
-- **Phase 1** — Études de prix (ouvrages composés, recalcul ascendant). ⏳
+- **Phase 1** — Études de prix. ✅ — **module cœur terminé**
+  - 1.1 bibliothèques & ressources · 1.2 ouvrages composés + **recalcul ascendant** (règle #1) ·
+    1.3 corps de devis hiérarchique + métré · 1.4 **feuille de vente** (coefficients + ventilation,
+    règles #2/#3) · 1.5 workflow d'affaire (règle #7) · 1.6 PDF · seed de démo.
+- **Phase 2** — Acceptation + Facturation (situations, DGD, Factur-X). ⏳
 
 Référentiel `client` / `supplier` (RLS) avec data-grid réutilisable (pagination / tri / filtre,
 colonnes de tri sur liste blanche) et recherche universelle extensible par providers. Les
