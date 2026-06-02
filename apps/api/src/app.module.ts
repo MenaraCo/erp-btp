@@ -13,6 +13,7 @@ import { AuthModule } from './core/auth/auth.module';
 import { DirectoryModule } from './modules/directory/directory.module';
 import { EstimatingModule } from './modules/estimating/estimating.module';
 import { InvoicingModule } from './modules/invoicing/invoicing.module';
+import { ComplianceModule } from './modules/compliance/compliance.module';
 import { SearchModule } from './core/common/search/search.module';
 import { HealthModule } from './health/health.module';
 
@@ -32,6 +33,7 @@ import { HealthModule } from './health/health.module';
     DirectoryModule,
     EstimatingModule,
     InvoicingModule,
+    ComplianceModule,
     SearchModule,
     HealthModule,
   ],
