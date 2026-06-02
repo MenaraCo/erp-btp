@@ -9,17 +9,37 @@ import { AvenantService } from './avenant.service';
 import { AvenantController } from './avenant.controller';
 import { DgdService } from './dgd.service';
 import { DgdController } from './dgd.controller';
+import { CompanyService } from './company.service';
+import { CompanyController } from './company.controller';
+import { InvoiceService } from './invoice.service';
+import { InvoiceController } from './invoice.controller';
 
-/** Invoicing (Facturation) — 2.1 acceptation, 2.2 situations, 2.3 avenants, 2.4 DGD. */
+/** Invoicing — 2.1 acceptation, 2.2 situations, 2.3 avenants, 2.4 DGD, 2.5 sociétés + factures. */
 @Module({
   imports: [TenancyModule, EstimatingModule],
-  providers: [AcceptanceService, SituationsService, AvenantService, DgdService],
+  providers: [
+    AcceptanceService,
+    SituationsService,
+    AvenantService,
+    DgdService,
+    CompanyService,
+    InvoiceService,
+  ],
   controllers: [
     AcceptanceController,
     SituationsController,
     AvenantController,
     DgdController,
+    CompanyController,
+    InvoiceController,
   ],
-  exports: [AcceptanceService, SituationsService, AvenantService, DgdService],
+  exports: [
+    AcceptanceService,
+    SituationsService,
+    AvenantService,
+    DgdService,
+    CompanyService,
+    InvoiceService,
+  ],
 })
 export class InvoicingModule {}
