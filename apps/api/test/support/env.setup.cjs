@@ -19,3 +19,7 @@ if (fs.existsSync(CONN_FILE)) {
 
 // Deterministic JWT secret for the test run.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret';
+
+// Small connection pool per app/DataSource so the many e2e suites (run serially) stay well
+// under PostgreSQL max_connections (avoids transient cross-suite connection exhaustion).
+process.env.DB_POOL_MAX = process.env.DB_POOL_MAX || '4';

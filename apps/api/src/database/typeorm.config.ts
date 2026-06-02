@@ -23,5 +23,11 @@ export function buildTypeOrmOptions(role: DbRole = 'app'): DataSourceOptions {
     migrations: [__dirname + '/migrations/*.{ts,js}'],
     synchronize: false,
     logging: false,
+    // Connection pool: bounded (env-tunable) and quick to release idle clients. Keeps the test
+    // suite (many apps/DataSources in sequence) well under PostgreSQL max_connections.
+    extra: {
+      max: Number(process.env.DB_POOL_MAX ?? 10),
+      idleTimeoutMillis: 1000,
+    },
   };
 }
