@@ -68,16 +68,26 @@ Conséquence importante : que l'offre soit présentée en paliers, en modules ou
 - *Bureau d'études, 2 deviseurs* : Socle + Études de prix × 2 ≈ **78 €/mois**. Aucun coût de suivi de chantier inutile.
 - *Service travaux, 4 conducteurs* : Socle + Suivi de chantiers × 4 + Facturation × 4 ≈ **312 €/mois**, avec accès lecture aux études.
 
-### 3.3 Essai gratuit 30 jours
+### 3.3 Deux parcours d'entrée indépendants : essai OU souscription directe
 
-- À l'inscription, créer une **souscription** au statut `trialing` donnant accès à **tous les modules**, avec un volant de jetons généreux mais borné (anti-abus). `trial_ends_at = now + 30 jours`.
-- **Carte bancaire non exigée à l'inscription** — ce comportement est un **flag de configuration** (`trial_requires_payment_method`, défaut `false`), modifiable sans redéploiement et testable en A/B. Ne jamais coder « sans CB » en dur dans le parcours.
-- À l'échéance sans souscription payante : **ne jamais supprimer les données.** Les modules non souscrits passent en **lecture seule** (consultation/export possibles), avec invitation explicite à activer le module concerné (upsell ciblé par module).
+**Règle fondamentale : l'essai n'est PAS un prérequis de l'abonnement.** L'inscription offre **deux portes parallèles**, présentées côte à côte (« Essayer gratuitement 30 jours » / « Choisir mon abonnement »). Un client convaincu doit pouvoir payer immédiatement sans passer par l'essai. Ne jamais coder le parcours comme « inscription → essai obligatoire → conversion » : ce serait fermer la souscription directe.
+
+**Porte 1 — Essai gratuit 30 jours**
+- À l'inscription par cette porte, créer une **souscription au statut `trialing`** donnant accès à **tous les modules**, avec un volant de jetons généreux mais borné (anti-abus). `trial_ends_at = now + 30 jours`.
+- **Carte bancaire non exigée** — comportement piloté par le flag de configuration `trial_requires_payment_method` (défaut `false`), modifiable sans redéploiement et testable en A/B.
+- À l'échéance sans souscription payante : **ne jamais supprimer les données.** Les modules non souscrits passent en **lecture seule** (consultation/export possibles), avec invitation à activer le module concerné (upsell ciblé).
 - Notifications de fin d'essai (J-7, J-1, J0).
+
+**Porte 2 — Souscription directe (sans essai)**
+- L'utilisateur choisit ses packs/modules et son nombre de jetons, renseigne son paiement, et la souscription est créée **directement au statut `active`**, **sans jamais passer par `trialing`**. Il démarre immédiatement en client payant.
+
+**Conversion en cours d'essai** : un utilisateur en `trialing` peut souscrire **à tout moment** (avant la fin des 30 jours) ; la souscription passe de `trialing` à `active`. Les deux portes restent ouvertes en permanence.
+
+**Écran d'abonnement permanent** : l'interface de choix/gestion d'abonnement (packs, modules, jetons, facturation) est accessible en continu depuis les paramètres, quel que soit l'état de la souscription.
 
 ### 3.4 Cycle de vie de la souscription
 
-Entité `Subscription` (par tenant) : statut `trialing | active | past_due | paused | canceled`, plus `trial_ends_at`, `current_period_end`, `cancel_at_period_end`, identifiants prestataire. Elle agrège des lignes **par module** (`ModuleSubscription` : module, jetons achetés, période).
+Entité `Subscription` (par tenant) : statut `trialing | active | past_due | paused | canceled`, plus `trial_ends_at`, `current_period_end`, `cancel_at_period_end`, identifiants prestataire. Elle agrège des lignes **par module** (`ModuleSubscription` : module, jetons achetés, période). Une souscription peut être créée **soit en `trialing`** (porte 1), **soit directement en `active`** (porte 2) — `trialing` n'est pas un passage obligé.
 
 - **Ajout d'un module / de jetons** : effet immédiat, **proratisation** de la période en cours.
 - **Retrait d'un module / réduction de jetons** : effet en fin de période ; le module retiré passe en **lecture seule** (pas de suppression). Si des jetons assignés dépassent les jetons restants, bloquer la création de nouvelles affectations jusqu'à régularisation.

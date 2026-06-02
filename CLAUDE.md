@@ -15,6 +15,7 @@ ERP **SaaS multi-tenant** pour les entreprises du **BTP**, couvrant la chaîne *
 - **Stack** : backend TypeScript + NestJS, base **PostgreSQL**, frontend React + Next.js + TypeScript. Un seul langage backend, pas de mélange.
 - **Multi-tenant strict** : isolation par `tenant_id` + Row-Level Security. Aucune requête ne doit pouvoir lire les données d'un autre tenant.
 - **Droits = capacités par module** : le code teste des **capacités** (`estimating.bid`, `invoicing.situations`, `site_tracking.budget`…), **jamais** un nom de module, de pack ou de palier en dur. Mapping module → capacités piloté par configuration.
+- **Essai et souscription = deux parcours indépendants** : l'essai 30 j (statut `trialing`) n'est **pas** un prérequis de l'abonnement. L'inscription propose deux portes parallèles — « Essayer gratuitement » (crée une souscription `trialing`) **et** « Choisir mon abonnement » (crée une souscription directement `active`, avec paiement, sans passer par `trialing`). Ne jamais coder « inscription → essai obligatoire → conversion ».
 - **Jetons par module** : un utilisateur n'accède à un module que si un **jeton de ce module** lui est affecté ; jetons affectés ≤ jetons achetés.
 - **Sécurité** : aucun secret en dur, aucun stockage navigateur pour des données sensibles, paiements via le prestataire (jamais de saisie de CB dans l'app).
 - **Conformité** : règles fiscales/légales (TVA, Factur-X, Chorus Pro) **isolées dans un module conformité dédié et versionné**, jamais dispersées dans la logique métier.

@@ -136,6 +136,53 @@ export class SubscriptionService {
     });
   }
 
+  /**
+   * Porte 2 (cahier §3.3): direct subscription WITHOUT a trial — creates the subscription
+   * straight in `active` for the chosen modules. Never goes through `trialing`.
+   */
+  subscribeDirect(
+    tenantId: string,
+    modules: Array<{ moduleCode: string; seats: number }>,
+  ): Promise<void> {
+    if (!modules || modules.length === 0) {
+      throw new BadRequestException('At least one module is required');
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const existing = await em.query(
+        `SELECT id FROM subscription WHERE tenant_id = $1`,
+        [tenantId],
+      );
+      if (existing.length > 0) {
+        throw new ConflictException('A subscription already exists for this tenant');
+      }
+
+      const sub = await em.query(
+        `INSERT INTO subscription (tenant_id, status) VALUES ($1, 'active') RETURNING id`,
+        [tenantId],
+      );
+      const subscriptionId = sub[0].id;
+
+      for (const m of modules) {
+        await em.query(
+          `INSERT INTO module_subscription
+             (tenant_id, subscription_id, module_code, seats_purchased, billing_period)
+           VALUES ($1, $2, $3, $4, 'monthly')`,
+          [tenantId, subscriptionId, m.moduleCode, m.seats],
+        );
+        await this.upsertTenantModule(em, tenantId, m.moduleCode, m.seats, true);
+      }
+
+      for (const [metric, limit] of Object.entries(TRIAL_QUOTAS)) {
+        await em.query(
+          `INSERT INTO tenant_quota (tenant_id, metric_key, limit_value)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (tenant_id, metric_key) DO UPDATE SET limit_value = EXCLUDED.limit_value`,
+          [tenantId, metric, limit],
+        );
+      }
+    });
+  }
+
   /** Adds/activates a paid module immediately (effet immédiat, cahier §3.4). */
   subscribeModule(
     tenantId: string,

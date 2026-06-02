@@ -15,6 +15,7 @@ import { EntitlementsModule } from '../../src/core/entitlements/entitlements.mod
 import { EntitlementsService } from '../../src/core/entitlements/entitlements.service';
 import { RbacModule } from '../../src/core/rbac/rbac.module';
 import { RbacService } from '../../src/core/rbac/rbac.service';
+import { SubscriptionsModule } from '../../src/core/subscriptions/subscriptions.module';
 import { DirectoryModule } from '../../src/modules/directory/directory.module';
 import { EstimatingModule } from '../../src/modules/estimating/estimating.module';
 import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
@@ -29,6 +30,7 @@ import { createUser, activateModule } from './entitlements.helpers';
     CatalogModule,
     EntitlementsModule,
     RbacModule,
+    SubscriptionsModule,
     DirectoryModule,
     EstimatingModule,
     InvoicingModule,
