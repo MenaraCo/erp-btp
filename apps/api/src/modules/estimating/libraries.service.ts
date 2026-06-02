@@ -43,15 +43,18 @@ export class LibrariesService {
   ): Promise<ResourceEntity> {
     const tenantId = this.context.requireTenantId();
     const updated = await runInTenant(this.dataSource, tenantId, async (em) => {
-      const result = await em.query(
-        `UPDATE resource SET unit_cost = $1, updated_at = now()
-          WHERE id = $2 AND library_id = $3 RETURNING *`,
-        [String(unitCost), resourceId, libraryId],
+      const existing = await em.query(
+        `SELECT id FROM resource WHERE id = $1 AND library_id = $2`,
+        [resourceId, libraryId],
       );
-      if (result.length === 0) {
+      if (existing.length === 0) {
         throw new NotFoundException(`Unknown resource "${resourceId}"`);
       }
-      return result[0];
+      await em.query(`UPDATE resource SET unit_cost = $1, updated_at = now() WHERE id = $2`, [
+        String(unitCost),
+        resourceId,
+      ]);
+      return (await em.query(`SELECT * FROM resource WHERE id = $1`, [resourceId]))[0];
     });
     await this.ouvrages.recomputeTenant();
     return updated;
