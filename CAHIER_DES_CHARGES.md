@@ -136,7 +136,7 @@ C'est la partie la plus importante : le modèle métier *est* l'avantage concurr
 ### 5.1 Bibliothèques et ressources
 
 - **Bibliothèque** : catalogue réutilisable (multi-bibliothèques par tenant). Peut être convertie depuis une affaire, importée (listing, format type BatiPrix), mise à jour depuis une nomenclature de chantier.
-- **Ressource** : brique élémentaire. Champs : `code`, `libellé`, `unité`, `prix unitaire (déboursé)`, `nature`. **Natures** : main d'œuvre (MO), matériaux, matériel, sous-traitance. Une ressource MO porte un rendement/temps.
+- **Ressource** : brique élémentaire. Champs : `code` (= **numéro analytique** propre à la société, ex. 280), `libellé`, `unité`, `prix unitaire (déboursé)`. Elle se rattache au **plan analytique** par sa **nature** (MO, matériaux, matériel, sous-traitance), son **lot** (corps d'état) et sa **famille** — voir 5.8. Autrement dit, la ressource **est** le code analytique : sa position dans l'arbre nature → lot → famille assure l'imputation automatique. Une ressource MO porte un rendement/temps.
 - **Élément composé / Ouvrage** : composition récursive de ressources et de sous-ouvrages, chacun avec une **quantité**. Son coût (déboursé sec) est **calculé automatiquement** par agrégation des composants. C'est l'entité reine — modélisez-la en arbre récursif avec recalcul ascendant.
 - **Élément en pourcentage** : ligne dont le montant est un % d'une assiette (frais, aléas).
 - **Étude type** : modèle de devis pré-rempli réutilisable.
@@ -221,14 +221,30 @@ Transfert d'une affaire gagnée vers l'aval, en **5 étapes** : choix de l'affai
   - Méthode 2 : `EAC = Budget initial / CPI`, avec `CPI = Budget avancé / Réalisé`.
 - **Marge prévisionnelle finale** : `Marge prévisionnelle = Vente totale − EAC`. Afficher en **montant ET en pourcentage**.
 
-#### Axes d'analyse
+#### Axes d'analyse — DEUX dimensions à croiser
 
-Tous les indicateurs disponibles à chaque niveau : **chantier global, lot, titre, sous-titre, ouvrage, ressource, nature de coût**. Chaque **nature** (MO, matériaux, matériel, sous-traitance, frais de chantier) porte son propre jeu : budget, budget avancé, engagé, réalisé, prévision, écart.
+Le module distingue **deux axes** d'analyse, disponibles séparément et croisables :
+
+**1. Axe structurel** (« où dans le devis/chantier ») : chantier global → titre → sous-titre → ouvrage → ressource.
+
+**2. Axe analytique** (« quel type de dépense ») — hiérarchie à **4 niveaux**, **paramétrable par société** : **nature → lot → famille → ressource (= code analytique)**.
+- **Nature** (niveau 1) : Matériaux, Matériel, Sous-traitant, Main d'œuvre.
+- **Lot** / corps d'état (niveau 2) : `SOLS DURS`, `SOLS SOUPLES`, `PEINTURES`, `GROS-ŒUVRE`…
+- **Famille** (niveau 3) : `COLLES`, `ÉTANCHÉITÉ`, `ENDUITS`, `COFFRAGE`, `BOIS`…
+- **Ressource = code analytique** (niveau 4, la feuille) : poste élémentaire avec **numéro propre à la société**. Ex. `COLLE = 280`, `CARRELAGE = 290`, `BANCHES = 300`.
+
+> **Unification clé : la ressource du chiffrage EST le code analytique.** Il n'y a donc pas de champ d'imputation distinct à ressaisir : une ressource porte intrinsèquement sa position dans l'arbre (nature → lot → famille → son code). Dès qu'elle est utilisée (budget d'étude, ligne de commande, pointage), sa classification analytique est connue **automatiquement**.
+
+Tous les indicateurs (budget, budget avancé, engagé, réalisé, écart, prévision, marge) sont disponibles **à chaque niveau des deux axes**, par **agrégation ascendante** : ressource/code → famille → lot → nature (même logique que le recalcul des ouvrages composés). Le tableau de bord se présente en **arborescence dépliable** : nature → (déplier) lot → (déplier) famille → (déplier) ressource/code.
+
+**Imputation analytique** : puisque la ressource est le code, l'imputation est intrinsèque. Chaque ligne génératrice de coût (ressource du budget d'étude, **ligne de commande** = engagé, **facture** = réalisé, **pointage** = MO) référence une ressource, donc hérite automatiquement de sa classification analytique complète.
+
+**Modèle de données analytique** (par société, avec **plan modèle dupliqué** à la création d'une société) : `Nature`, `LotAnalytique` (→ nature), `FamilleAnalytique` (→ lot), `Ressource` (= code analytique : numéro société, libellé, unité, déboursé, → famille). **Nesting strict** : une ressource appartient à une seule famille, qui appartient à un seul lot, qui appartient à une seule nature. C'est cette même entité `Ressource` qui sert dans les bibliothèques d'étude de prix (section 5.1).
 
 #### Tableaux de bord
 
 - **Vue Direction** — portefeuille de chantiers, colonnes : vente, budget, réalisé, engagé, budget avancé, prévision fin de chantier, marge finale prévisionnelle, taux de marge. **Classement automatique des chantiers à risque.**
-- **Vue Conducteur de travaux** — détail d'un chantier, widgets : budget, réalisé, engagé, budget avancé, écart, prévision fin de chantier.
+- **Vue Conducteur de travaux** — détail d'un chantier, widgets : budget, réalisé, engagé, budget avancé, écart, prévision fin de chantier. **Tableau analytique dépliable nature → lot → famille → ressource/code** avec les indicateurs à chaque niveau, et possibilité de croiser avec l'axe structurel (par titre/ouvrage).
 
 #### Alertes automatiques
 
@@ -330,6 +346,11 @@ Chaque phase doit être livrable et testée de bout en bout avant la suivante.
 | **EAC** | *Estimate At Completion* : prévision du coût total à la clôture du chantier. |
 | **CPI** | *Cost Performance Index* : Budget avancé / Réalisé ; mesure l'efficience des coûts. |
 | **Marge prévisionnelle finale** | Vente totale − EAC, en montant et en pourcentage. |
+| **Plan analytique** | Référentiel de ventilation des coûts, paramétrable par société, à 4 niveaux : nature → lot → famille → ressource (= code analytique). |
+| **Lot (analytique)** | Corps d'état regroupant des familles (ex. SOLS DURS, GROS-ŒUVRE, PEINTURES). Niveau 2 du plan analytique. |
+| **Famille analytique** | Regroupement de ressources/codes (ex. COLLES, COFFRAGE, BOIS). Niveau 3. |
+| **Code analytique** | La ressource elle-même, avec son numéro propre à la société (ex. COLLE = 280, BANCHES = 300). Niveau 4 / feuille. |
+| **Imputation analytique** | Classification d'un coût ; intrinsèque ici, car la ressource utilisée porte déjà sa position nature → lot → famille → code. |
 
 ---
 
