@@ -30,6 +30,8 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'estimating.devis.write', label: 'Modifier les devis' },
   { key: 'invoicing.read', label: 'Consulter la facturation' },
   { key: 'invoicing.write', label: 'Gérer la facturation (marchés, situations, factures)' },
+  { key: 'site_tracking.read', label: 'Consulter le suivi de chantiers' },
+  { key: 'site_tracking.write', label: 'Gérer le suivi de chantiers (chantiers, budgets, pointages, achats)' },
 ];
 
 const ALL_PERMISSION_KEYS = PERMISSIONS.map((p) => p.key);

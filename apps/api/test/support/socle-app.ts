@@ -20,6 +20,7 @@ import { DirectoryModule } from '../../src/modules/directory/directory.module';
 import { EstimatingModule } from '../../src/modules/estimating/estimating.module';
 import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { ComplianceModule } from '../../src/modules/compliance/compliance.module';
+import { SiteTrackingModule } from '../../src/modules/site-tracking/site-tracking.module';
 import { SearchModule } from '../../src/core/common/search/search.module';
 import { createTenant } from './datasource';
 import { createUser, activateModule } from './entitlements.helpers';
@@ -36,6 +37,7 @@ import { createUser, activateModule } from './entitlements.helpers';
     EstimatingModule,
     InvoicingModule,
     ComplianceModule,
+    SiteTrackingModule,
     SearchModule,
   ],
 })

@@ -55,7 +55,7 @@ Conséquence importante : que l'offre soit présentée en paliers, en modules ou
 | **Facturation** | ADV, comptabilité | Devis client, factures, **situations de travaux**, avenants, **DGD**, retenue de garantie, révision de prix | ~29 € |
 | **Suivi de chantiers** | Conducteurs de travaux | **Budgets chantier**, pointages (mobile terrain), chaîne des achats, résultats analytiques | ~49 € |
 
-**Options à la carte (add-ons)** : Stocks & Parc matériel (~19 €/siège), BIM/IFC (forfait), Assistance IA (forfait ou /siège), API & connecteurs comptabilité/paie + export FEC (forfait), Multi-société / SSO / SLA (offre entreprise **sur devis**).
+**Options à la carte (add-ons)** : **Contrôle de gestion chantier** (module différenciant premium — analytique prédictif, voir 5.8 ; ~/siège, positionnement haut à valider), Stocks & Parc matériel (~19 €/siège), BIM/IFC (forfait), Assistance IA (forfait ou /siège), API & connecteurs comptabilité/paie + export FEC (forfait), Multi-société / SSO / SLA (offre entreprise **sur devis**).
 
 **Packs métier (bundles remisés — porte d'entrée commerciale)** :
 - **Pack Bureau d'études** = Socle + Études de prix.
@@ -196,6 +196,52 @@ Transfert d'une affaire gagnée vers l'aval, en **5 étapes** : choix de l'affai
 - **Rôles (RBAC)** : autorisations fines par module et par environnement (ex. opérateur de saisie MO, acheteur avec/sans création fournisseur, métreur avec/sans coefficients, administrateur des bibliothèques, planificateur…). Rôles cumulables. Droits sur bases, modules et centres de coûts.
 - **Prédispositions** : récupérer la configuration d'un utilisateur (grilles, mises en page, paramètres) et la diffuser aux autres.
 
+### 5.8 Contrôle de gestion chantier — MODULE DIFFÉRENCIANT (analytique prédictif)
+
+**C'est l'élément différenciant principal de l'ERP.** Là où la plupart des ERP BTP se limitent à *budget initial / dépenses réalisées / factures fournisseurs*, ce module fournit une **vision prédictive en temps réel** répondant à une seule question : **« Quelle sera la marge réelle du chantier à sa clôture ? »** — et il doit permettre de détecter les dérives **plusieurs semaines ou mois avant la fin** des travaux. Aucun traitement nocturne : tous les indicateurs sont **recalculés en temps réel**.
+
+**Bounded context dédié et indépendant : `control-management`.** Il *consomme* les données des autres modules (étude de prix, pointages, achats, factures, situations) et *produit* des KPI, prévisions, alertes et analyses. Le moteur analytique est **centralisé** ; **les calculs ne sont jamais codés dans les écrans**, et **toutes les formules sont paramétrables et versionnées**.
+
+#### Modèle économique du chantier — 4 axes
+
+1. **Vente** : `Vente totale = Marché initial + Avenants` (intégrer travaux supplémentaires et travaux supprimés).
+2. **Budget** (issu de l'étude de prix) : découpé par **nature** (main d'œuvre, matériaux, matériel, sous-traitance, frais de chantier) et conservé à **tous les niveaux** (chantier global → titre → sous-titre → ouvrage → ressource).
+3. **Engagé** : montants commandés mais pas forcément facturés (bon de commande fournisseur, sous-traitance commandée, location réservée). `Engagé = Σ commandes validées non annulées`, comptabilisé **dès la validation de la commande**.
+4. **Réalisé** : coûts réellement consommés (factures fournisseurs, heures pointées, matériel consommé, sous-traitance facturée). `Réalisé = Σ coûts comptabilisés`.
+
+#### Indicateurs (toutes formules paramétrables et versionnées)
+
+- **Budget avancé** (concept fondamental) : budget théorique qui *devrait* être consommé compte tenu de l'avancement réel. `Budget avancé = Budget initial × % d'avancement`.
+- **Crédit débloqué** : part du budget rendue consommable par l'avancement, par nature. Ex. `Crédit débloqué MO = Budget MO × % avancement MO`. Comparé au réalisé et à l'engagé.
+- **Écart au stade** (indicateur principal) : `Écart au stade = Budget avancé − (Réalisé + Engagé)`. Positif = avance financière ; négatif = **dérive**.
+- **Reste à engager** : `Budget initial − Engagé` (anticipe les besoins futurs).
+- **Reste à dépenser** : `Budget prévisionnel final − Réalisé` (calculé automatiquement).
+- **Prévision à terminaison (EAC, *Estimate At Completion*)** — indicateur stratégique, **moteur multi-méthodes paramétrable** :
+  - Méthode 1 : `EAC = Réalisé + Reste à dépenser`.
+  - Méthode 2 : `EAC = Budget initial / CPI`, avec `CPI = Budget avancé / Réalisé`.
+- **Marge prévisionnelle finale** : `Marge prévisionnelle = Vente totale − EAC`. Afficher en **montant ET en pourcentage**.
+
+#### Axes d'analyse
+
+Tous les indicateurs disponibles à chaque niveau : **chantier global, lot, titre, sous-titre, ouvrage, ressource, nature de coût**. Chaque **nature** (MO, matériaux, matériel, sous-traitance, frais de chantier) porte son propre jeu : budget, budget avancé, engagé, réalisé, prévision, écart.
+
+#### Tableaux de bord
+
+- **Vue Direction** — portefeuille de chantiers, colonnes : vente, budget, réalisé, engagé, budget avancé, prévision fin de chantier, marge finale prévisionnelle, taux de marge. **Classement automatique des chantiers à risque.**
+- **Vue Conducteur de travaux** — détail d'un chantier, widgets : budget, réalisé, engagé, budget avancé, écart, prévision fin de chantier.
+
+#### Alertes automatiques
+
+Déclencher quand : écart au stade < −5 % ; marge prévisionnelle < marge cible ; dépassement de budget par nature (MO, matériaux, matériel, sous-traitance). Seuils **paramétrables**.
+
+#### Courbes de pilotage
+
+Tracer simultanément les courbes **budget avancé / réalisé / engagé / prévision** pour visualiser immédiatement les dérives.
+
+#### Capacités & packaging
+
+Capacités `cost_control.dashboard`, `cost_control.forecast`, `cost_control.alerts`, `cost_control.portfolio`. Le module dépend des données de l'Étude de prix (budget), du Suivi de chantiers (pointages, achats) et de la Facturation (vente/situations) ; le proposer comme **module premium** (fort argument de différenciation — justifie un positionnement tarifaire haut). À ajouter à l'offre (section 3.2) et aux packs concernés.
+
 ---
 
 ## 6. Règles métier critiques (à ne pas rater)
@@ -210,6 +256,7 @@ Ces règles font la valeur d'un ERP BTP. Testez-les unitairement.
 6. **Situation à l'avancement** : montant d'une situation = Σ(quantité marché × PU × % avancement) − situations antérieures ; gérer retenue de garantie, révision de prix, pénalités, comptes prorata.
 7. **Workflow bloquant** : une affaire non « Gagnée » ne se transfère pas sans confirmation ; alerter (non bloquant) si déboursé nul ou affaire déjà transférée.
 8. **Multi-tenant strict** : aucune requête ne doit pouvoir lire les données d'un autre tenant. RLS + tests d'isolation.
+9. **Contrôle de gestion — moteur analytique centralisé** (module différenciant, voir 5.8) : tous les indicateurs (`budget avancé`, `engagé`, `réalisé`, `écart au stade`, `EAC`, `marge prévisionnelle`) sont recalculés **en temps réel**, **jamais en traitement nocturne**. Les **formules sont paramétrables et versionnées**, et **calculées dans le moteur `control-management`, jamais dans les écrans**. L'**engagé** est comptabilisé **dès la validation d'une commande** (pas à la facturation). Tester unitairement chaque formule (budget avancé, écart au stade, EAC méthodes 1 et 2, marge prévisionnelle) avec jeux de valeurs connus.
 
 ---
 
@@ -234,7 +281,7 @@ Ne pas tout construire d'un coup. Ordre recommandé :
 
 **Phase 2 — Acceptation + Facturation** : transfert affaire gagnée → devis facturation, situations de travaux à l'avancement, avenants, DGD, génération de factures, Factur-X.
 
-**Phase 3 — Suivi de chantiers** : budgets, pointages (mobile), chaîne des achats, résultats analytiques, export compta.
+**Phase 3 — Suivi de chantiers + Contrôle de gestion (le différenciateur)** : exécution — budgets, pointages (mobile), chaîne des achats, résultats analytiques, export compta. Puis le **moteur `control-management`** (section 5.8) : modèle économique à 4 axes (vente/budget/engagé/réalisé), indicateurs prédictifs (budget avancé, écart au stade, EAC, marge prévisionnelle), tableaux de bord Direction et Conducteur, alertes et courbes de pilotage. *C'est le cœur de l'outil et l'argument de différenciation — construire d'abord les briques d'exécution qui alimentent le moteur, puis le moteur analytique centralisé et paramétrable. Soigner les tests de formules.*
 
 **Phase 4 — Avancé** : stocks, parc matériel, BIM/IFC, assistance IA, connecteurs comptabilité/paie, app mobile complète hors-ligne.
 
@@ -273,6 +320,16 @@ Chaque phase doit être livrable et testée de bout en bout avant la suivante.
 | **Avenant** | Modification du marché initial (travaux supplémentaires/modificatifs). |
 | **Nomenclature** | Catalogue des ressources propre à un chantier. |
 | **Pointage** | Saisie des heures de main d'œuvre par salarié et par chantier. |
+| **Engagé** | Montants commandés mais pas forcément facturés ; comptés dès la validation de la commande. |
+| **Réalisé** | Coûts réellement consommés (factures, heures pointées, sous-traitance facturée…). |
+| **Budget avancé** | Budget théorique qui devrait être consommé vu l'avancement : Budget initial × % avancement. |
+| **Crédit débloqué** | Part du budget rendue consommable par l'avancement, par nature de coût. |
+| **Écart au stade** | Budget avancé − (Réalisé + Engagé). Négatif = dérive. |
+| **Reste à engager** | Budget initial − Engagé. |
+| **Reste à dépenser** | Budget prévisionnel final − Réalisé. |
+| **EAC** | *Estimate At Completion* : prévision du coût total à la clôture du chantier. |
+| **CPI** | *Cost Performance Index* : Budget avancé / Réalisé ; mesure l'efficience des coûts. |
+| **Marge prévisionnelle finale** | Vente totale − EAC, en montant et en pourcentage. |
 
 ---
 

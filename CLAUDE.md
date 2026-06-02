@@ -19,6 +19,7 @@ ERP **SaaS multi-tenant** pour les entreprises du **BTP**, couvrant la chaîne *
 - **Jetons par module** : un utilisateur n'accède à un module que si un **jeton de ce module** lui est affecté ; jetons affectés ≤ jetons achetés.
 - **Sécurité** : aucun secret en dur, aucun stockage navigateur pour des données sensibles, paiements via le prestataire (jamais de saisie de CB dans l'app).
 - **Conformité** : règles fiscales/légales (TVA, Factur-X, Chorus Pro) **isolées dans un module conformité dédié et versionné**, jamais dispersées dans la logique métier.
+- **Contrôle de gestion = moteur analytique centralisé** (module différenciant, voir 5.8 du cahier des charges) : bounded context dédié `control-management`, indépendant. Il consomme les données des autres modules (étude de prix, pointages, achats, factures, situations) et produit KPI/prévisions/alertes. **Calculs en temps réel, jamais en traitement nocturne. Formules paramétrables et versionnées. Jamais de calcul codé dans les écrans.** L'engagé est compté dès la validation de la commande.
 
 ---
 
@@ -46,7 +47,7 @@ Une tâche n'est terminée que si : le code fonctionne **et** les tests passent 
 - **Phase 0 — Socle** : multi-tenant, auth/RBAC, système de modules + capacités + jetons, cycle de souscription (essai 30 j, **CB non exigée** mais via flag de config), data-grid réutilisable, recherche universelle, CI/CD. La garde de capacité doit exister **avant** tout module métier. **Livrable obligatoire de fin de phase : une interface web minimale navigable** (connexion + menu des modules + tableau de bord) lançable en local, pour que le propriétaire voie l'app vivre dès le départ.
 - **Phase 1 — Module Études de prix** (le cœur qui vend le produit) : bibliothèques + ressources, **ouvrages composés avec recalcul ascendant**, corps de devis hiérarchique, métré, déboursé/sous-détails, feuille de vente + coefficients, workflow d'affaire, édition PDF, devis d'appel d'offre.
 - **Phase 2 — Acceptation + Facturation** : transfert affaire gagnée → devis, situations de travaux, avenants, DGD, génération de factures, Factur-X.
-- **Phase 3 — Suivi de chantiers** : budgets, pointages (mobile), achats, résultats analytiques, export compta.
+- **Phase 3 — Suivi de chantiers + Contrôle de gestion (le différenciateur)** : exécution (budgets, pointages mobile, achats, analytique, export compta), puis le moteur `control-management` — modèle économique à 4 axes (vente/budget/engagé/réalisé), indicateurs prédictifs (budget avancé, écart au stade, EAC, marge prévisionnelle), tableaux de bord Direction + Conducteur, alertes, courbes de pilotage. **Cœur de l'outil : construire d'abord les briques d'exécution qui alimentent le moteur, puis le moteur analytique centralisé et paramétrable, avec tests de formules soignés.**
 - **Phase 4 — Avancé** : stocks, parc matériel, BIM/IFC, assistance IA, connecteurs, mobile hors-ligne.
 
 Chaque phase doit être livrable et testée de bout en bout avant la suivante.
