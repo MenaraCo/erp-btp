@@ -50,6 +50,10 @@ export const CAPABILITIES: CapabilityDef[] = [
   { key: 'api_access', label: 'API et connecteurs' },
   { key: 'multi_company', label: 'Multi-société' },
   { key: 'sso', label: 'Authentification SSO' },
+  { key: 'financial.dashboard', label: 'Gestion financière — tableaux de bord' },
+  { key: 'financial.forecast', label: 'Gestion financière — prévisions (EAC, marge)' },
+  { key: 'financial.alerts', label: 'Gestion financière — alertes' },
+  { key: 'financial.portfolio', label: 'Gestion financière — portefeuille Direction' },
 ];
 
 export const MODULES: ModuleDef[] = [
@@ -92,6 +96,17 @@ export const MODULES: ModuleDef[] = [
     isAddon: true,
     capabilities: ['multi_company', 'sso'],
   },
+  {
+    code: 'financial_management',
+    label: 'Gestion financière',
+    isAddon: true,
+    capabilities: [
+      'financial.dashboard',
+      'financial.forecast',
+      'financial.alerts',
+      'financial.portfolio',
+    ],
+  },
 ];
 
 export const PACKS: PackDef[] = [
@@ -121,6 +136,7 @@ export const PACKS: PackDef[] = [
       'ai',
       'api',
       'enterprise',
+      'financial_management',
     ],
   },
 ];

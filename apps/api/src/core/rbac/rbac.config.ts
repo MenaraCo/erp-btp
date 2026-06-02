@@ -32,6 +32,8 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'invoicing.write', label: 'Gérer la facturation (marchés, situations, factures)' },
   { key: 'site_tracking.read', label: 'Consulter le suivi de chantiers' },
   { key: 'site_tracking.write', label: 'Gérer le suivi de chantiers (chantiers, budgets, pointages, achats)' },
+  { key: 'financial.read', label: 'Consulter la gestion financière' },
+  { key: 'financial.write', label: 'Paramétrer la gestion financière (formules, avancement)' },
 ];
 
 const ALL_PERMISSION_KEYS = PERMISSIONS.map((p) => p.key);
