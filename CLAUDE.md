@@ -30,6 +30,7 @@ ERP **SaaS multi-tenant** pour les entreprises du **BTP**, couvrant la chaîne *
 5. **Demander en cas d'ambiguïté.** Si une règle métier n'est pas claire, poser la question plutôt que deviner.
 6. **Gating systématique.** Chaque endpoint/action lié à un module porte sa **garde de capacité + vérification de jeton** dès sa création, avec des tests d'accès (autorisé / refusé / quota dépassé).
 7. **Pas de destruction de données.** Jamais de suppression de données utilisateur ni de migration destructive sans confirmation explicite.
+8. **Interface web navigable tôt.** Une interface web (dossier `apps/web`, React + Next.js) doit exister et être lançable en local **dès la fin de la Phase 0** : page de connexion, mise en page avec menu de navigation des modules, tableau de bord d'accueil, branchés sur l'API d'authentification. Ne pas construire le backend pendant des semaines sans aucun écran cliquable. Chaque phase ultérieure ajoute ses écrans à ce cadre. Le propriétaire du projet n'est pas développeur : fournir à chaque jalon une explication simple de **comment lancer et voir l'app** dans le navigateur.
 
 ---
 
@@ -41,7 +42,7 @@ Une tâche n'est terminée que si : le code fonctionne **et** les tests passent 
 
 ## Ordre de construction (résumé)
 
-- **Phase 0 — Socle** : multi-tenant, auth/RBAC, système de modules + capacités + jetons, cycle de souscription (essai 30 j, **CB non exigée** mais via flag de config), data-grid réutilisable, recherche universelle, CI/CD. La garde de capacité doit exister **avant** tout module métier.
+- **Phase 0 — Socle** : multi-tenant, auth/RBAC, système de modules + capacités + jetons, cycle de souscription (essai 30 j, **CB non exigée** mais via flag de config), data-grid réutilisable, recherche universelle, CI/CD. La garde de capacité doit exister **avant** tout module métier. **Livrable obligatoire de fin de phase : une interface web minimale navigable** (connexion + menu des modules + tableau de bord) lançable en local, pour que le propriétaire voie l'app vivre dès le départ.
 - **Phase 1 — Module Études de prix** (le cœur qui vend le produit) : bibliothèques + ressources, **ouvrages composés avec recalcul ascendant**, corps de devis hiérarchique, métré, déboursé/sous-détails, feuille de vente + coefficients, workflow d'affaire, édition PDF, devis d'appel d'offre.
 - **Phase 2 — Acceptation + Facturation** : transfert affaire gagnée → devis, situations de travaux, avenants, DGD, génération de factures, Factur-X.
 - **Phase 3 — Suivi de chantiers** : budgets, pointages (mobile), achats, résultats analytiques, export compta.
