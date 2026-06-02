@@ -39,6 +39,8 @@ export interface DevisLineInput {
   sourceOuvrageId?: string | null;
   sourceResourceId?: string | null;
   sortOrder?: number;
+  /** false for titres non vendables / frais de chantier (ventilated by the feuille de vente). */
+  vendable?: boolean;
 }
 
 @Injectable()
@@ -135,8 +137,8 @@ export class DevisService {
         await em.query(
           `INSERT INTO devis_line
              (tenant_id, affaire_version_id, parent_line_id, type, code, designation, unit,
-              quantity, quantity_formula, pu, source_ouvrage_id, source_resource_id, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+              quantity, quantity_formula, pu, source_ouvrage_id, source_resource_id, sort_order, vendable)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
           [
             tenantId,
             versionId,
@@ -151,6 +153,7 @@ export class DevisService {
             input.sourceOuvrageId ?? null,
             input.sourceResourceId ?? null,
             input.sortOrder ?? 0,
+            input.vendable !== false,
           ],
         )
       )[0];

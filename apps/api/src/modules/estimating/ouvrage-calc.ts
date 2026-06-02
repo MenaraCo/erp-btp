@@ -15,12 +15,28 @@ import Decimal from 'decimal.js';
 
 export type ComponentKind = 'resource' | 'sub_ouvrage' | 'percentage';
 
+export type Nature = 'labor' | 'material' | 'equipment' | 'subcontract';
+export const NATURES: Nature[] = ['labor', 'material', 'equipment', 'subcontract'];
+
+export type NatureBreakdown = Record<Nature, Decimal>;
+
+export function zeroBreakdown(): NatureBreakdown {
+  return {
+    labor: new Decimal(0),
+    material: new Decimal(0),
+    equipment: new Decimal(0),
+    subcontract: new Decimal(0),
+  };
+}
+
 export interface CalcComponent {
   kind: ComponentKind;
   /** resource & sub_ouvrage */
   quantity?: Decimal.Value;
   /** resource: resolved déboursé unitaire */
   unitCost?: Decimal.Value;
+  /** resource: nature (required for the per-nature breakdown) */
+  nature?: Nature;
   /** sub_ouvrage: referenced child ouvrage id */
   childOuvrageId?: string;
   /** percentage: rate as a fraction (e.g. 0.03 for 3%) */
@@ -114,4 +130,71 @@ export function computeDebourse(
   ouvragesById: Map<string, CalcOuvrage>,
 ): Decimal {
   return computeDebourseMap(ouvragesById).get(rootId) ?? new Decimal(0);
+}
+
+/**
+ * Per-nature breakdown of the déboursé sec of every ouvrage. Percentage components are
+ * allocated pro rata across the natures of their assiette (so the breakdown always sums to the
+ * total déboursé). Used by the feuille de vente to apply per-nature sale coefficients.
+ */
+export function computeNatureBreakdownMap(
+  ouvragesById: Map<string, CalcOuvrage>,
+): Map<string, NatureBreakdown> {
+  const memo = new Map<string, NatureBreakdown>();
+  const visiting = new Set<string>();
+
+  function visit(id: string): NatureBreakdown {
+    const cached = memo.get(id);
+    if (cached) {
+      return cached;
+    }
+    if (visiting.has(id)) {
+      throw new CycleDetectedError(id);
+    }
+    const ouvrage = ouvragesById.get(id);
+    if (!ouvrage) {
+      throw new UnknownOuvrageError(id);
+    }
+    visiting.add(id);
+
+    const base = zeroBreakdown();
+    for (const c of ouvrage.components) {
+      if (c.kind === 'resource') {
+        const nature = c.nature ?? 'material';
+        base[nature] = base[nature].plus(
+          new Decimal(c.quantity ?? 0).times(new Decimal(c.unitCost ?? 0)),
+        );
+      } else if (c.kind === 'sub_ouvrage') {
+        if (!c.childOuvrageId) {
+          throw new Error(`sub_ouvrage component without childOuvrageId in "${id}"`);
+        }
+        const qty = new Decimal(c.quantity ?? 0);
+        const child = visit(c.childOuvrageId);
+        for (const n of NATURES) {
+          base[n] = base[n].plus(qty.times(child[n]));
+        }
+      }
+    }
+
+    // Percentages allocate pro rata across the assiette's natures.
+    let rateTotal = new Decimal(0);
+    for (const c of ouvrage.components) {
+      if (c.kind === 'percentage') {
+        rateTotal = rateTotal.plus(new Decimal(c.rate ?? 0));
+      }
+    }
+    const result = zeroBreakdown();
+    for (const n of NATURES) {
+      result[n] = base[n].plus(base[n].times(rateTotal));
+    }
+
+    visiting.delete(id);
+    memo.set(id, result);
+    return result;
+  }
+
+  for (const id of ouvragesById.keys()) {
+    visit(id);
+  }
+  return memo;
 }

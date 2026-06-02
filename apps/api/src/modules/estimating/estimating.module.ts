@@ -12,9 +12,14 @@ import { OuvragesService } from './ouvrages.service';
 import { OuvragesController } from './ouvrages.controller';
 import { DevisService } from './devis.service';
 import { DevisController } from './devis.controller';
+import { VenteService } from './vente.service';
+import { VenteController } from './vente.controller';
 import { EstimatingSearchProvider } from './estimating-search.provider';
 
-/** Estimating (Études de prix) — 1.1 libraries/resources, 1.2 ouvrages + recalc, 1.3 devis + métré. */
+/**
+ * Estimating (Études de prix) — 1.1 libraries/resources, 1.2 ouvrages + recalc,
+ * 1.3 devis + métré, 1.4 feuille de vente.
+ */
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -26,8 +31,19 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     ]),
     TenancyModule,
   ],
-  providers: [LibrariesService, OuvragesService, DevisService, EstimatingSearchProvider],
-  controllers: [LibrariesController, OuvragesController, DevisController],
-  exports: [LibrariesService, OuvragesService, DevisService, EstimatingSearchProvider],
+  providers: [
+    LibrariesService,
+    OuvragesService,
+    DevisService,
+    VenteService,
+    EstimatingSearchProvider,
+  ],
+  controllers: [
+    LibrariesController,
+    OuvragesController,
+    DevisController,
+    VenteController,
+  ],
+  exports: [LibrariesService, OuvragesService, DevisService, VenteService, EstimatingSearchProvider],
 })
 export class EstimatingModule {}
