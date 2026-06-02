@@ -16,11 +16,13 @@ import { VenteService } from './vente.service';
 import { VenteController } from './vente.controller';
 import { WorkflowService } from './workflow.service';
 import { WorkflowController } from './workflow.controller';
+import { DevisPdfService } from './devis-pdf.service';
+import { DevisPdfController } from './devis-pdf.controller';
 import { EstimatingSearchProvider } from './estimating-search.provider';
 
 /**
  * Estimating (Études de prix) — 1.1 libraries/resources, 1.2 ouvrages + recalc,
- * 1.3 devis + métré, 1.4 feuille de vente, 1.5 workflow d'affaire.
+ * 1.3 devis + métré, 1.4 feuille de vente, 1.5 workflow, 1.6 PDF.
  */
 @Module({
   imports: [
@@ -39,6 +41,7 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     DevisService,
     VenteService,
     WorkflowService,
+    DevisPdfService,
     EstimatingSearchProvider,
   ],
   controllers: [
@@ -47,6 +50,7 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     DevisController,
     VenteController,
     WorkflowController,
+    DevisPdfController,
   ],
   exports: [
     LibrariesService,
