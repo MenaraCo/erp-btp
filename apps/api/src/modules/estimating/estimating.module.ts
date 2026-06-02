@@ -5,13 +5,16 @@ import { LibraryEntity } from './entities/library.entity';
 import { ResourceEntity } from './entities/resource.entity';
 import { OuvrageEntity } from './entities/ouvrage.entity';
 import { OuvrageComponentEntity } from './entities/ouvrage-component.entity';
+import { AffaireEntity } from './entities/affaire.entity';
 import { LibrariesService } from './libraries.service';
 import { LibrariesController } from './libraries.controller';
 import { OuvragesService } from './ouvrages.service';
 import { OuvragesController } from './ouvrages.controller';
+import { DevisService } from './devis.service';
+import { DevisController } from './devis.controller';
 import { EstimatingSearchProvider } from './estimating-search.provider';
 
-/** Estimating (Études de prix) — 1.1 libraries & resources, 1.2 composed ouvrages + recalc. */
+/** Estimating (Études de prix) — 1.1 libraries/resources, 1.2 ouvrages + recalc, 1.3 devis + métré. */
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -19,11 +22,12 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
       ResourceEntity,
       OuvrageEntity,
       OuvrageComponentEntity,
+      AffaireEntity,
     ]),
     TenancyModule,
   ],
-  providers: [LibrariesService, OuvragesService, EstimatingSearchProvider],
-  controllers: [LibrariesController, OuvragesController],
-  exports: [LibrariesService, OuvragesService, EstimatingSearchProvider],
+  providers: [LibrariesService, OuvragesService, DevisService, EstimatingSearchProvider],
+  controllers: [LibrariesController, OuvragesController, DevisController],
+  exports: [LibrariesService, OuvragesService, DevisService, EstimatingSearchProvider],
 })
 export class EstimatingModule {}
