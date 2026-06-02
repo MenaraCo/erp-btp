@@ -29,6 +29,17 @@ export class TenantResolverService {
       return id;
     }
 
+    // Dev convenience: resolve by slug header (the web app knows the slug, not the UUID).
+    const slugHeader = req.headers['x-tenant-slug'];
+    if (slugHeader) {
+      const value = Array.isArray(slugHeader) ? slugHeader[0] : slugHeader;
+      const id = await this.findIdBySlug(value);
+      if (!id) {
+        throw new NotFoundException(`Unknown tenant slug "${value}"`);
+      }
+      return id;
+    }
+
     const header = req.headers['x-tenant-id'];
     if (header) {
       const tenantId = Array.isArray(header) ? header[0] : header;

@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "web",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.local/bin:$PATH\"; cd /Users/menco/Desktop/erp-btp; exec pnpm -C apps/web dev"
+      ],
+      "port": 3000
+    },
+    {
       "name": "api",
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": [

@@ -7,6 +7,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# next.js
+.next/
+next-env.d.ts
+
 # local embedded postgres data (apps/api/.pgdata)
 .pgdata/
 

@@ -6,6 +6,11 @@ import { loadAppConfig } from './config/env.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // Dev: allow the local web app (and tooling) to call the API cross-origin.
+  app.enableCors({
+    origin: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Id', 'X-Tenant-Slug', 'X-User-Id'],
+  });
   const { port } = loadAppConfig();
   await app.listen(port);
   Logger.log(`ERP BTP API listening on http://localhost:${port}`, 'Bootstrap');

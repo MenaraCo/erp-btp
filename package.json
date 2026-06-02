@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @erp-btp/api start:dev",
+    "dev:web": "pnpm --filter @erp-btp/web dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
