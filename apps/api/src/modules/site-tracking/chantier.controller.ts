@@ -70,4 +70,20 @@ export class ChantierController {
   validate(@Param('chantierId') chantierId: string) {
     return this.chantiers.validateContreEtude(chantierId);
   }
+
+  // --- Budget prévisionnel ---
+
+  @Put('execution-lines/:lineId/budget/:nature')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  setPrevisionnel(
+    @Param('lineId') lineId: string,
+    @Param('nature') nature: string,
+    @Body() body: { montantPrevisionnel?: string | number },
+  ) {
+    if (body?.montantPrevisionnel == null || Number.isNaN(Number(body.montantPrevisionnel))) {
+      throw new BadRequestException('montantPrevisionnel is required');
+    }
+    return this.chantiers.setPrevisionnel(lineId, nature, body.montantPrevisionnel);
+  }
 }

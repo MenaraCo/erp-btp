@@ -319,7 +319,42 @@ export class ChantierService {
         `UPDATE chantier SET contre_etude_status = 'validated', updated_at = now() WHERE id = $1`,
         [chantierId],
       );
+      // Initialise the prévisionnel budget from the validated objectif.
+      await em.query(
+        `UPDATE execution_line_budget b SET montant_previsionnel = b.montant_objectif
+           FROM execution_line l
+          WHERE l.id = b.execution_line_id AND l.chantier_id = $1`,
+        [chantierId],
+      );
       return this.getChantierInTx(em, chantierId);
+    });
+  }
+
+  /** Adjusts the prévisionnel budget of a line/nature (after the contre-étude is validated). */
+  setPrevisionnel(lineId: string, nature: string, montant: string | number) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT l.chantier_id, c.contre_etude_status
+           FROM execution_line l JOIN chantier c ON c.id = l.chantier_id
+          WHERE l.id = $1`,
+        [lineId],
+      );
+      if (rows.length === 0) {
+        throw new NotFoundException(`Unknown execution line "${lineId}"`);
+      }
+      if (rows[0].contre_etude_status !== 'validated') {
+        throw new ConflictException('Validate the contre-étude before adjusting the prévisionnel.');
+      }
+      const upd = await em.query(
+        `UPDATE execution_line_budget SET montant_previsionnel = $1
+          WHERE execution_line_id = $2 AND nature = $3 RETURNING id`,
+        [String(montant), lineId, nature],
+      );
+      if (upd.length === 0) {
+        throw new NotFoundException(`No budget line for nature "${nature}"`);
+      }
+      return this.getChantierInTx(em, rows[0].chantier_id);
     });
   }
 
@@ -338,7 +373,8 @@ export class ChantierService {
     const budgetByNature = await em.query(
       `SELECT b.nature,
               SUM(b.montant_etude)::numeric(16,2) AS etude,
-              SUM(b.montant_objectif)::numeric(16,2) AS objectif
+              SUM(b.montant_objectif)::numeric(16,2) AS objectif,
+              SUM(b.montant_previsionnel)::numeric(16,2) AS previsionnel
          FROM execution_line_budget b
          JOIN execution_line l ON l.id = b.execution_line_id
         WHERE l.chantier_id = $1 AND l.parent_line_id IS NULL
