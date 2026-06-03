@@ -12,6 +12,7 @@ import { DevisService } from '../../modules/estimating/devis.service';
 import { VenteService } from '../../modules/estimating/vente.service';
 import { WorkflowService } from '../../modules/estimating/workflow.service';
 import { AnalyticalPlanService } from '../../modules/analytical/analytical-plan.service';
+import { ANALYTICAL_PLAN_TEMPLATE } from '../../modules/analytical/analytical-plan.config';
 import { ChantierService } from '../../modules/site-tracking/chantier.service';
 import { PurchasingService } from '../../modules/site-tracking/purchasing.service';
 import { TimesheetService } from '../../modules/site-tracking/timesheet.service';
@@ -212,6 +213,33 @@ async function codesByNumber(plan: AnalyticalPlanService, tenantId: string): Pro
   return m;
 }
 
+/**
+ * Ensures the plan modèle's codes analytiques exist (idempotent). Needed for a demo tenant whose
+ * plan was duplicated before the code-analytique level existed: ensurePlan sees a non-empty plan
+ * and skips, so we add the template codes under their familles here.
+ */
+async function ensureTemplateCodes(plan: AnalyticalPlanService, tenantId: string): Promise<void> {
+  await plan.ensurePlan(tenantId);
+  const tree = await plan.getTree(tenantId);
+  const famIdByCode = new Map<string, string>();
+  const existingCodeNumbers = new Set<string>();
+  for (const n of tree) for (const l of n.lots) for (const f of l.familles) {
+    famIdByCode.set(f.code, f.id);
+    for (const c of f.codes) existingCodeNumbers.add(c.code);
+  }
+  for (const lot of ANALYTICAL_PLAN_TEMPLATE) {
+    for (const fam of lot.familles) {
+      const famId = famIdByCode.get(fam.code);
+      if (!famId) continue;
+      for (const code of fam.codes) {
+        if (!existingCodeNumbers.has(code.code)) {
+          await plan.createCode({ familleId: famId, code: code.code, label: code.label });
+        }
+      }
+    }
+  }
+}
+
 /** Classifies the demo resources onto real analytical CODES (idempotent). Reclassifies resources
  *  still sitting in an auto-created "(à classer)" code. Parpaing is left unclassified on purpose
  *  to illustrate the "Non réparti" bucket. */
@@ -221,7 +249,7 @@ async function classifyResources(
   plan: AnalyticalPlanService,
   libraries: LibrariesService,
 ): Promise<void> {
-  await plan.ensurePlan(tenantId);
+  await ensureTemplateCodes(plan, tenantId);
   const codeByNumber = await codesByNumber(plan, tenantId);
 
   const lib = (await runInTenant(ds, tenantId, (em) =>
@@ -288,6 +316,19 @@ async function ensureSampleChantier(
         );
       });
     }
+    // Demo chantier was transferred before the code-analytique level existed: align its
+    // nomenclature once from the now-classified estimating resources (seed sync, not runtime).
+    await runInTenant(ds, tenantId, (em) =>
+      em.query(
+        `UPDATE nomenclature_resource nr SET code_analytique_id = r.code_analytique_id
+           FROM resource r
+          WHERE nr.source_resource_id = r.id
+            AND nr.chantier_id = $1
+            AND nr.code_analytique_id IS NULL
+            AND r.code_analytique_id IS NOT NULL`,
+        [chantierId],
+      ),
+    );
   } else {
     const affaire = (await runInTenant(ds, tenantId, (em) =>
       em.query(`SELECT id, status FROM affaire WHERE code = 'DEMO-2026-001'`),
