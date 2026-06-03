@@ -3,13 +3,22 @@ import { RequiresCapability } from '../../core/entitlements/requires-capability.
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { FinancialConfigService, FormulaSetInput } from './financial-config.service';
 import { AdvancementInput, AdvancementService } from './advancement.service';
+import { AnalyticalResultsService } from './analytical-results.service';
 
 @Controller()
 export class FinancialController {
   constructor(
     private readonly config: FinancialConfigService,
     private readonly advancement: AdvancementService,
+    private readonly analyticalResults: AnalyticalResultsService,
   ) {}
+
+  @Get('chantiers/:chantierId/analytical-results')
+  @RequiresCapability('financial.dashboard')
+  @RequiresPermission('financial.read')
+  getAnalyticalResults(@Param('chantierId') chantierId: string) {
+    return this.analyticalResults.chantierAnalyticalResults(chantierId);
+  }
 
   @Get('financial/formula-set')
   @RequiresCapability('financial.forecast')

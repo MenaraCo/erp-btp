@@ -51,6 +51,12 @@
 | POST | `/affaires/:affaireId/transition` | `estimating.devis.write` | Workflow (`{ to }`) ; transition interdite → 409 |
 | GET | `/affaires/:affaireId/transfer-check` | `estimating.devis.read` | Transférable ? + alertes |
 
+## Gestion financière — tableau de bord analytique (capacité `financial.dashboard`)
+
+| Méthode | Route | Permission | Notes |
+|---|---|---|---|
+| GET | `/chantiers/:chantierId/analytical-results` | `financial.read` | Budget/engagé/réalisé agrégés sur l'axe analytique nature→lot→famille (§5.8) ; seau « Non réparti » par nature + branche « Frais de chantier » ; totaux réconciliés |
+
 ## Plan analytique (capacité `estimating.bid`)
 
 Axe analytique nature → lot → famille → ressource (cahier des charges §5.8). La ressource du chiffrage **est** le code analytique.
