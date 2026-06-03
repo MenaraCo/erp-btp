@@ -29,4 +29,12 @@ export class ResourceEntity extends BaseTenantEntity {
   /** Output / rendement (e.g. hours per unit for labour). */
   @Column({ type: 'numeric', precision: 14, scale: 6, nullable: true })
   output?: string | null;
+
+  /**
+   * Position in the analytical plan (cahier des charges §5.8): the resource attaches to a
+   * famille (→ lot → nature), so it IS the analytical code — no separate imputation field.
+   * Nullable: a tenant classifies at its own pace.
+   */
+  @Column({ name: 'famille_analytique_id', type: 'uuid', nullable: true })
+  familleAnalytiqueId?: string | null;
 }

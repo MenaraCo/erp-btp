@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
@@ -73,5 +74,19 @@ export class LibrariesController {
       throw new BadRequestException('unitCost is required');
     }
     return this.libraries.updateResourceCost(libraryId, resourceId, body.unitCost);
+  }
+
+  @Put(':libraryId/resources/:resourceId/famille')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  classifyResource(
+    @Param('libraryId') libraryId: string,
+    @Param('resourceId') resourceId: string,
+    @Body() body: { familleAnalytiqueId?: string },
+  ) {
+    if (!body?.familleAnalytiqueId) {
+      throw new BadRequestException('familleAnalytiqueId is required');
+    }
+    return this.libraries.classifyResource(libraryId, resourceId, body.familleAnalytiqueId);
   }
 }

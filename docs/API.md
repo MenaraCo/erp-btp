@@ -31,9 +31,10 @@
 |---|---|---|---|
 | POST | `/libraries` | `estimating.devis.write` | Crée une bibliothèque |
 | GET | `/libraries` | `estimating.devis.read` | Data-grid |
-| POST | `/libraries/:libraryId/resources` | `estimating.devis.write` | Crée une ressource (`nature` MO/matériaux/matériel/sous-traitance) |
+| POST | `/libraries/:libraryId/resources` | `estimating.devis.write` | Crée une ressource (`nature` MO/matériaux/matériel/sous-traitance ; `familleAnalytiqueId` optionnel) |
 | GET | `/libraries/:libraryId/resources` | `estimating.devis.read` | Data-grid |
 | PATCH | `/libraries/:libraryId/resources/:resourceId` | `estimating.devis.write` | Change le déboursé → **recalcul ascendant** |
+| PUT | `/libraries/:libraryId/resources/:resourceId/famille` | `estimating.devis.write` | Classe la ressource sur une famille analytique (§5.8) ; famille inconnue → 404 |
 | POST | `/libraries/:libraryId/ouvrages` | `estimating.devis.write` | Crée un ouvrage composé |
 | GET | `/libraries/:libraryId/ouvrages` | `estimating.devis.read` | Data-grid (avec déboursé) |
 | GET | `/ouvrages/:id` | `estimating.devis.read` | Ouvrage + déboursé calculé |

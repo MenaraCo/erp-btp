@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import {
@@ -25,6 +25,8 @@ export interface ResourceInput {
   nature: ResourceNature;
   unitCost: string | number;
   output?: string | number | null;
+  /** Optional analytical classification (famille). Left unclassified (null) if omitted. */
+  familleAnalytiqueId?: string | null;
 }
 
 @Injectable()
@@ -90,6 +92,9 @@ export class LibrariesService {
       if (!library) {
         throw new NotFoundException(`Unknown library "${libraryId}"`);
       }
+      if (input.familleAnalytiqueId != null) {
+        await this.assertFamilleExists(em, input.familleAnalytiqueId);
+      }
       const repo = em.getRepository(ResourceEntity);
       return repo.save(
         repo.create({
@@ -101,9 +106,41 @@ export class LibrariesService {
           nature: input.nature,
           unitCost: String(input.unitCost),
           output: input.output == null ? null : String(input.output),
+          familleAnalytiqueId: input.familleAnalytiqueId ?? null,
         }),
       );
     });
+  }
+
+  /** Classifies a resource onto a famille of the analytical plan (cahier des charges §5.8). */
+  async classifyResource(
+    libraryId: string,
+    resourceId: string,
+    familleAnalytiqueId: string,
+  ): Promise<ResourceEntity> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const existing = await em.query(
+        `SELECT id FROM resource WHERE id = $1 AND library_id = $2`,
+        [resourceId, libraryId],
+      );
+      if (existing.length === 0) {
+        throw new NotFoundException(`Unknown resource "${resourceId}"`);
+      }
+      await this.assertFamilleExists(em, familleAnalytiqueId);
+      await em.query(
+        `UPDATE resource SET famille_analytique_id = $1, updated_at = now() WHERE id = $2`,
+        [familleAnalytiqueId, resourceId],
+      );
+      return (await em.query(`SELECT * FROM resource WHERE id = $1`, [resourceId]))[0];
+    });
+  }
+
+  private async assertFamilleExists(em: EntityManager, familleId: string): Promise<void> {
+    const rows = await em.query(`SELECT id FROM analytical_famille WHERE id = $1`, [familleId]);
+    if (rows.length === 0) {
+      throw new NotFoundException(`Unknown famille analytique "${familleId}"`);
+    }
   }
 
   listResources(
