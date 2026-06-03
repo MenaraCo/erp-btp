@@ -21,8 +21,12 @@
 |---|---|---|---|
 | POST | `/clients` | `directory.write` | Crée un client |
 | GET | `/clients` | `directory.read` | Data-grid : `?page&pageSize&sort&dir&search` |
+| PATCH | `/clients/:id` | `directory.write` | Modifie un client ; inconnu → 404 |
+| DELETE | `/clients/:id` | `directory.write` | Suppression douce (soft delete) ; inconnu → 404 |
 | POST | `/suppliers` | `directory.write` | Crée un fournisseur |
 | GET | `/suppliers` | `directory.read` | Data-grid |
+| PATCH | `/suppliers/:id` | `directory.write` | Modifie un fournisseur ; inconnu → 404 |
+| DELETE | `/suppliers/:id` | `directory.write` | Suppression douce ; inconnu → 404 |
 | GET | `/search?q=` | `directory.read` | Recherche universelle (clients, fournisseurs, biblio, ressources) |
 
 ## Études de prix (capacité `estimating.bid`)
@@ -64,6 +68,7 @@ L'acceptation d'une affaire gagnée crée un **marché** rattaché à un **chant
 
 | Méthode | Route | Permission | Notes |
 |---|---|---|---|
+| POST | `/chantiers` | `site_tracking.write` | Crée un chantier vide (unité d'agrégation) `{ code, name }` ; code dupliqué → 409 |
 | POST | `/affaires/:affaireId/accept` | `invoicing.write` | **Acceptation unifiée (§5.4)** : crée UN marché sur un chantier (nouveau ou existant via corps `{ chantierId }`) portant **à la fois** la chaîne de facturation (lignes de marché) **et** l'étude d'exécution ; double acceptation d'une version → 409 |
 | GET | `/chantiers/:chantierId/marches` | `site_tracking.read` | Liste des marchés agrégés par le chantier |
 

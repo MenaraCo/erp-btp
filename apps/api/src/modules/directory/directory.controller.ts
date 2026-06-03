@@ -2,7 +2,10 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -34,6 +37,21 @@ export class DirectoryController {
     return this.directory.listClients(query);
   }
 
+  @Patch('clients/:id')
+  @RequiresCapability('directory')
+  @RequiresPermission('directory.write')
+  updateClient(@Param('id') id: string, @Body() body: PartyInput) {
+    this.assertParty(body);
+    return this.directory.updateClient(id, body);
+  }
+
+  @Delete('clients/:id')
+  @RequiresCapability('directory')
+  @RequiresPermission('directory.write')
+  deleteClient(@Param('id') id: string) {
+    return this.directory.deleteClient(id);
+  }
+
   @Post('suppliers')
   @RequiresCapability('directory')
   @RequiresPermission('directory.write')
@@ -47,6 +65,21 @@ export class DirectoryController {
   @RequiresPermission('directory.read')
   listSuppliers(@Query() query: DataGridQuery) {
     return this.directory.listSuppliers(query);
+  }
+
+  @Patch('suppliers/:id')
+  @RequiresCapability('directory')
+  @RequiresPermission('directory.write')
+  updateSupplier(@Param('id') id: string, @Body() body: PartyInput) {
+    this.assertParty(body);
+    return this.directory.updateSupplier(id, body);
+  }
+
+  @Delete('suppliers/:id')
+  @RequiresCapability('directory')
+  @RequiresPermission('directory.write')
+  deleteSupplier(@Param('id') id: string) {
+    return this.directory.deleteSupplier(id);
   }
 
   private assertParty(body: PartyInput): void {

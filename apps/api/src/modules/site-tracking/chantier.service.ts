@@ -391,6 +391,24 @@ export class ChantierService {
     });
   }
 
+  /** Creates a standalone (empty) chantier — an aggregation unit; marchés are added by acceptance. */
+  createChantier(input: { code: string; name: string }) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const existing = await em.query(`SELECT id FROM chantier WHERE code = $1`, [input.code]);
+      if (existing.length > 0) {
+        throw new ConflictException(`Chantier code "${input.code}" already exists`);
+      }
+      return (
+        await em.query(
+          `INSERT INTO chantier (tenant_id, code, name, budget_vente_ht, status)
+           VALUES ($1, $2, $3, 0, 'open') RETURNING *`,
+          [tenantId, input.code, input.name],
+        )
+      )[0];
+    });
+  }
+
   getChantier(chantierId: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) => this.getChantierInTx(em, chantierId));

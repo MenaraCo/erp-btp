@@ -11,8 +11,9 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: '/', label: 'Tableau de bord', section: 'Général' },
-  { href: '/directory', label: 'Clients & fournisseurs', section: 'Référentiel' },
-  { href: '/estimating', label: 'Études de prix', section: 'Modules' },
+  { href: '/clients', label: 'Clients', section: 'Référentiel' },
+  { href: '/suppliers', label: 'Fournisseurs', section: 'Référentiel' },
+  { href: '/estimating', label: 'Devis', section: 'Modules' },
   { href: '/chantiers', label: 'Chantiers', section: 'Modules' },
   { href: '/invoicing', label: 'Facturation', section: 'Modules' },
 ];
