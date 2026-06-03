@@ -28,6 +28,13 @@ interface Results {
   byNature: NatureResult[];
   totals: { budgetObjectif: string; engage: string; realise: string; ecart: string };
 }
+interface Marche {
+  id: string;
+  code: string;
+  name: string;
+  total_ht: string;
+  contre_etude_status: string;
+}
 
 type Metrics = Record<string, string>;
 interface Famille {
@@ -85,6 +92,12 @@ export default function ChantierDetailPage() {
     enabled: Boolean(token),
     queryFn: () => apiFetch<Results>(`/chantiers/${chantierId}/results`, { token }),
   });
+  const marches = useQuery({
+    queryKey: ['chantier-marches', chantierId],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<Marche[]>(`/chantiers/${chantierId}/marches`, { token }),
+  });
   const analytical = useQuery({
     queryKey: ['chantier-analytical', chantierId],
     enabled: Boolean(token),
@@ -128,6 +141,37 @@ export default function ChantierDetailPage() {
         </div>
       )}
       {results.isError && <p className="muted">Suivi de chantiers non autorisé pour cet utilisateur.</p>}
+
+      {marches.data && marches.data.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Marchés du chantier ({marches.data.length})</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Un chantier agrège plusieurs marchés ; la facturation est propre à chaque marché (§5.5).
+          </p>
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Désignation</th>
+                <th>Contre-étude</th>
+                <th style={{ textAlign: 'right' }}>Montant vente HT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {marches.data.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.code}</td>
+                  <td>{m.name}</td>
+                  <td className="muted">
+                    {m.contre_etude_status === 'validated' ? 'validée' : 'en cours'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>{euro(m.total_ht)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Gestion financière — axe analytique</h2>
