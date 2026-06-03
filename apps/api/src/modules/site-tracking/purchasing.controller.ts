@@ -81,6 +81,7 @@ export class PurchasingController {
       amountHt?: string | number;
       invoiceDate?: string;
       familleAnalytiqueId?: string | null;
+      codeAnalytiqueId?: string | null;
     },
   ) {
     if (!body?.code || !body?.nature || !NATURES.includes(body.nature) || body?.amountHt == null) {
@@ -92,6 +93,7 @@ export class PurchasingController {
       amountHt: body.amountHt,
       invoiceDate: body.invoiceDate,
       familleAnalytiqueId: body.familleAnalytiqueId,
+      codeAnalytiqueId: body.codeAnalytiqueId,
     });
   }
 

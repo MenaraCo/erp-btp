@@ -15,6 +15,8 @@ export interface TimesheetInput {
   date: string;
   hours: string | number;
   hourlyCost: string | number;
+  /** Imputation analytique optionnelle au code analytique du plan partagé (MO réalisée, §5.8). */
+  codeAnalytiqueId?: string | null;
 }
 
 @Injectable()
@@ -47,11 +49,17 @@ export class TimesheetService {
           throw new BadRequestException('execution line does not belong to this chantier');
         }
       }
+      if (input.codeAnalytiqueId) {
+        const code = await em.query(`SELECT id FROM analytical_code WHERE id = $1`, [input.codeAnalytiqueId]);
+        if (code.length === 0) {
+          throw new NotFoundException(`Unknown code analytique "${input.codeAnalytiqueId}"`);
+        }
+      }
       return (
         await em.query(
           `INSERT INTO timesheet
-             (tenant_id, chantier_id, execution_line_id, employee_label, work_date, hours, hourly_cost, cost)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+             (tenant_id, chantier_id, execution_line_id, employee_label, work_date, hours, hourly_cost, cost, code_analytique_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
           [
             tenantId,
             chantierId,
@@ -61,6 +69,7 @@ export class TimesheetService {
             hours.toString(),
             hourlyCost.toString(),
             cost.toString(),
+            input.codeAnalytiqueId ?? null,
           ],
         )
       )[0];

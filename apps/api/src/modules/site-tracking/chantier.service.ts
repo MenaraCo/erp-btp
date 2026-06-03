@@ -116,8 +116,13 @@ export class ChantierService {
       for (const o of await em.query(`SELECT id, code, label, unit FROM ouvrage`)) {
         ouvById.set(o.id, o);
       }
-      const resById = new Map<string, { code: string; label: string; unit: string; nature: string; unit_cost: string }>();
-      for (const r of await em.query(`SELECT id, code, label, unit, nature, unit_cost FROM resource`)) {
+      const resById = new Map<
+        string,
+        { code: string; label: string; unit: string; nature: string; unit_cost: string; code_analytique_id: string | null }
+      >();
+      for (const r of await em.query(
+        `SELECT id, code, label, unit, nature, unit_cost, code_analytique_id FROM resource`,
+      )) {
         resById.set(r.id, r);
       }
       const nomencByResource = new Map<string, string>();
@@ -126,12 +131,16 @@ export class ChantierService {
         const cached = nomencByResource.get(resourceId);
         if (cached) return cached;
         const r = resById.get(resourceId)!;
+        // Copie du rattachement analytique au transfert : la nomenclature porte SON code analytique
+        // et n'est plus jamais lue en direct depuis la bibliothèque d'étude (catalogues indépendants).
         const row = (
           await em.query(
             `INSERT INTO nomenclature_resource
-               (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature, unit_cost_etude, unit_cost_objectif)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) RETURNING id`,
-            [tenantId, chantier.id, marcheId, resourceId, r.code, r.label, r.unit, r.nature, r.unit_cost],
+               (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
+                unit_cost_etude, unit_cost_objectif, code_analytique_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING id`,
+            [tenantId, chantier.id, marcheId, resourceId, r.code, r.label, r.unit, r.nature,
+              r.unit_cost, r.code_analytique_id ?? null],
           )
         )[0];
         nomencByResource.set(resourceId, row.id);
