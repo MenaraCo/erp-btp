@@ -11,7 +11,7 @@ describe('Imputation analytique engagé/réalisé B.0d (§5.8)', () => {
   let userId: string;
   let chantierId: string;
   let orderId: string;
-  let familleId: string;
+  let codeId: string;
 
   function as(method: 'get' | 'post' | 'put', path: string) {
     const server = app.getHttpServer();
@@ -58,7 +58,11 @@ describe('Imputation analytique engagé/réalisé B.0d (§5.8)', () => {
     chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
 
     const tree = (await as('get', '/analytical/plan').expect(200)).body;
-    familleId = tree.find((n: { nature: string }) => n.nature === 'material').lots[0].familles[0].id;
+    const fam = tree
+      .find((n: { nature: string }) => n.nature === 'material')
+      .lots.flatMap((l: { familles: unknown[] }) => l.familles)
+      .find((f: { codes: unknown[] }) => f.codes.length > 0);
+    codeId = fam.codes[0].id;
 
     const ddp = (await as('post', `/chantiers/${chantierId}/purchase-requests`).send({ code: 'DDP' }).expect(201)).body;
     orderId = (await as('post', `/purchase-requests/${ddp.id}/convert`).send({ code: 'BC' }).expect(201)).body.id;
@@ -69,7 +73,7 @@ describe('Imputation analytique engagé/réalisé B.0d (§5.8)', () => {
     await ds.destroy();
   });
 
-  it('impute une ligne de commande (engagé) à une famille analytique', async () => {
+  it('impute une ligne de commande (engagé) à un code analytique', async () => {
     const line = (
       await as('post', `/purchase-orders/${orderId}/lines`)
         .send({
@@ -77,25 +81,25 @@ describe('Imputation analytique engagé/réalisé B.0d (§5.8)', () => {
           designation: 'Béton',
           quantity: '10',
           unitPrice: '95',
-          familleAnalytiqueId: familleId,
+          codeAnalytiqueId: codeId,
         })
         .expect(201)
     ).body;
-    expect(line.famille_analytique_id).toBe(familleId);
+    expect(line.code_analytique_id).toBe(codeId);
   });
 
-  it('impute une facture fournisseur (réalisé) à une famille analytique', async () => {
+  it('impute une facture fournisseur (réalisé) à un code analytique', async () => {
     await as('post', `/purchase-orders/${orderId}/validate`).expect(201);
     await as('post', `/purchase-orders/${orderId}/delivery-notes`).send({ code: 'BL' }).expect(201);
     const inv = (
       await as('post', `/purchase-orders/${orderId}/invoices`)
-        .send({ code: 'F1', nature: 'material', amountHt: '900', familleAnalytiqueId: familleId })
+        .send({ code: 'F1', nature: 'material', amountHt: '900', codeAnalytiqueId: codeId })
         .expect(201)
     ).body;
-    expect(inv.famille_analytique_id).toBe(familleId);
+    expect(inv.code_analytique_id).toBe(codeId);
   });
 
-  it('refuse une famille inexistante sur une ligne de commande (404)', async () => {
+  it('refuse un code analytique inexistant sur une ligne de commande (404)', async () => {
     const ddp = (await as('post', `/chantiers/${chantierId}/purchase-requests`).send({ code: 'DDP2' }).expect(201)).body;
     const order2 = (await as('post', `/purchase-requests/${ddp.id}/convert`).send({ code: 'BC2' }).expect(201)).body;
     await as('post', `/purchase-orders/${order2.id}/lines`)
@@ -104,7 +108,7 @@ describe('Imputation analytique engagé/réalisé B.0d (§5.8)', () => {
         designation: 'X',
         quantity: '1',
         unitPrice: '1',
-        familleAnalytiqueId: '00000000-0000-0000-0000-000000000000',
+        codeAnalytiqueId: '00000000-0000-0000-0000-000000000000',
       })
       .expect(404);
   });

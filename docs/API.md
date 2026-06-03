@@ -35,10 +35,10 @@
 |---|---|---|---|
 | POST | `/libraries` | `estimating.devis.write` | Crée une bibliothèque |
 | GET | `/libraries` | `estimating.devis.read` | Data-grid |
-| POST | `/libraries/:libraryId/resources` | `estimating.devis.write` | Crée une ressource (`nature` MO/matériaux/matériel/sous-traitance ; `familleAnalytiqueId` optionnel) |
+| POST | `/libraries/:libraryId/resources` | `estimating.devis.write` | Crée une ressource (`nature` ; `codeProduit` unique société ; `codeAnalytiqueId` optionnel) |
 | GET | `/libraries/:libraryId/resources` | `estimating.devis.read` | Data-grid |
 | PATCH | `/libraries/:libraryId/resources/:resourceId` | `estimating.devis.write` | Change le déboursé → **recalcul ascendant** |
-| PUT | `/libraries/:libraryId/resources/:resourceId/famille` | `estimating.devis.write` | Classe la ressource sur une famille analytique (§5.8) ; famille inconnue → 404 |
+| PUT | `/libraries/:libraryId/resources/:resourceId/code-analytique` | `estimating.devis.write` | Rattache la ressource à un code analytique (§5.8) ; code inconnu → 404 |
 | POST | `/libraries/:libraryId/ouvrages` | `estimating.devis.write` | Crée un ouvrage composé |
 | GET | `/libraries/:libraryId/ouvrages` | `estimating.devis.read` | Data-grid (avec déboursé) |
 | GET | `/ouvrages/:id` | `estimating.devis.read` | Ouvrage + déboursé calculé |
@@ -75,23 +75,23 @@ L'acceptation d'une affaire gagnée crée un **marché** rattaché à un **chant
 
 ## Plan analytique (capacité `estimating.bid`)
 
-Axe analytique nature → lot → famille → ressource (cahier des charges §5.8). La ressource du chiffrage **est** le code analytique.
+Axe analytique à 5 niveaux : nature → lot → famille → **code analytique** → ressource (cahier des charges §5.8). Un code analytique (n° société, ex. COLLE=280) regroupe plusieurs ressources.
 
 | Méthode | Route | Permission | Notes |
 |---|---|---|---|
-| GET | `/analytical/plan` | `estimating.devis.read` | Arbre dépliable nature → lot → famille ; duplique le plan modèle à la 1ʳᵉ lecture |
+| GET | `/analytical/plan` | `estimating.devis.read` | Arbre dépliable nature → lot → famille → code analytique ; duplique le plan modèle à la 1ʳᵉ lecture |
 | POST | `/analytical/lots` | `estimating.devis.write` | Ajoute un lot sous une nature ; code déjà pris → 409 |
 | POST | `/analytical/familles` | `estimating.devis.write` | Ajoute une famille sous un lot ; code déjà pris → 409 |
 | POST | `/analytical/codes` | `estimating.devis.write` | Ajoute un code analytique (n° société) sous une famille ; code déjà pris → 409 |
 
 ### Imputation analytique de l'engagé / réalisé
 
-Les lignes de commande (engagé) et les factures fournisseurs (réalisé) acceptent un `familleAnalytiqueId` optionnel pour l'imputation sur l'axe analytique (§5.8) ; famille inconnue → 404. Sans famille, le montant tombe dans le seau « Non réparti » de sa nature.
+Les lignes de commande (engagé) et les factures fournisseurs (réalisé) acceptent un `codeAnalytiqueId` optionnel pour l'imputation sur l'axe analytique (§5.8) ; code inconnu → 404. Sans code, le montant tombe dans le seau « Non réparti » de sa nature.
 
 | Méthode | Route | Notes |
 |---|---|---|
-| POST | `/purchase-orders/:orderId/lines` | `familleAnalytiqueId` optionnel (engagé) |
-| POST | `/purchase-orders/:orderId/invoices` | `familleAnalytiqueId` optionnel (réalisé) |
+| POST | `/purchase-orders/:orderId/lines` | `codeAnalytiqueId` optionnel (engagé) |
+| POST | `/purchase-orders/:orderId/invoices` | `codeAnalytiqueId` optionnel (réalisé) |
 
 ## Facturation (capacité `invoicing.situations`)
 

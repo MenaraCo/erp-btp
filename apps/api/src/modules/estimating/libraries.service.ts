@@ -25,8 +25,10 @@ export interface ResourceInput {
   nature: ResourceNature;
   unitCost: string | number;
   output?: string | number | null;
-  /** Optional analytical classification (famille). Left unclassified (null) if omitted. */
-  familleAnalytiqueId?: string | null;
+  /** Code produit unique société (défaut = `code`). */
+  codeProduit?: string | null;
+  /** Rattachement optionnel à un code analytique du plan (cahier §5.8). */
+  codeAnalytiqueId?: string | null;
 }
 
 @Injectable()
@@ -92,8 +94,8 @@ export class LibrariesService {
       if (!library) {
         throw new NotFoundException(`Unknown library "${libraryId}"`);
       }
-      if (input.familleAnalytiqueId != null) {
-        await this.assertFamilleExists(em, input.familleAnalytiqueId);
+      if (input.codeAnalytiqueId != null) {
+        await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
       }
       const repo = em.getRepository(ResourceEntity);
       return repo.save(
@@ -106,17 +108,18 @@ export class LibrariesService {
           nature: input.nature,
           unitCost: String(input.unitCost),
           output: input.output == null ? null : String(input.output),
-          familleAnalytiqueId: input.familleAnalytiqueId ?? null,
+          codeProduit: input.codeProduit ?? input.code,
+          codeAnalytiqueId: input.codeAnalytiqueId ?? null,
         }),
       );
     });
   }
 
-  /** Classifies a resource onto a famille of the analytical plan (cahier des charges §5.8). */
+  /** Classifies a resource onto a code analytique of the analytical plan (cahier §5.8). */
   async classifyResource(
     libraryId: string,
     resourceId: string,
-    familleAnalytiqueId: string,
+    codeAnalytiqueId: string,
   ): Promise<ResourceEntity> {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
@@ -127,19 +130,19 @@ export class LibrariesService {
       if (existing.length === 0) {
         throw new NotFoundException(`Unknown resource "${resourceId}"`);
       }
-      await this.assertFamilleExists(em, familleAnalytiqueId);
+      await this.assertCodeAnalytiqueExists(em, codeAnalytiqueId);
       await em.query(
-        `UPDATE resource SET famille_analytique_id = $1, updated_at = now() WHERE id = $2`,
-        [familleAnalytiqueId, resourceId],
+        `UPDATE resource SET code_analytique_id = $1, updated_at = now() WHERE id = $2`,
+        [codeAnalytiqueId, resourceId],
       );
       return (await em.query(`SELECT * FROM resource WHERE id = $1`, [resourceId]))[0];
     });
   }
 
-  private async assertFamilleExists(em: EntityManager, familleId: string): Promise<void> {
-    const rows = await em.query(`SELECT id FROM analytical_famille WHERE id = $1`, [familleId]);
+  private async assertCodeAnalytiqueExists(em: EntityManager, codeId: string): Promise<void> {
+    const rows = await em.query(`SELECT id FROM analytical_code WHERE id = $1`, [codeId]);
     if (rows.length === 0) {
-      throw new NotFoundException(`Unknown famille analytique "${familleId}"`);
+      throw new NotFoundException(`Unknown code analytique "${codeId}"`);
     }
   }
 

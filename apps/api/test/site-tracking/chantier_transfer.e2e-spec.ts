@@ -25,12 +25,12 @@ describe('Site-tracking 3.1 — transfert affaire gagnée → chantier', () => {
     const lib = (await as('post', '/libraries').send({ code: `L-${code}`, name: 'L' }).expect(201)).body;
     const mo = (
       await as('post', `/libraries/${lib.id}/resources`)
-        .send({ code: 'MO', label: 'Maçon', unit: 'h', nature: 'labor', unitCost: '40' })
+        .send({ code: `MO-${code}`, label: 'Maçon', unit: 'h', nature: 'labor', unitCost: '40' })
         .expect(201)
     ).body;
     const mat = (
       await as('post', `/libraries/${lib.id}/resources`)
-        .send({ code: 'MAT', label: 'Béton', unit: 'm3', nature: 'material', unitCost: '100' })
+        .send({ code: `MAT-${code}`, label: 'Béton', unit: 'm3', nature: 'material', unitCost: '100' })
         .expect(201)
     ).body;
     // OUV: 2h MO (80) + 1 m3 béton (100) -> déboursé 180 (labor 80, material 100)

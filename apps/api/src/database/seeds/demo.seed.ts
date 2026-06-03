@@ -204,24 +204,16 @@ async function ensureModulesAndSeats(
   }
 }
 
-/** Lots/familles the demo needs (the backfill only created "(à classer)" buckets, and ensurePlan
- *  then sees a non-empty plan and skips the template — so we create these explicitly). */
-const DEMO_LOTS = [
-  {
-    nature: 'material' as const, code: 'MAT-GO', label: 'Gros œuvre',
-    familles: [
-      { code: 'MAT-GO-BET', label: 'Bétons' },
-      { code: 'MAT-GO-ACI', label: 'Aciers' },
-    ],
-  },
-  {
-    nature: 'labor' as const, code: 'MO-PROD', label: 'Main d’œuvre production',
-    familles: [{ code: 'MO-PROD-MAC', label: 'Maçons' }],
-  },
-];
+/** Map : numéro de code analytique → id, depuis le plan modèle dupliqué du tenant. */
+async function codesByNumber(plan: AnalyticalPlanService, tenantId: string): Promise<Map<string, string>> {
+  const tree = await plan.getTree(tenantId);
+  const m = new Map<string, string>();
+  for (const n of tree) for (const l of n.lots) for (const f of l.familles) for (const c of f.codes) m.set(c.code, c.id);
+  return m;
+}
 
-/** Classifies the demo resources onto real analytical familles (idempotent). Reclassifies resources
- *  still sitting in an auto-created "(à classer)" bucket. Parpaing is left unclassified on purpose
+/** Classifies the demo resources onto real analytical CODES (idempotent). Reclassifies resources
+ *  still sitting in an auto-created "(à classer)" code. Parpaing is left unclassified on purpose
  *  to illustrate the "Non réparti" bucket. */
 async function classifyResources(
   ds: DataSource,
@@ -230,61 +222,34 @@ async function classifyResources(
   libraries: LibrariesService,
 ): Promise<void> {
   await plan.ensurePlan(tenantId);
-  let tree = await plan.getTree(tenantId);
-  const codes = new Set<string>();
-  for (const n of tree) for (const l of n.lots) { codes.add(l.code); for (const f of l.familles) codes.add(f.code); }
-
-  for (const lot of DEMO_LOTS) {
-    let lotId: string | undefined;
-    for (const n of tree) for (const l of n.lots) if (l.code === lot.code) lotId = l.id;
-    if (!lotId) {
-      lotId = (await plan.createLot({ nature: lot.nature, code: lot.code, label: lot.label }))
-        .id as string;
-    }
-    const ensuredLotId: string = lotId;
-    for (const fam of lot.familles) {
-      if (!codes.has(fam.code)) {
-        await plan.createFamille({ lotId: ensuredLotId, code: fam.code, label: fam.label });
-      }
-    }
-  }
-  tree = await plan.getTree(tenantId);
-  const familleByCode = new Map<string, string>();
-  for (const n of tree) for (const l of n.lots) for (const f of l.familles) familleByCode.set(f.code, f.id);
+  const codeByNumber = await codesByNumber(plan, tenantId);
 
   const lib = (await runInTenant(ds, tenantId, (em) =>
     em.query(`SELECT id FROM library WHERE code = 'BIB-GO'`),
   ))[0];
   if (!lib) return;
 
+  // ressource → code analytique du plan modèle (Béton=200, Aciers=210, MO maçonnerie=500)
   const mapping: Record<string, string> = {
-    'MAT-BETON': 'MAT-GO-BET',
-    'MAT-ACIER': 'MAT-GO-ACI',
-    'MO-MACON': 'MO-PROD-MAC',
+    'MAT-BETON': '200',
+    'MAT-ACIER': '210',
+    'MO-MACON': '500',
   };
-  for (const [resCode, famCode] of Object.entries(mapping)) {
-    const famId = familleByCode.get(famCode);
-    if (!famId) continue;
+  for (const [resCode, codeNum] of Object.entries(mapping)) {
+    const codeId = codeByNumber.get(codeNum);
+    if (!codeId) continue;
     const res = (await runInTenant(ds, tenantId, (em) =>
       em.query(
-        `SELECT r.id, f.code AS fam_code FROM resource r
-           LEFT JOIN analytical_famille f ON f.id = r.famille_analytique_id
+        `SELECT r.id, c.code AS cur FROM resource r
+           LEFT JOIN analytical_code c ON c.id = r.code_analytique_id
           WHERE r.code = $1 AND r.library_id = $2`,
         [resCode, lib.id],
       ),
     ))[0];
-    // (re)classify if unclassified or still in an auto "(à classer)" bucket
-    if (res && (!res.fam_code || String(res.fam_code).startsWith('ACL-'))) {
-      await libraries.classifyResource(lib.id, res.id, famId);
+    if (res && (!res.cur || String(res.cur).startsWith('ACL-CODE-'))) {
+      await libraries.classifyResource(lib.id, res.id, codeId);
     }
   }
-}
-
-/** Returns the analytical famille id for a code, or null. */
-async function familleId(plan: AnalyticalPlanService, tenantId: string, code: string): Promise<string | null> {
-  const tree = await plan.getTree(tenantId);
-  for (const n of tree) for (const l of n.lots) for (const f of l.familles) if (f.code === code) return f.id;
-  return null;
 }
 
 /** Creates a sample chantier from the won demo affaire with a few imputed purchases (idempotent). */
@@ -301,25 +266,25 @@ async function ensureSampleChantier(
     plan: AnalyticalPlanService;
   },
 ): Promise<void> {
-  const betonFamille = await familleId(s.plan, tenantId, 'MAT-GO-BET');
+  const betonCode = (await codesByNumber(s.plan, tenantId)).get('200') ?? null;
 
   const already = await runInTenant(ds, tenantId, (em) => em.query(`SELECT id FROM chantier LIMIT 1`));
   let chantierId: string;
 
   if (already.length > 0) {
     chantierId = already[0].id;
-    // Reconcile the engagé/réalisé imputation if created before the famille existed (non-destructive).
-    if (betonFamille) {
+    // Reconcile the engagé/réalisé imputation (non-destructive) onto the code analytique Bétons.
+    if (betonCode) {
       await runInTenant(ds, tenantId, async (em) => {
         await em.query(
-          `UPDATE purchase_order_line SET famille_analytique_id = $1
-            WHERE designation = 'Béton C25/30' AND famille_analytique_id IS NULL`,
-          [betonFamille],
+          `UPDATE purchase_order_line SET code_analytique_id = $1
+            WHERE designation = 'Béton C25/30' AND code_analytique_id IS NULL`,
+          [betonCode],
         );
         await em.query(
-          `UPDATE supplier_invoice SET famille_analytique_id = $1
-            WHERE code = 'FF-2026-001' AND famille_analytique_id IS NULL`,
-          [betonFamille],
+          `UPDATE supplier_invoice SET code_analytique_id = $1
+            WHERE code = 'FF-2026-001' AND code_analytique_id IS NULL`,
+          [betonCode],
         );
       });
     }
@@ -338,11 +303,11 @@ async function ensureSampleChantier(
 
     chantierId = (await s.acceptance.accept(affaire.id)).chantier.id;
 
-    // Engagé + réalisé imputés à la famille Bétons.
+    // Engagé + réalisé imputés au code analytique Bétons.
     const order = await s.purchasing.createOrder(chantierId, { code: 'BC-2026-001' });
     await s.purchasing.addLine(order.id, {
       nature: 'material', designation: 'Béton C25/30', quantity: '12', unitPrice: '118',
-      familleAnalytiqueId: betonFamille,
+      codeAnalytiqueId: betonCode,
     });
     // Une ligne non imputée (→ « Non réparti ») et une de frais de chantier (→ branche dédiée).
     await s.purchasing.addLine(order.id, { nature: 'material', designation: 'Divers', quantity: '1', unitPrice: '300' });
@@ -350,7 +315,7 @@ async function ensureSampleChantier(
     await s.purchasing.validateOrder(order.id);
     await s.purchasing.receiveDelivery(order.id, 'BL-2026-001');
     await s.purchasing.addSupplierInvoice(order.id, {
-      code: 'FF-2026-001', nature: 'material', amountHt: '1380', familleAnalytiqueId: betonFamille,
+      code: 'FF-2026-001', nature: 'material', amountHt: '1380', codeAnalytiqueId: betonCode,
     });
 
     // Réalisé main d'œuvre (pointage).

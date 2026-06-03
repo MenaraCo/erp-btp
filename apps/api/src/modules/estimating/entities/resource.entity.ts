@@ -30,11 +30,14 @@ export class ResourceEntity extends BaseTenantEntity {
   @Column({ type: 'numeric', precision: 14, scale: 6, nullable: true })
   output?: string | null;
 
+  /** Code produit unique par société (cahier §5.1) — identifie l'article dans tout le tenant. */
+  @Column({ name: 'code_produit', type: 'varchar', length: 64, nullable: true })
+  codeProduit?: string | null;
+
   /**
-   * Position in the analytical plan (cahier des charges §5.8): the resource attaches to a
-   * famille (→ lot → nature), so it IS the analytical code — no separate imputation field.
-   * Nullable: a tenant classifies at its own pace.
+   * Rattachement au plan analytique (cahier §5.8) : la ressource appartient à exactement un
+   * code analytique (→ famille → lot → nature). Nullable : classement au rythme du tenant.
    */
-  @Column({ name: 'famille_analytique_id', type: 'uuid', nullable: true })
-  familleAnalytiqueId?: string | null;
+  @Column({ name: 'code_analytique_id', type: 'uuid', nullable: true })
+  codeAnalytiqueId?: string | null;
 }

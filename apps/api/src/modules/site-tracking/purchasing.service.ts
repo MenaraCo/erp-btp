@@ -22,8 +22,6 @@ export interface OrderLineInput {
   unitPrice: string | number;
   /** Imputation analytique au code analytique du plan partagé (engagé, cahier §5.8). Optionnel. */
   codeAnalytiqueId?: string | null;
-  /** @deprecated transitoire — remplacé par codeAnalytiqueId (retiré en C.4). */
-  familleAnalytiqueId?: string | null;
 }
 
 export interface SupplierInvoiceInput {
@@ -33,8 +31,6 @@ export interface SupplierInvoiceInput {
   invoiceDate?: string;
   /** Imputation analytique au code analytique du plan partagé (réalisé, cahier §5.8). Optionnel. */
   codeAnalytiqueId?: string | null;
-  /** @deprecated transitoire — remplacé par codeAnalytiqueId (retiré en C.4). */
-  familleAnalytiqueId?: string | null;
 }
 
 @Injectable()
@@ -108,9 +104,6 @@ export class PurchasingService {
       if (order[0].status !== 'draft') {
         throw new ConflictException('Lines can only be added to a draft order.');
       }
-      if (input.familleAnalytiqueId != null) {
-        await this.assertFamilleExists(em, input.familleAnalytiqueId);
-      }
       if (input.codeAnalytiqueId != null) {
         await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
       }
@@ -118,11 +111,10 @@ export class PurchasingService {
         await em.query(
           `INSERT INTO purchase_order_line
              (tenant_id, order_id, execution_line_id, nature, designation, quantity, unit_price, amount_ht,
-              famille_analytique_id, code_analytique_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+              code_analytique_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
           [tenantId, orderId, input.executionLineId ?? null, input.nature, input.designation,
-            qty.toString(), price.toString(), amount.toString(),
-            input.familleAnalytiqueId ?? null, input.codeAnalytiqueId ?? null],
+            qty.toString(), price.toString(), amount.toString(), input.codeAnalytiqueId ?? null],
         )
       )[0];
       await em.query(
@@ -198,30 +190,20 @@ export class PurchasingService {
       if (order[0].status !== 'validated') {
         throw new ConflictException('Supplier invoices require a validated order.');
       }
-      if (input.familleAnalytiqueId != null) {
-        await this.assertFamilleExists(em, input.familleAnalytiqueId);
-      }
       if (input.codeAnalytiqueId != null) {
         await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
       }
       return (
         await em.query(
           `INSERT INTO supplier_invoice
-             (tenant_id, chantier_id, order_id, code, nature, amount_ht, invoice_date, famille_analytique_id, code_analytique_id)
-           VALUES ($1,$2,$3,$4,$5,$6, COALESCE($7, now()), $8, $9) RETURNING *`,
+             (tenant_id, chantier_id, order_id, code, nature, amount_ht, invoice_date, code_analytique_id)
+           VALUES ($1,$2,$3,$4,$5,$6, COALESCE($7, now()), $8) RETURNING *`,
           [tenantId, order[0].chantier_id, orderId, input.code, input.nature,
             new Decimal(input.amountHt ?? 0).toDecimalPlaces(2).toString(), input.invoiceDate ?? null,
-            input.familleAnalytiqueId ?? null, input.codeAnalytiqueId ?? null],
+            input.codeAnalytiqueId ?? null],
         )
       )[0];
     });
-  }
-
-  private async assertFamilleExists(em: EntityManager, familleId: string): Promise<void> {
-    const rows = await em.query(`SELECT id FROM analytical_famille WHERE id = $1`, [familleId]);
-    if (rows.length === 0) {
-      throw new NotFoundException(`Unknown famille analytique "${familleId}"`);
-    }
   }
 
   private async assertCodeAnalytiqueExists(em: EntityManager, codeId: string): Promise<void> {

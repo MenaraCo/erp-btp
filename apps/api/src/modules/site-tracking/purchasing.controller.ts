@@ -80,7 +80,6 @@ export class PurchasingController {
       nature?: string;
       amountHt?: string | number;
       invoiceDate?: string;
-      familleAnalytiqueId?: string | null;
       codeAnalytiqueId?: string | null;
     },
   ) {
@@ -92,7 +91,6 @@ export class PurchasingController {
       nature: body.nature,
       amountHt: body.amountHt,
       invoiceDate: body.invoiceDate,
-      familleAnalytiqueId: body.familleAnalytiqueId,
       codeAnalytiqueId: body.codeAnalytiqueId,
     });
   }

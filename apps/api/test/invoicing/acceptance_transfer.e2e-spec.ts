@@ -25,7 +25,7 @@ describe('Invoicing 2.1 — acceptation : transfert affaire gagnée → marché'
     const lib = (await as('post', '/libraries').send({ code: `L-${code}`, name: 'L' }).expect(201)).body;
     const mat = (
       await as('post', `/libraries/${lib.id}/resources`)
-        .send({ code: 'MAT', label: 'Mat', unit: 'u', nature: 'material', unitCost: '200' })
+        .send({ code: `MAT-${code}`, label: 'Mat', unit: 'u', nature: 'material', unitCost: '200' })
         .expect(201)
     ).body;
     const ouv = (

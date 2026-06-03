@@ -76,17 +76,17 @@ export class LibrariesController {
     return this.libraries.updateResourceCost(libraryId, resourceId, body.unitCost);
   }
 
-  @Put(':libraryId/resources/:resourceId/famille')
+  @Put(':libraryId/resources/:resourceId/code-analytique')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')
   classifyResource(
     @Param('libraryId') libraryId: string,
     @Param('resourceId') resourceId: string,
-    @Body() body: { familleAnalytiqueId?: string },
+    @Body() body: { codeAnalytiqueId?: string },
   ) {
-    if (!body?.familleAnalytiqueId) {
-      throw new BadRequestException('familleAnalytiqueId is required');
+    if (!body?.codeAnalytiqueId) {
+      throw new BadRequestException('codeAnalytiqueId is required');
     }
-    return this.libraries.classifyResource(libraryId, resourceId, body.familleAnalytiqueId);
+    return this.libraries.classifyResource(libraryId, resourceId, body.codeAnalytiqueId);
   }
 }
