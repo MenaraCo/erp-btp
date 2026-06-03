@@ -47,7 +47,7 @@ describe('Invoicing 2.2 — situations à l’avancement (rule #6)', () => {
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    const transfer = (await as('post', `/affaires/${created.affaire.id}/transfer`).expect(201)).body;
+    const transfer = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body;
     marcheId = transfer.marche.id;
     marcheLineId = (await as('get', `/marches/${marcheId}`).expect(200)).body.lines[0].id;
   });

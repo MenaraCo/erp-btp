@@ -45,7 +45,7 @@ describe('Compliance 2.6 — Factur-X, CII XML, e-facture (Chorus Pro stub)', ()
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    const marcheId = (await as('post', `/affaires/${created.affaire.id}/transfer`).expect(201)).body.marche.id;
+    const marcheId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.marche.id;
     const lineId = (await as('get', `/marches/${marcheId}`).expect(200)).body.lines[0].id;
     const situation = (
       await as('post', `/marches/${marcheId}/situations`)

@@ -42,7 +42,7 @@ describe('Chantier 1→N Marché — agrégation de plusieurs marchés (refactor
   beforeAll(async () => {
     ds = await createTestDataSource();
     app = await buildSocleApp();
-    ({ tenantId, userId } = await entitleUser(app, ds, 'Multi', 'admin', ['estimating', 'site_tracking']));
+    ({ tenantId, userId } = await entitleUser(app, ds, 'Multi', 'admin', ['estimating', 'site_tracking', 'invoicing']));
   });
 
   afterAll(async () => {
@@ -54,12 +54,12 @@ describe('Chantier 1→N Marché — agrégation de plusieurs marchés (refactor
     const a1 = await wonAffaire('LOT-PEINTURE', '100'); // budget 1000
     const a2 = await wonAffaire('LOT-SOLS', '150'); // budget 1500
 
-    const t1 = (await as('post', `/affaires/${a1}/transfer-to-chantier`).expect(201)).body;
+    const t1 = (await as('post', `/affaires/${a1}/accept`).expect(201)).body;
     const chantierId = t1.chantier.id;
     expect(t1.marche.chantier_id).toBe(chantierId);
 
     // second marché attaché au MÊME chantier
-    const t2 = (await as('post', `/affaires/${a2}/transfer-to-chantier`).send({ chantierId }).expect(201)).body;
+    const t2 = (await as('post', `/affaires/${a2}/accept`).send({ chantierId }).expect(201)).body;
     expect(t2.chantier.id).toBe(chantierId);
     expect(t2.marche.chantier_id).toBe(chantierId);
     expect(t2.marche.id).not.toBe(t1.marche.id);
@@ -72,7 +72,7 @@ describe('Chantier 1→N Marché — agrégation de plusieurs marchés (refactor
 
   it('refuse une double acceptation de la même affaire (409)', async () => {
     const a = await wonAffaire('LOT-DUP', '100');
-    await as('post', `/affaires/${a}/transfer-to-chantier`).expect(201);
-    await as('post', `/affaires/${a}/transfer-to-chantier`).expect(409);
+    await as('post', `/affaires/${a}/accept`).expect(201);
+    await as('post', `/affaires/${a}/accept`).expect(409);
   });
 });

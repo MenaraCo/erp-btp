@@ -30,6 +30,7 @@ describe('Imputation analytique engagé/réalisé B.0d (§5.8)', () => {
     ({ tenantId, userId } = await entitleUser(app, ds, 'Imp', 'admin', [
       'estimating',
       'site_tracking',
+      'invoicing',
     ]));
 
     const lib = (await as('post', '/libraries').send({ code: 'L', name: 'L' }).expect(201)).body;
@@ -54,7 +55,7 @@ describe('Imputation analytique engagé/réalisé B.0d (§5.8)', () => {
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/transfer-to-chantier`).expect(201)).body.chantier.id;
+    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
 
     const tree = (await as('get', '/analytical/plan').expect(200)).body;
     familleId = tree.find((n: { nature: string }) => n.nature === 'material').lots[0].familles[0].id;

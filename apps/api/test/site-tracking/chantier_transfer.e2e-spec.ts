@@ -54,7 +54,7 @@ describe('Site-tracking 3.1 — transfert affaire gagnée → chantier', () => {
   beforeAll(async () => {
     ds = await createTestDataSource();
     app = await buildSocleApp();
-    ({ tenantId, userId } = await entitleUser(app, ds, 'Ch', 'admin', ['estimating', 'site_tracking']));
+    ({ tenantId, userId } = await entitleUser(app, ds, 'Ch', 'admin', ['estimating', 'site_tracking', 'invoicing']));
   });
 
   afterAll(async () => {
@@ -64,7 +64,7 @@ describe('Site-tracking 3.1 — transfert affaire gagnée → chantier', () => {
 
   it('crée un chantier avec étude d’exécution et budget par nature', async () => {
     const affaireId = await buildWonAffaire('CH-1');
-    const res = await as('post', `/affaires/${affaireId}/transfer-to-chantier`).expect(201);
+    const res = await as('post', `/affaires/${affaireId}/accept`).expect(201);
     expect(res.body.lineCount).toBe(1);
 
     const detail = (await as('get', `/chantiers/${res.body.chantier.id}`).expect(200)).body;
@@ -90,12 +90,12 @@ describe('Site-tracking 3.1 — transfert affaire gagnée → chantier', () => {
     const lib = (await as('post', '/libraries').send({ code: 'L-X', name: 'L' }).expect(201)).body;
     const created = (await as('post', '/affaires').send({ code: 'CH-2', name: 'x' }).expect(201)).body;
     void lib;
-    await as('post', `/affaires/${created.affaire.id}/transfer-to-chantier`).expect(409);
+    await as('post', `/affaires/${created.affaire.id}/accept`).expect(409);
   });
 
   it('refuse (409) un double transfert', async () => {
     const affaireId = await buildWonAffaire('CH-3');
-    await as('post', `/affaires/${affaireId}/transfer-to-chantier`).expect(201);
-    await as('post', `/affaires/${affaireId}/transfer-to-chantier`).expect(409);
+    await as('post', `/affaires/${affaireId}/accept`).expect(201);
+    await as('post', `/affaires/${affaireId}/accept`).expect(409);
   });
 });

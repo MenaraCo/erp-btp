@@ -64,7 +64,7 @@ L'acceptation d'une affaire gagnée crée un **marché** rattaché à un **chant
 
 | Méthode | Route | Permission | Notes |
 |---|---|---|---|
-| POST | `/affaires/:affaireId/transfer-to-chantier` | `site_tracking.write` | Crée un marché + son étude d'exécution ; corps optionnel `{ chantierId }` pour rattacher à un chantier existant ; double acceptation d'une version → 409 |
+| POST | `/affaires/:affaireId/accept` | `invoicing.write` | **Acceptation unifiée (§5.4)** : crée UN marché sur un chantier (nouveau ou existant via corps `{ chantierId }`) portant **à la fois** la chaîne de facturation (lignes de marché) **et** l'étude d'exécution ; double acceptation d'une version → 409 |
 | GET | `/chantiers/:chantierId/marches` | `site_tracking.read` | Liste des marchés agrégés par le chantier |
 
 ## Plan analytique (capacité `estimating.bid`)
@@ -90,8 +90,7 @@ Les lignes de commande (engagé) et les factures fournisseurs (réalisé) accept
 
 | Méthode | Route | Permission | Notes |
 |---|---|---|---|
-| POST | `/affaires/:affaireId/transfer` | `invoicing.write` | Transfère une affaire **Gagnée** → marché ; non gagnée/déjà transférée → 409 |
-| GET | `/marches` | `invoicing.read` | Liste des marchés |
+| GET | `/marches` | `invoicing.read` | Liste des marchés (acceptation via `POST /affaires/:id/accept`, voir ci-dessus) |
 | GET | `/marches/:marcheId` | `invoicing.read` | Marché + lignes valorisées |
 
 ---

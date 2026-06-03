@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { AcceptanceService } from './acceptance.service';
@@ -7,11 +7,15 @@ import { AcceptanceService } from './acceptance.service';
 export class AcceptanceController {
   constructor(private readonly acceptance: AcceptanceService) {}
 
-  @Post('affaires/:affaireId/transfer')
+  /**
+   * Acceptation unifiée (cahier §5.4) : un seul marché sur un chantier (nouveau ou existant)
+   * portant facturation + étude d'exécution. Corps optionnel `{ chantierId }`.
+   */
+  @Post('affaires/:affaireId/accept')
   @RequiresCapability('invoicing.situations')
   @RequiresPermission('invoicing.write')
-  transfer(@Param('affaireId') affaireId: string) {
-    return this.acceptance.transfer(affaireId);
+  accept(@Param('affaireId') affaireId: string, @Body() body?: { chantierId?: string | null }) {
+    return this.acceptance.accept(affaireId, body?.chantierId ?? null);
   }
 
   @Get('marches')

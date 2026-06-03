@@ -29,7 +29,7 @@ describe('Site-tracking 3.6 — résultats analytiques (budget / engagé / réal
   beforeAll(async () => {
     ds = await createTestDataSource();
     app = await buildSocleApp();
-    ({ tenantId, userId } = await entitleUser(app, ds, 'An', 'admin', ['estimating', 'site_tracking']));
+    ({ tenantId, userId } = await entitleUser(app, ds, 'An', 'admin', ['estimating', 'site_tracking', 'invoicing']));
 
     const lib = (await as('post', '/libraries').send({ code: 'L', name: 'L' }).expect(201)).body;
     const mo = (await as('post', `/libraries/${lib.id}/resources`).send({ code: 'MO', label: 'MO', unit: 'h', nature: 'labor', unitCost: '40' }).expect(201)).body;
@@ -45,7 +45,7 @@ describe('Site-tracking 3.6 — résultats analytiques (budget / engagé / réal
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/transfer-to-chantier`).expect(201)).body.chantier.id;
+    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
     await as('post', `/chantiers/${chantierId}/contre-etude/validate`).expect(201);
     lineId = (await as('get', `/chantiers/${chantierId}`).expect(200)).body.lines[0].id;
 

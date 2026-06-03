@@ -55,7 +55,7 @@ describe('Invoicing 2.5 — sociétés, chrono figé et factures', () => {
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    marcheId = (await as('post', `/affaires/${created.affaire.id}/transfer`).expect(201)).body.marche.id;
+    marcheId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.marche.id;
 
     companyId = (await as('post', '/companies').send({ code: 'STE1', name: 'Société 1' }).expect(201)).body.id;
   });

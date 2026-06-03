@@ -15,6 +15,7 @@ import { AnalyticalPlanService } from '../../modules/analytical/analytical-plan.
 import { ChantierService } from '../../modules/site-tracking/chantier.service';
 import { PurchasingService } from '../../modules/site-tracking/purchasing.service';
 import { TimesheetService } from '../../modules/site-tracking/timesheet.service';
+import { AcceptanceService } from '../../modules/invoicing/acceptance.service';
 
 const DEMO_SLUG = 'demo';
 const DEMO_EMAIL = 'admin@demo.test';
@@ -57,6 +58,7 @@ export async function seedDemo(app: INestApplicationContext): Promise<void> {
   const workflow = app.get(WorkflowService);
   const plan = app.get(AnalyticalPlanService);
   const chantiers = app.get(ChantierService);
+  const acceptance = app.get(AcceptanceService);
   const purchasing = app.get(PurchasingService);
   const timesheets = app.get(TimesheetService);
 
@@ -95,7 +97,7 @@ export async function seedDemo(app: INestApplicationContext): Promise<void> {
     await rbac.provisionSystemRoles(tenantId);
     await ensureModulesAndSeats(ds, tenantId, userId, entitlements);
     await classifyResources(ds, tenantId, plan, libraries);
-    await ensureSampleChantier(ds, tenantId, { workflow, chantiers, purchasing, timesheets, plan });
+    await ensureSampleChantier(ds, tenantId, { workflow, chantiers, acceptance, purchasing, timesheets, plan });
 
     // eslint-disable-next-line no-console
     console.log(
@@ -290,6 +292,7 @@ async function ensureSampleChantier(
   s: {
     workflow: WorkflowService;
     chantiers: ChantierService;
+    acceptance: AcceptanceService;
     purchasing: PurchasingService;
     timesheets: TimesheetService;
     plan: AnalyticalPlanService;
@@ -331,7 +334,7 @@ async function ensureSampleChantier(
     }
   }
 
-  const chantier = (await s.chantiers.transferFromAffaire(affaire.id)).chantier;
+  const chantier = (await s.acceptance.accept(affaire.id)).chantier;
 
   // Engagé + réalisé imputés à la famille Bétons.
   const order = await s.purchasing.createOrder(chantier.id, { code: 'BC-2026-001' });

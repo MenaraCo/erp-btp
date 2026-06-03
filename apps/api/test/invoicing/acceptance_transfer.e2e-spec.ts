@@ -72,7 +72,7 @@ describe('Invoicing 2.1 — acceptation : transfert affaire gagnée → marché'
     const affaireId = await buildCostedAffaire('ACC-1');
     await winAffaire(affaireId);
 
-    const res = await as('post', `/affaires/${affaireId}/transfer`).expect(201);
+    const res = await as('post', `/affaires/${affaireId}/accept`).expect(201);
     expect(res.body.lineCount).toBe(1);
     // PV = déboursé 200 * 1.2 = 240 ; quantité 10 -> montant 2400, PU 240
     expect(res.body.marche.total_ht).toBe('2400.00');
@@ -85,13 +85,13 @@ describe('Invoicing 2.1 — acceptation : transfert affaire gagnée → marché'
 
   it('refuse (409) le transfert d’une affaire non gagnée', async () => {
     const affaireId = await buildCostedAffaire('ACC-2'); // stays 'open'
-    await as('post', `/affaires/${affaireId}/transfer`).expect(409);
+    await as('post', `/affaires/${affaireId}/accept`).expect(409);
   });
 
   it('refuse (409) un double transfert de la même version', async () => {
     const affaireId = await buildCostedAffaire('ACC-3');
     await winAffaire(affaireId);
-    await as('post', `/affaires/${affaireId}/transfer`).expect(201);
-    await as('post', `/affaires/${affaireId}/transfer`).expect(409);
+    await as('post', `/affaires/${affaireId}/accept`).expect(201);
+    await as('post', `/affaires/${affaireId}/accept`).expect(409);
   });
 });

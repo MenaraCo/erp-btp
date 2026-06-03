@@ -45,7 +45,7 @@ describe('Invoicing 2.4 — DGD (décompte général définitif)', () => {
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    marcheId = (await as('post', `/affaires/${created.affaire.id}/transfer`).expect(201)).body.marche.id;
+    marcheId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.marche.id;
     // marché = 16 * 100 = 1600 HT
   });
 

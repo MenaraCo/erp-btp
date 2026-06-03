@@ -45,7 +45,7 @@ describe('Invoicing 2.3 — avenants (rule #4 recodification)', () => {
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    marcheId = (await as('post', `/affaires/${created.affaire.id}/transfer`).expect(201)).body.marche.id;
+    marcheId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.marche.id;
   });
 
   afterAll(async () => {

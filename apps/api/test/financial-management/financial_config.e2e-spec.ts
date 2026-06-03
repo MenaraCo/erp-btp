@@ -28,6 +28,7 @@ describe('Gestion financière B.1 — paramètres versionnés + avancement', () 
     ({ tenantId, userId } = await entitleUser(app, ds, 'Fm', 'admin', [
       'estimating',
       'site_tracking',
+      'invoicing',
       'financial_management',
     ]));
 
@@ -41,7 +42,7 @@ describe('Gestion financière B.1 — paramètres versionnés + avancement', () 
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/transfer-to-chantier`).expect(201)).body.chantier.id;
+    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
   });
 
   afterAll(async () => {

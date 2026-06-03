@@ -8,14 +8,12 @@ import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
-import { isTransferable } from '../estimating/affaire-workflow';
 import {
   CalcComponent,
   CalcOuvrage,
   NATURES,
   computeNatureBreakdownMap,
 } from '../estimating/ouvrage-calc';
-import { VenteService } from '../estimating/vente.service';
 import { BUDGET_NATURES, BudgetNature } from './budget-nature';
 
 interface OuvrageComp {
@@ -31,84 +29,78 @@ export class ChantierService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
-    private readonly vente: VenteService,
   ) {}
 
-  /** Transfers a won affaire into a chantier, materialising the déboursé hierarchy. */
   /**
-   * Accepts a won affaire as a MARCHÉ on a chantier (cahier des charges §5.4/5.5). When
-   * `targetChantierId` is given the marché is attached to that existing chantier (a chantier
-   * aggregates many marchés); otherwise a new chantier is created. The étude d'exécution is
-   * materialised under the new marché (marche_id) and aggregated at the chantier (chantier_id).
+   * Creates the marché (the contract, cahier §5.4) rooted on a chantier — existing (aggregate,
+   * budget incremented) or new. Guards against double acceptance of a version. The étude
+   * d'exécution and the facturation lines are added separately by the callers.
    */
-  async transferFromAffaire(affaireId: string, targetChantierId?: string | null) {
-    const tenantId = this.context.requireTenantId();
-
-    const affaire = await runInTenant(this.dataSource, tenantId, (em) =>
-      em.query(`SELECT id, code, name, status FROM affaire WHERE id = $1`, [affaireId]),
-    );
-    if (affaire.length === 0) {
-      throw new NotFoundException(`Unknown affaire "${affaireId}"`);
+  async createMarche(
+    em: EntityManager,
+    args: {
+      tenantId: string;
+      affaire: { id: string; code: string; name: string };
+      versionId: string;
+      venteTotal: string;
+      targetChantierId?: string | null;
+    },
+  ) {
+    const { tenantId, affaire, versionId, venteTotal, targetChantierId } = args;
+    if ((await em.query(`SELECT id FROM marche WHERE affaire_version_id = $1`, [versionId])).length > 0) {
+      throw new ConflictException('This affaire version has already been accepted (marché exists).');
     }
-    if (!isTransferable(affaire[0].status)) {
-      throw new ConflictException('Only a won affaire can be transferred.');
-    }
-    const versionRow = await runInTenant(this.dataSource, tenantId, (em) =>
-      em.query(
-        `SELECT id FROM affaire_version WHERE affaire_id = $1 ORDER BY version_no DESC LIMIT 1`,
-        [affaireId],
-      ),
-    );
-    if (versionRow.length === 0) {
-      throw new ConflictException('Affaire has no version to transfer.');
-    }
-    const versionId = versionRow[0].id as string;
-    const venteTotal = (await this.vente.computeForVersion(versionId)).totalPvHt;
-
-    return runInTenant(this.dataSource, tenantId, async (em) => {
-      const current = await em.query(`SELECT status FROM affaire WHERE id = $1 FOR UPDATE`, [affaireId]);
-      if (!isTransferable(current[0].status)) {
-        throw new ConflictException('Only a won affaire can be transferred.');
+    let chantierId: string;
+    if (targetChantierId) {
+      const found = await em.query(`SELECT id FROM chantier WHERE id = $1 FOR UPDATE`, [targetChantierId]);
+      if (found.length === 0) {
+        throw new NotFoundException(`Unknown chantier "${targetChantierId}"`);
       }
-      // A given affaire version becomes exactly one marché (no double acceptance).
-      if ((await em.query(`SELECT id FROM marche WHERE affaire_version_id = $1`, [versionId])).length > 0) {
-        throw new ConflictException('This affaire version has already been accepted (marché exists).');
-      }
-
-      // Resolve the destination chantier: existing (aggregate) or a new one.
-      let chantier;
-      if (targetChantierId) {
-        const found = await em.query(`SELECT * FROM chantier WHERE id = $1 FOR UPDATE`, [targetChantierId]);
-        if (found.length === 0) {
-          throw new NotFoundException(`Unknown chantier "${targetChantierId}"`);
-        }
-        chantier = found[0];
+      chantierId = found[0].id;
+      await em.query(
+        `UPDATE chantier SET budget_vente_ht = budget_vente_ht + $1, updated_at = now() WHERE id = $2`,
+        [venteTotal, chantierId],
+      );
+    } else {
+      chantierId = (
         await em.query(
-          `UPDATE chantier SET budget_vente_ht = budget_vente_ht + $1, updated_at = now() WHERE id = $2`,
-          [venteTotal, chantier.id],
-        );
-      } else {
-        chantier = (
-          await em.query(
-            `INSERT INTO chantier (tenant_id, code, name, affaire_id, affaire_version_id, budget_vente_ht)
-             VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-            [tenantId, `${affaire[0].code}-CH`, affaire[0].name, affaireId, versionId, venteTotal],
-          )
-        )[0];
-      }
-
-      // Create the marché (the contract) rooted on the chantier. Facturation lines (marche_line)
-      // are added by the invoicing acceptance; here it roots the étude d'exécution.
-      const marche = (
-        await em.query(
-          `INSERT INTO marche
-             (tenant_id, affaire_id, affaire_version_id, chantier_id, code, name, total_ht,
-              execution_form, contre_etude_status, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'by_ouvrage','draft','active') RETURNING *`,
-          [tenantId, affaireId, versionId, chantier.id, affaire[0].code, affaire[0].name, venteTotal],
+          `INSERT INTO chantier (tenant_id, code, name, affaire_id, affaire_version_id, budget_vente_ht)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+          [tenantId, `${affaire.code}-CH`, affaire.name, affaire.id, versionId, venteTotal],
         )
-      )[0];
-      const marcheId = marche.id as string;
+      )[0].id;
+    }
+    return (
+      await em.query(
+        `INSERT INTO marche
+           (tenant_id, affaire_id, affaire_version_id, chantier_id, code, name, total_ht,
+            execution_form, contre_etude_status, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'by_ouvrage','draft','active') RETURNING *`,
+        [tenantId, affaire.id, versionId, chantierId, affaire.code, affaire.name, venteTotal],
+      )
+    )[0];
+  }
+
+  /**
+   * Materialises the étude d'exécution (déboursé hierarchy) of a marché's affaire version under
+   * that marché (cahier §5.5), aggregated at its chantier. Shared by the site-tracking acceptance
+   * and the unified invoicing /accept. No-op if the marché already has execution.
+   */
+  async materialiseExecutionForMarche(marcheId: string): Promise<number> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const marcheRows = await em.query(
+        `SELECT chantier_id, affaire_version_id FROM marche WHERE id = $1`,
+        [marcheId],
+      );
+      if (marcheRows.length === 0) {
+        throw new NotFoundException(`Unknown marché "${marcheId}"`);
+      }
+      const chantier = { id: marcheRows[0].chantier_id as string };
+      const versionId = marcheRows[0].affaire_version_id as string;
+      if ((await em.query(`SELECT 1 FROM execution_line WHERE marche_id = $1 LIMIT 1`, [marcheId])).length > 0) {
+        return 0;
+      }
 
       // In-memory ouvrage graph for materialisation.
       const compByOuvrage = new Map<string, OuvrageComp[]>();
@@ -215,7 +207,7 @@ export class ChantierService {
       }
 
       await this.recompute(em, tenantId, chantier.id, true, marcheId);
-      return { chantier, marche, lineCount: devisLines.length };
+      return devisLines.length;
     });
   }
 

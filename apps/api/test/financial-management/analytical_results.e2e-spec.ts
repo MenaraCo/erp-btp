@@ -46,6 +46,7 @@ describe('Tableau de bord analytique B.0e — double axe (§5.8)', () => {
     ({ tenantId, userId } = await entitleUser(app, ds, 'AnaRes', 'admin', [
       'estimating',
       'site_tracking',
+      'invoicing',
       'financial_management',
     ]));
 
@@ -74,7 +75,7 @@ describe('Tableau de bord analytique B.0e — double axe (§5.8)', () => {
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/transfer-to-chantier`).expect(201)).body.chantier.id;
+    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
 
     // engagé + réalisé imputés à la même famille
     const ddp = (await as('post', `/chantiers/${chantierId}/purchase-requests`).send({ code: 'DDP' }).expect(201)).body;
