@@ -15,6 +15,7 @@ import { EstimatingModule } from './modules/estimating/estimating.module';
 import { InvoicingModule } from './modules/invoicing/invoicing.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { SiteTrackingModule } from './modules/site-tracking/site-tracking.module';
+import { AnalyticalModule } from './modules/analytical/analytical.module';
 import { FinancialManagementModule } from './modules/financial-management/financial-management.module';
 import { SearchModule } from './core/common/search/search.module';
 import { HealthModule } from './health/health.module';
@@ -37,6 +38,7 @@ import { HealthModule } from './health/health.module';
     InvoicingModule,
     ComplianceModule,
     SiteTrackingModule,
+    AnalyticalModule,
     FinancialManagementModule,
     SearchModule,
     HealthModule,

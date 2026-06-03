@@ -50,6 +50,16 @@
 | POST | `/affaires/:affaireId/transition` | `estimating.devis.write` | Workflow (`{ to }`) ; transition interdite → 409 |
 | GET | `/affaires/:affaireId/transfer-check` | `estimating.devis.read` | Transférable ? + alertes |
 
+## Plan analytique (capacité `estimating.bid`)
+
+Axe analytique nature → lot → famille → ressource (cahier des charges §5.8). La ressource du chiffrage **est** le code analytique.
+
+| Méthode | Route | Permission | Notes |
+|---|---|---|---|
+| GET | `/analytical/plan` | `estimating.devis.read` | Arbre dépliable nature → lot → famille ; duplique le plan modèle à la 1ʳᵉ lecture |
+| POST | `/analytical/lots` | `estimating.devis.write` | Ajoute un lot sous une nature ; code déjà pris → 409 |
+| POST | `/analytical/familles` | `estimating.devis.write` | Ajoute une famille sous un lot ; code déjà pris → 409 |
+
 ## Facturation (capacité `invoicing.situations`)
 
 | Méthode | Route | Permission | Notes |
