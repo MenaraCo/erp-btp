@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { TenancyModule } from '../../core/tenancy/tenancy.module';
 import { AnalyticalModule } from '../analytical/analytical.module';
+import { SiteTrackingModule } from '../site-tracking/site-tracking.module';
 import { FinancialConfigService } from './financial-config.service';
 import { AdvancementService } from './advancement.service';
 import { AnalyticalResultsService } from './analytical-results.service';
+import { FinancialForecastService } from './financial-forecast.service';
 import { FinancialController } from './financial.controller';
 
 /**
@@ -12,8 +14,13 @@ import { FinancialController } from './financial.controller';
  * B.0e: analytical dashboard (budget/engagé/réalisé aggregated along the analytical axis).
  */
 @Module({
-  imports: [TenancyModule, AnalyticalModule],
-  providers: [FinancialConfigService, AdvancementService, AnalyticalResultsService],
+  imports: [TenancyModule, AnalyticalModule, SiteTrackingModule],
+  providers: [
+    FinancialConfigService,
+    AdvancementService,
+    AnalyticalResultsService,
+    FinancialForecastService,
+  ],
   controllers: [FinancialController],
   exports: [FinancialConfigService, AdvancementService],
 })

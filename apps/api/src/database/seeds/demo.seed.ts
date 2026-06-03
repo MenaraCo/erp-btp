@@ -16,6 +16,7 @@ import { ChantierService } from '../../modules/site-tracking/chantier.service';
 import { PurchasingService } from '../../modules/site-tracking/purchasing.service';
 import { TimesheetService } from '../../modules/site-tracking/timesheet.service';
 import { AcceptanceService } from '../../modules/invoicing/acceptance.service';
+import { AdvancementService } from '../../modules/financial-management/advancement.service';
 
 const DEMO_SLUG = 'demo';
 const DEMO_EMAIL = 'admin@demo.test';
@@ -59,6 +60,7 @@ export async function seedDemo(app: INestApplicationContext): Promise<void> {
   const plan = app.get(AnalyticalPlanService);
   const chantiers = app.get(ChantierService);
   const acceptance = app.get(AcceptanceService);
+  const advancement = app.get(AdvancementService);
   const purchasing = app.get(PurchasingService);
   const timesheets = app.get(TimesheetService);
 
@@ -97,7 +99,7 @@ export async function seedDemo(app: INestApplicationContext): Promise<void> {
     await rbac.provisionSystemRoles(tenantId);
     await ensureModulesAndSeats(ds, tenantId, userId, entitlements);
     await classifyResources(ds, tenantId, plan, libraries);
-    await ensureSampleChantier(ds, tenantId, { workflow, chantiers, acceptance, purchasing, timesheets, plan });
+    await ensureSampleChantier(ds, tenantId, { workflow, chantiers, acceptance, advancement, purchasing, timesheets, plan });
 
     // eslint-disable-next-line no-console
     console.log(
@@ -293,6 +295,7 @@ async function ensureSampleChantier(
     workflow: WorkflowService;
     chantiers: ChantierService;
     acceptance: AcceptanceService;
+    advancement: AdvancementService;
     purchasing: PurchasingService;
     timesheets: TimesheetService;
     plan: AnalyticalPlanService;
@@ -301,9 +304,11 @@ async function ensureSampleChantier(
   const betonFamille = await familleId(s.plan, tenantId, 'MAT-GO-BET');
 
   const already = await runInTenant(ds, tenantId, (em) => em.query(`SELECT id FROM chantier LIMIT 1`));
+  let chantierId: string;
+
   if (already.length > 0) {
-    // Chantier already seeded: reconcile the engagé/réalisé imputation if it was created before the
-    // famille existed (non-destructive UPDATE on the demo's own rows).
+    chantierId = already[0].id;
+    // Reconcile the engagé/réalisé imputation if created before the famille existed (non-destructive).
     if (betonFamille) {
       await runInTenant(ds, tenantId, async (em) => {
         await em.query(
@@ -318,39 +323,52 @@ async function ensureSampleChantier(
         );
       });
     }
-    return;
+  } else {
+    const affaire = (await runInTenant(ds, tenantId, (em) =>
+      em.query(`SELECT id, status FROM affaire WHERE code = 'DEMO-2026-001'`),
+    ))[0];
+    if (!affaire) return;
+
+    const path = ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won'];
+    if (affaire.status !== 'won') {
+      for (const to of path) {
+        await s.workflow.transition(affaire.id, to);
+      }
+    }
+
+    chantierId = (await s.acceptance.accept(affaire.id)).chantier.id;
+
+    // Engagé + réalisé imputés à la famille Bétons.
+    const order = await s.purchasing.createOrder(chantierId, { code: 'BC-2026-001' });
+    await s.purchasing.addLine(order.id, {
+      nature: 'material', designation: 'Béton C25/30', quantity: '12', unitPrice: '118',
+      familleAnalytiqueId: betonFamille,
+    });
+    // Une ligne non imputée (→ « Non réparti ») et une de frais de chantier (→ branche dédiée).
+    await s.purchasing.addLine(order.id, { nature: 'material', designation: 'Divers', quantity: '1', unitPrice: '300' });
+    await s.purchasing.addLine(order.id, { nature: 'site_overhead', designation: 'Installation de chantier', quantity: '1', unitPrice: '800' });
+    await s.purchasing.validateOrder(order.id);
+    await s.purchasing.receiveDelivery(order.id, 'BL-2026-001');
+    await s.purchasing.addSupplierInvoice(order.id, {
+      code: 'FF-2026-001', nature: 'material', amountHt: '1380', familleAnalytiqueId: betonFamille,
+    });
+
+    // Réalisé main d'œuvre (pointage).
+    await s.timesheets.create(chantierId, { employee: 'Équipe maçonnerie', date: '2026-05-15', hours: '40', hourlyCost: '40' });
   }
 
-  const affaire = (await runInTenant(ds, tenantId, (em) =>
-    em.query(`SELECT id, status FROM affaire WHERE code = 'DEMO-2026-001'`),
-  ))[0];
-  if (!affaire) return;
-
-  // Walk the workflow to "won" if not already there.
-  const path = ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won'];
-  if (affaire.status !== 'won') {
-    for (const to of path) {
-      await s.workflow.transition(affaire.id, to);
+  // Forecast inputs (idempotent): validate each marché's contre-étude (initialise le prévisionnel)
+  // et enregistre un avancement global, pour que la vue prévisionnelle soit réaliste.
+  const marches = await runInTenant(ds, tenantId, (em) =>
+    em.query(`SELECT id, contre_etude_status FROM marche WHERE chantier_id = $1`, [chantierId]),
+  );
+  for (const m of marches) {
+    if (m.contre_etude_status !== 'validated') {
+      await s.chantiers.validateContreEtude(m.id);
     }
   }
-
-  const chantier = (await s.acceptance.accept(affaire.id)).chantier;
-
-  // Engagé + réalisé imputés à la famille Bétons.
-  const order = await s.purchasing.createOrder(chantier.id, { code: 'BC-2026-001' });
-  await s.purchasing.addLine(order.id, {
-    nature: 'material', designation: 'Béton C25/30', quantity: '12', unitPrice: '118',
-    familleAnalytiqueId: betonFamille,
-  });
-  // Une ligne non imputée (→ « Non réparti ») et une de frais de chantier (→ branche dédiée).
-  await s.purchasing.addLine(order.id, { nature: 'material', designation: 'Divers', quantity: '1', unitPrice: '300' });
-  await s.purchasing.addLine(order.id, { nature: 'site_overhead', designation: 'Installation de chantier', quantity: '1', unitPrice: '800' });
-  await s.purchasing.validateOrder(order.id);
-  await s.purchasing.receiveDelivery(order.id, 'BL-2026-001');
-  await s.purchasing.addSupplierInvoice(order.id, {
-    code: 'FF-2026-001', nature: 'material', amountHt: '1380', familleAnalytiqueId: betonFamille,
-  });
-
-  // Réalisé main d'œuvre (pointage).
-  await s.timesheets.create(chantier.id, { employee: 'Équipe maçonnerie', date: '2026-05-15', hours: '40', hourlyCost: '40' });
+  const adv = await s.advancement.current(chantierId);
+  if (!adv.global) {
+    await s.advancement.record(chantierId, { pct: '0.35' });
+  }
 }

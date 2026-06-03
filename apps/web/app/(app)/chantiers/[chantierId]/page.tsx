@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
-import { euro } from '@/lib/format';
+import { euro, percent } from '@/lib/format';
 
 const NATURE_LABELS: Record<string, string> = {
   material: 'Matériaux',
@@ -62,6 +62,17 @@ interface AnalyticalResults {
   siteOverhead: { label: string; metrics: Metrics };
   total: Metrics;
 }
+interface Forecast {
+  avancement: string;
+  indicators: {
+    budgetAvance: string;
+    ecartAuStade: string;
+    eac: string | null;
+    margePrevisionnelle: string | null;
+    margePrevisionnellePct: string | null;
+    alerts: string[];
+  };
+}
 
 function MetricCells({ m }: { m: Metrics }) {
   return (
@@ -104,6 +115,12 @@ export default function ChantierDetailPage() {
     retry: false,
     queryFn: () => apiFetch<AnalyticalResults>(`/chantiers/${chantierId}/analytical-results`, { token }),
   });
+  const forecast = useQuery({
+    queryKey: ['chantier-forecast', chantierId],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<Forecast>(`/chantiers/${chantierId}/forecast`, { token }),
+  });
 
   return (
     <div>
@@ -141,6 +158,49 @@ export default function ChantierDetailPage() {
         </div>
       )}
       {results.isError && <p className="muted">Suivi de chantiers non autorisé pour cet utilisateur.</p>}
+
+      {forecast.data && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <h2 style={{ margin: 0 }}>Prévisionnel (Gestion financière)</h2>
+            <span className="muted">Avancement {percent(forecast.data.avancement)}</span>
+          </div>
+          <div className="card-grid" style={{ marginTop: 12 }}>
+            <div className="card">
+              <h2>Marge prévisionnelle</h2>
+              <div
+                className="stat"
+                style={{ color: Number(forecast.data.indicators.margePrevisionnelle ?? 0) < 0 ? 'var(--danger)' : undefined }}
+              >
+                {euro(forecast.data.indicators.margePrevisionnelle)}
+              </div>
+              <div className="muted">{percent(forecast.data.indicators.margePrevisionnellePct)}</div>
+            </div>
+            <div className="card">
+              <h2>Coût final estimé (EAC)</h2>
+              <div className="stat">{euro(forecast.data.indicators.eac)}</div>
+            </div>
+            <div className="card">
+              <h2>Budget avancé</h2>
+              <div className="stat">{euro(forecast.data.indicators.budgetAvance)}</div>
+            </div>
+            <div className="card">
+              <h2>Écart au stade</h2>
+              <div
+                className="stat"
+                style={{ color: Number(forecast.data.indicators.ecartAuStade) < 0 ? 'var(--danger)' : undefined }}
+              >
+                {euro(forecast.data.indicators.ecartAuStade)}
+              </div>
+            </div>
+          </div>
+          {forecast.data.indicators.alerts.length > 0 && (
+            <p style={{ color: 'var(--danger)', marginBottom: 0 }}>
+              ⚠ Alertes : {forecast.data.indicators.alerts.join(', ')}
+            </p>
+          )}
+        </div>
+      )}
 
       {marches.data && marches.data.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>

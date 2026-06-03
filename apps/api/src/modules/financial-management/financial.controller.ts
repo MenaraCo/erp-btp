@@ -4,6 +4,7 @@ import { RequiresPermission } from '../../core/rbac/requires-permission.decorato
 import { FinancialConfigService, FormulaSetInput } from './financial-config.service';
 import { AdvancementInput, AdvancementService } from './advancement.service';
 import { AnalyticalResultsService } from './analytical-results.service';
+import { FinancialForecastService } from './financial-forecast.service';
 
 @Controller()
 export class FinancialController {
@@ -11,6 +12,7 @@ export class FinancialController {
     private readonly config: FinancialConfigService,
     private readonly advancement: AdvancementService,
     private readonly analyticalResults: AnalyticalResultsService,
+    private readonly forecast: FinancialForecastService,
   ) {}
 
   @Get('chantiers/:chantierId/analytical-results')
@@ -18,6 +20,13 @@ export class FinancialController {
   @RequiresPermission('financial.read')
   getAnalyticalResults(@Param('chantierId') chantierId: string) {
     return this.analyticalResults.chantierAnalyticalResults(chantierId);
+  }
+
+  @Get('chantiers/:chantierId/forecast')
+  @RequiresCapability('financial.forecast')
+  @RequiresPermission('financial.read')
+  getForecast(@Param('chantierId') chantierId: string) {
+    return this.forecast.chantierForecast(chantierId);
   }
 
   @Get('financial/formula-set')

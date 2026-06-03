@@ -61,6 +61,7 @@
 | Méthode | Route | Permission | Notes |
 |---|---|---|---|
 | GET | `/chantiers/:chantierId/analytical-results` | `financial.read` | Budget/engagé/réalisé agrégés sur l'axe analytique nature→lot→famille (§5.8) ; seau « Non réparti » par nature + branche « Frais de chantier » ; totaux réconciliés |
+| GET | `/chantiers/:chantierId/forecast` | `financial.read` (cap. `financial.forecast`) | **Prévisionnel / vue Conducteur (B.3)** : assemble les 4 axes + avancement + paramètres versionnés → indicateurs (budget avancé, écart au stade, EAC, marge prévisionnelle €/%, alertes) |
 
 ## Acceptation / Suivi de chantiers — Chantier 1→N Marché
 
