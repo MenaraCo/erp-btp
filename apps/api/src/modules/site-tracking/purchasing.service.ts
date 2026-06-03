@@ -20,6 +20,17 @@ export interface OrderLineInput {
   designation: string;
   quantity: string | number;
   unitPrice: string | number;
+  /** Analytical imputation (famille → lot → nature) for the engagé axis (cahier §5.8). */
+  familleAnalytiqueId?: string | null;
+}
+
+export interface SupplierInvoiceInput {
+  code: string;
+  nature: string;
+  amountHt: string | number;
+  invoiceDate?: string;
+  /** Analytical imputation (famille → lot → nature) for the réalisé axis (cahier §5.8). */
+  familleAnalytiqueId?: string | null;
 }
 
 @Injectable()
@@ -93,13 +104,16 @@ export class PurchasingService {
       if (order[0].status !== 'draft') {
         throw new ConflictException('Lines can only be added to a draft order.');
       }
+      if (input.familleAnalytiqueId != null) {
+        await this.assertFamilleExists(em, input.familleAnalytiqueId);
+      }
       const line = (
         await em.query(
           `INSERT INTO purchase_order_line
-             (tenant_id, order_id, execution_line_id, nature, designation, quantity, unit_price, amount_ht)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+             (tenant_id, order_id, execution_line_id, nature, designation, quantity, unit_price, amount_ht, famille_analytique_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
           [tenantId, orderId, input.executionLineId ?? null, input.nature, input.designation,
-            qty.toString(), price.toString(), amount.toString()],
+            qty.toString(), price.toString(), amount.toString(), input.familleAnalytiqueId ?? null],
         )
       )[0];
       await em.query(
@@ -165,7 +179,7 @@ export class PurchasingService {
 
   // --- Facture fournisseur ---
 
-  addSupplierInvoice(orderId: string, input: { code: string; nature: string; amountHt: string | number; invoiceDate?: string }) {
+  addSupplierInvoice(orderId: string, input: SupplierInvoiceInput) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const order = await em.query(`SELECT chantier_id, status FROM purchase_order WHERE id = $1`, [orderId]);
@@ -175,15 +189,26 @@ export class PurchasingService {
       if (order[0].status !== 'validated') {
         throw new ConflictException('Supplier invoices require a validated order.');
       }
+      if (input.familleAnalytiqueId != null) {
+        await this.assertFamilleExists(em, input.familleAnalytiqueId);
+      }
       return (
         await em.query(
-          `INSERT INTO supplier_invoice (tenant_id, chantier_id, order_id, code, nature, amount_ht, invoice_date)
-           VALUES ($1,$2,$3,$4,$5,$6, COALESCE($7, now())) RETURNING *`,
+          `INSERT INTO supplier_invoice (tenant_id, chantier_id, order_id, code, nature, amount_ht, invoice_date, famille_analytique_id)
+           VALUES ($1,$2,$3,$4,$5,$6, COALESCE($7, now()), $8) RETURNING *`,
           [tenantId, order[0].chantier_id, orderId, input.code, input.nature,
-            new Decimal(input.amountHt ?? 0).toDecimalPlaces(2).toString(), input.invoiceDate ?? null],
+            new Decimal(input.amountHt ?? 0).toDecimalPlaces(2).toString(), input.invoiceDate ?? null,
+            input.familleAnalytiqueId ?? null],
         )
       )[0];
     });
+  }
+
+  private async assertFamilleExists(em: EntityManager, familleId: string): Promise<void> {
+    const rows = await em.query(`SELECT id FROM analytical_famille WHERE id = $1`, [familleId]);
+    if (rows.length === 0) {
+      throw new NotFoundException(`Unknown famille analytique "${familleId}"`);
+    }
   }
 
   /** Engagé (validated orders) and réalisé achats (supplier invoices), by nature, for a chantier. */

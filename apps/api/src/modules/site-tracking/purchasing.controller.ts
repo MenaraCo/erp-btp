@@ -74,13 +74,24 @@ export class PurchasingController {
   @RequiresPermission('site_tracking.write')
   invoice(
     @Param('orderId') orderId: string,
-    @Body() body: { code?: string; nature?: string; amountHt?: string | number; invoiceDate?: string },
+    @Body()
+    body: {
+      code?: string;
+      nature?: string;
+      amountHt?: string | number;
+      invoiceDate?: string;
+      familleAnalytiqueId?: string | null;
+    },
   ) {
     if (!body?.code || !body?.nature || !NATURES.includes(body.nature) || body?.amountHt == null) {
       throw new BadRequestException('code, nature (valid) and amountHt are required');
     }
     return this.purchasing.addSupplierInvoice(orderId, {
-      code: body.code, nature: body.nature, amountHt: body.amountHt, invoiceDate: body.invoiceDate,
+      code: body.code,
+      nature: body.nature,
+      amountHt: body.amountHt,
+      invoiceDate: body.invoiceDate,
+      familleAnalytiqueId: body.familleAnalytiqueId,
     });
   }
 

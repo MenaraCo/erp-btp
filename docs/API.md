@@ -61,6 +61,15 @@ Axe analytique nature → lot → famille → ressource (cahier des charges §5.
 | POST | `/analytical/lots` | `estimating.devis.write` | Ajoute un lot sous une nature ; code déjà pris → 409 |
 | POST | `/analytical/familles` | `estimating.devis.write` | Ajoute une famille sous un lot ; code déjà pris → 409 |
 
+### Imputation analytique de l'engagé / réalisé
+
+Les lignes de commande (engagé) et les factures fournisseurs (réalisé) acceptent un `familleAnalytiqueId` optionnel pour l'imputation sur l'axe analytique (§5.8) ; famille inconnue → 404. Sans famille, le montant tombe dans le seau « Non réparti » de sa nature.
+
+| Méthode | Route | Notes |
+|---|---|---|
+| POST | `/purchase-orders/:orderId/lines` | `familleAnalytiqueId` optionnel (engagé) |
+| POST | `/purchase-orders/:orderId/invoices` | `familleAnalytiqueId` optionnel (réalisé) |
+
 ## Facturation (capacité `invoicing.situations`)
 
 | Méthode | Route | Permission | Notes |
