@@ -7,11 +7,7 @@ import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { CalcComponent, CalcOuvrage } from '../estimating/ouvrage-calc';
 import { computeBucketBreakdownMap } from '../estimating/bucket-breakdown';
 import { AnalyticalPlanService } from '../analytical/analytical-plan.service';
-import {
-  aggregateAnalytical,
-  MeasureRow,
-  Metrics,
-} from './analytical-aggregate';
+import { aggregateAnalytical, MeasureRow, Metrics } from './analytical-aggregate';
 
 const UNALLOC_PREFIX = '__unalloc__:';
 const METRICS = ['budgetObjectif', 'engage', 'realise'] as const;
@@ -24,7 +20,7 @@ interface CompRow {
   rate: string | null;
   nature: string | null;
   unit_cost_objectif: string | null;
-  famille_id: string | null;
+  code_id: string | null;
 }
 interface LineRow {
   id: string;
@@ -35,15 +31,14 @@ interface LineRow {
 
 /**
  * Tableau de bord analytique d'un chantier (cahier des charges §5.8): budget / engagé / réalisé
- * agrégés le long de l'axe analytique nature → lot → famille, via le helper pur aggregateAnalytical.
+ * agrégés le long de l'axe analytique nature → lot → famille → code analytique (helper pur
+ * aggregateAnalytical). L'imputation se fait au CODE ANALYTIQUE ; le budget lit le code analytique
+ * propre à la nomenclature de chantier (copié au transfert) — aucune lecture live vers la
+ * bibliothèque d'étude (catalogues indépendants, §5.5).
  *
- * Hybrid handling of amounts outside the 4 analytical natures (user decision):
- *  - unimputed resources within the 4 natures → "Non réparti" bucket of their nature;
- *  - frais de chantier (site_overhead) → a dedicated "Frais de chantier" branch,
- * so the grand total always reconciles with the structural per-nature view.
- *
- * Budget shown here = budget OBJECTIF (the engine's "budget initial"). Prévisionnel stays in the
- * per-nature /results view and the formula engine (B.2).
+ * Hors des 4 natures analytiques (décision propriétaire) : ressources non imputées → « Non
+ * réparti » de leur nature ; frais de chantier (site_overhead) → branche dédiée. Le total se
+ * réconcilie toujours.
  */
 @Injectable()
 export class AnalyticalResultsService {
@@ -91,7 +86,7 @@ export class AnalyticalResultsService {
     });
   }
 
-  /** Budget objectif by famille (vendable lines) + frais de chantier (non-vendable lines). */
+  /** Budget objectif par code analytique (lignes vendables) + frais de chantier (non-vendables). */
   private async collectBudget(
     em: EntityManager,
     chantierId: string,
@@ -103,13 +98,13 @@ export class AnalyticalResultsService {
          FROM execution_line WHERE chantier_id = $1`,
       [chantierId],
     );
+    // Code analytique = celui de la nomenclature de chantier (copié au transfert), pas la biblio.
     const comps: CompRow[] = await em.query(
       `SELECT ec.execution_line_id, ec.kind, ec.child_line_id, ec.quantite_objectif, ec.rate,
-              n.nature, n.unit_cost_objectif, r.famille_analytique_id AS famille_id
+              n.nature, n.unit_cost_objectif, n.code_analytique_id AS code_id
          FROM execution_component ec
          JOIN execution_line el ON el.id = ec.execution_line_id
          LEFT JOIN nomenclature_resource n ON n.id = ec.nomenclature_resource_id
-         LEFT JOIN resource r ON r.id = n.source_resource_id
         WHERE el.chantier_id = $1`,
       [chantierId],
     );
@@ -123,8 +118,7 @@ export class AnalyticalResultsService {
       if (c.kind === 'resource') {
         comp.quantity = c.quantite_objectif ?? 0;
         comp.unitCost = c.unit_cost_objectif ?? 0;
-        // bucket = famille if classified, else a per-nature "unallocated" key
-        comp.bucket = c.famille_id ?? `${UNALLOC_PREFIX}${c.nature ?? 'material'}`;
+        comp.bucket = c.code_id ?? `${UNALLOC_PREFIX}${c.nature ?? 'material'}`;
       } else if (c.kind === 'sub_line') {
         comp.quantity = c.quantite_objectif ?? 0;
         comp.childOuvrageId = c.child_line_id ?? undefined;
@@ -140,15 +134,13 @@ export class AnalyticalResultsService {
       const unit = breakdown.get(l.id) ?? {};
       const qty = new Decimal(l.quantite_objectif ?? 0);
       if (!l.vendable) {
-        // non-vendable titre → frais de chantier
         for (const value of Object.values(unit)) {
           siteOverhead.budgetObjectif = siteOverhead.budgetObjectif.plus(value.times(qty));
         }
         continue;
       }
       for (const [bucket, value] of Object.entries(unit)) {
-        const montant = value.times(qty);
-        rows.push(this.bucketToRow(bucket, { budgetObjectif: montant.toString() }));
+        rows.push(this.bucketToRow(bucket, { budgetObjectif: value.times(qty).toString() }));
       }
     }
   }
@@ -160,15 +152,14 @@ export class AnalyticalResultsService {
     siteOverhead: Record<string, Decimal>,
   ): Promise<void> {
     const engage = await em.query(
-      `SELECT l.famille_analytique_id AS famille_id, l.nature,
-              SUM(l.amount_ht)::numeric(16,2) AS montant
+      `SELECT l.code_analytique_id AS code_id, l.nature, SUM(l.amount_ht)::numeric(16,2) AS montant
          FROM purchase_order_line l JOIN purchase_order o ON o.id = l.order_id
         WHERE o.chantier_id = $1 AND o.status = 'validated'
-        GROUP BY l.famille_analytique_id, l.nature`,
+        GROUP BY l.code_analytique_id, l.nature`,
       [chantierId],
     );
     for (const r of engage) {
-      this.dispatch(rows, siteOverhead, r.famille_id, r.nature, 'engage', r.montant);
+      this.dispatch(rows, siteOverhead, r.code_id, r.nature, 'engage', r.montant);
     }
   }
 
@@ -179,42 +170,41 @@ export class AnalyticalResultsService {
     siteOverhead: Record<string, Decimal>,
   ): Promise<void> {
     const invoices = await em.query(
-      `SELECT famille_analytique_id AS famille_id, nature,
-              SUM(amount_ht)::numeric(16,2) AS montant
+      `SELECT code_analytique_id AS code_id, nature, SUM(amount_ht)::numeric(16,2) AS montant
          FROM supplier_invoice WHERE chantier_id = $1
-        GROUP BY famille_analytique_id, nature`,
+        GROUP BY code_analytique_id, nature`,
       [chantierId],
     );
     for (const r of invoices) {
-      this.dispatch(rows, siteOverhead, r.famille_id, r.nature, 'realise', r.montant);
+      this.dispatch(rows, siteOverhead, r.code_id, r.nature, 'realise', r.montant);
     }
-    // Labor réalisé from timesheets (no famille → "Non réparti" under labor).
-    const labor = (
-      await em.query(
-        `SELECT COALESCE(SUM(cost), 0)::numeric(16,2) AS total FROM timesheet WHERE chantier_id = $1`,
-        [chantierId],
-      )
-    )[0].total;
-    if (new Decimal(labor).gt(0)) {
-      rows.push({ familleId: null, nature: 'labor', metrics: { realise: labor } });
+    // Réalisé MO depuis les pointages (nature labor), imputé au code analytique s'il est renseigné.
+    const labor = await em.query(
+      `SELECT code_analytique_id AS code_id, SUM(cost)::numeric(16,2) AS montant
+         FROM timesheet WHERE chantier_id = $1 GROUP BY code_analytique_id`,
+      [chantierId],
+    );
+    for (const r of labor) {
+      if (new Decimal(r.montant ?? 0).isZero()) continue;
+      this.dispatch(rows, siteOverhead, r.code_id, 'labor', 'realise', r.montant);
     }
   }
 
-  /** Routes a measure to the famille tree, the per-nature unallocated bucket, or frais de chantier. */
+  /** Routes a measure to the code-analytique tree, the per-nature unallocated bucket, or frais de chantier. */
   private dispatch(
     rows: MeasureRow[],
     siteOverhead: Record<string, Decimal>,
-    familleId: string | null,
+    codeId: string | null,
     nature: string,
     metric: string,
     montant: string,
   ): void {
-    if (!familleId && nature === 'site_overhead') {
+    if (!codeId && nature === 'site_overhead') {
       siteOverhead[metric] = siteOverhead[metric].plus(new Decimal(montant));
       return;
     }
     rows.push({
-      familleId: familleId ?? null,
+      codeId: codeId ?? null,
       nature: (nature === 'site_overhead' ? 'material' : nature) as MeasureRow['nature'],
       metrics: { [metric]: montant } as Metrics,
     });
@@ -222,14 +212,10 @@ export class AnalyticalResultsService {
 
   private bucketToRow(bucket: string, metrics: Metrics): MeasureRow {
     if (bucket.startsWith(UNALLOC_PREFIX)) {
-      return {
-        familleId: null,
-        nature: bucket.slice(UNALLOC_PREFIX.length) as MeasureRow['nature'],
-        metrics,
-      };
+      return { codeId: null, nature: bucket.slice(UNALLOC_PREFIX.length) as MeasureRow['nature'], metrics };
     }
-    // Known famille: aggregateAnalytical places it by the plan; nature here is a placeholder.
-    return { familleId: bucket, nature: 'material', metrics };
+    // Code analytique connu : aggregateAnalytical le place via le plan ; nature ici n'est qu'un repli.
+    return { codeId: bucket, nature: 'material', metrics };
   }
 
   private async assertChantier(em: EntityManager, chantierId: string): Promise<void> {

@@ -3,6 +3,7 @@ import { RequiresCapability } from '../../core/entitlements/requires-capability.
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import {
   AnalyticalPlanService,
+  CodeInput,
   FamilleInput,
   LotInput,
 } from './analytical-plan.service';
@@ -36,5 +37,12 @@ export class AnalyticalController {
   @RequiresPermission('estimating.devis.write')
   createFamille(@Body() body: FamilleInput) {
     return this.plan.createFamille(body);
+  }
+
+  @Post('codes')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  createCode(@Body() body: CodeInput) {
+    return this.plan.createCode(body);
   }
 }

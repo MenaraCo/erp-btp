@@ -2,11 +2,11 @@
  * "Plan modèle" — the canonical analytical plan template (cahier des charges §5.8).
  *
  * Duplicated into a tenant's own rows at setup (and, later, per société at company creation).
- * Application code never hard-codes a lot/famille; it reads the tenant's duplicated plan. This
- * template is only the starting point a tenant then tailors.
+ * Application code never hard-codes a level; it reads the tenant's duplicated plan. This template
+ * is only the starting point a tenant then tailors.
  *
- * Hierarchy: nature (fixed) → lot → famille. The estimating resource carries the analytical code
- * and attaches to a famille, so its position nature → lot → famille drives automatic imputation.
+ * Hierarchy (5 levels): nature (fixed) → lot → famille → CODE ANALYTIQUE (n° société, ex. COLLE=280)
+ * → ressource. A resource attaches to exactly one code analytique and inherits famille→lot→nature.
  */
 
 export const ANALYTICAL_NATURES = ['material', 'equipment', 'subcontract', 'labor'] as const;
@@ -19,11 +19,16 @@ export const NATURE_LABELS: Record<AnalyticalNature, string> = {
   labor: "Main d'œuvre",
 };
 
-export interface FamilleTemplate {
+export interface CodeTemplate {
+  /** Numéro de code analytique propre à la société (ex. 280). */
   code: string;
   label: string;
 }
-
+export interface FamilleTemplate {
+  code: string;
+  label: string;
+  codes: CodeTemplate[];
+}
 export interface LotTemplate {
   code: string;
   label: string;
@@ -31,20 +36,16 @@ export interface LotTemplate {
   familles: FamilleTemplate[];
 }
 
-/**
- * Starter plan: a handful of lots/familles per nature. Codes are illustrative société analytical
- * codes; a tenant renames/extends them. Resources later point at a famille and carry their own
- * analytical code (e.g. COLLE = 280).
- */
+/** Starter plan : lots / familles / codes analytiques par nature. Numéros illustratifs. */
 export const ANALYTICAL_PLAN_TEMPLATE: LotTemplate[] = [
   {
     code: 'MAT-GO',
     label: 'Gros œuvre',
     nature: 'material',
     familles: [
-      { code: 'MAT-GO-BET', label: 'Bétons' },
-      { code: 'MAT-GO-ACI', label: 'Aciers' },
-      { code: 'MAT-GO-COF', label: 'Coffrage' },
+      { code: 'MAT-GO-BET', label: 'Bétons', codes: [{ code: '200', label: 'Béton prêt à l’emploi' }] },
+      { code: 'MAT-GO-ACI', label: 'Aciers', codes: [{ code: '210', label: 'Armatures acier' }] },
+      { code: 'MAT-GO-COF', label: 'Coffrage', codes: [{ code: '300', label: 'Banches / coffrage' }] },
     ],
   },
   {
@@ -52,8 +53,8 @@ export const ANALYTICAL_PLAN_TEMPLATE: LotTemplate[] = [
     label: 'Sols durs',
     nature: 'material',
     familles: [
-      { code: 'MAT-SOL-COL', label: 'Colles' },
-      { code: 'MAT-SOL-CAR', label: 'Carrelage' },
+      { code: 'MAT-SOL-COL', label: 'Colles', codes: [{ code: '280', label: 'Colle' }] },
+      { code: 'MAT-SOL-CAR', label: 'Carrelage', codes: [{ code: '290', label: 'Carrelage' }] },
     ],
   },
   {
@@ -61,8 +62,8 @@ export const ANALYTICAL_PLAN_TEMPLATE: LotTemplate[] = [
     label: 'Étanchéité',
     nature: 'material',
     familles: [
-      { code: 'MAT-ETA-MEM', label: 'Membranes' },
-      { code: 'MAT-ETA-RES', label: 'Résines' },
+      { code: 'MAT-ETA-MEM', label: 'Membranes', codes: [{ code: '320', label: 'Membranes étanchéité' }] },
+      { code: 'MAT-ETA-RES', label: 'Résines', codes: [{ code: '330', label: 'Résines' }] },
     ],
   },
   {
@@ -70,8 +71,8 @@ export const ANALYTICAL_PLAN_TEMPLATE: LotTemplate[] = [
     label: 'Engins & matériel',
     nature: 'equipment',
     familles: [
-      { code: 'EQP-ENG-LOC', label: 'Location engins' },
-      { code: 'EQP-ENG-PET', label: 'Petit matériel' },
+      { code: 'EQP-ENG-LOC', label: 'Location engins', codes: [{ code: '600', label: 'Location engins' }] },
+      { code: 'EQP-ENG-PET', label: 'Petit matériel', codes: [{ code: '610', label: 'Petit matériel' }] },
     ],
   },
   {
@@ -79,8 +80,8 @@ export const ANALYTICAL_PLAN_TEMPLATE: LotTemplate[] = [
     label: 'Sous-traitance générale',
     nature: 'subcontract',
     familles: [
-      { code: 'STR-GEN-ETA', label: 'Sous-traitance étanchéité' },
-      { code: 'STR-GEN-ELE', label: 'Sous-traitance électricité' },
+      { code: 'STR-GEN-ETA', label: 'Sous-traitance étanchéité', codes: [{ code: '700', label: 'ST étanchéité' }] },
+      { code: 'STR-GEN-ELE', label: 'Sous-traitance électricité', codes: [{ code: '710', label: 'ST électricité' }] },
     ],
   },
   {
@@ -88,9 +89,9 @@ export const ANALYTICAL_PLAN_TEMPLATE: LotTemplate[] = [
     label: 'Main d’œuvre production',
     nature: 'labor',
     familles: [
-      { code: 'MO-PROD-MAC', label: 'Maçons' },
-      { code: 'MO-PROD-CAR', label: 'Carreleurs' },
-      { code: 'MO-PROD-PEI', label: 'Peintres' },
+      { code: 'MO-PROD-MAC', label: 'Maçons', codes: [{ code: '500', label: 'MO maçonnerie' }] },
+      { code: 'MO-PROD-CAR', label: 'Carreleurs', codes: [{ code: '510', label: 'MO carrelage' }] },
+      { code: 'MO-PROD-PEI', label: 'Peintres', codes: [{ code: '520', label: 'MO peinture' }] },
     ],
   },
 ];

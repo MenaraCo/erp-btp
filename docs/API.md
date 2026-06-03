@@ -82,6 +82,7 @@ Axe analytique nature → lot → famille → ressource (cahier des charges §5.
 | GET | `/analytical/plan` | `estimating.devis.read` | Arbre dépliable nature → lot → famille ; duplique le plan modèle à la 1ʳᵉ lecture |
 | POST | `/analytical/lots` | `estimating.devis.write` | Ajoute un lot sous une nature ; code déjà pris → 409 |
 | POST | `/analytical/familles` | `estimating.devis.write` | Ajoute une famille sous un lot ; code déjà pris → 409 |
+| POST | `/analytical/codes` | `estimating.devis.write` | Ajoute un code analytique (n° société) sous une famille ; code déjà pris → 409 |
 
 ### Imputation analytique de l'engagé / réalisé
 

@@ -3,18 +3,23 @@ import { AnalyticalNature } from '../analytical/analytical-plan.config';
 
 /**
  * Pure ascending aggregation along the analytical axis (cahier des charges §5.8):
- * ressource/famille → lot → nature → total. This helper only SUMS metrics up the tree; the
- * derived indicators (écart, EAC, marge prévisionnelle…) are computed by the formula engine
- * (B.2). Keeping summation isolated and pure makes both independently testable.
+ * code analytique → famille → lot → nature → total. This helper only SUMS metrics up the tree;
+ * derived indicators (écart, EAC, marge…) are computed by the formula engine (B.2). Keeping
+ * summation isolated and pure makes both independently testable.
  */
 
-/** A metric is any named cost measure carried by a row (budget, engagé, réalisé…). */
 export type Metrics = Record<string, string | number>;
 
+export interface AnalyticalPlanCode {
+  id: string;
+  code: string;
+  label: string;
+}
 export interface AnalyticalPlanFamille {
   id: string;
   code: string;
   label: string;
+  codes: AnalyticalPlanCode[];
 }
 export interface AnalyticalPlanLot {
   id: string;
@@ -28,31 +33,37 @@ export interface AnalyticalPlanNode {
   lots: AnalyticalPlanLot[];
 }
 
-/** A cost measure attributed to a famille (or only to a nature when famille is unknown). */
+/** A cost measure attributed to a code analytique (or only to a nature when the code is unknown). */
 export interface MeasureRow {
-  familleId?: string | null;
+  codeId?: string | null;
   nature: AnalyticalNature;
   metrics: Metrics;
 }
 
-export interface AggregatedFamille {
-  id: string;
-  code: string;
-  label: string;
+interface Rendered {
   metrics: Record<string, string>;
 }
-export interface AggregatedLot {
+export interface AggregatedCode extends Rendered {
   id: string;
   code: string;
   label: string;
-  metrics: Record<string, string>;
+}
+export interface AggregatedFamille extends Rendered {
+  id: string;
+  code: string;
+  label: string;
+  codes: AggregatedCode[];
+}
+export interface AggregatedLot extends Rendered {
+  id: string;
+  code: string;
+  label: string;
   familles: AggregatedFamille[];
 }
-export interface AggregatedNature {
+export interface AggregatedNature extends Rendered {
   nature: AnalyticalNature;
   label: string;
-  metrics: Record<string, string>;
-  /** measures attributed to this nature but to no known famille (engagé/réalisé not yet imputed) */
+  /** measures attributed to this nature but to no known code analytique */
   unallocated: Record<string, string>;
   lots: AggregatedLot[];
 }
@@ -68,19 +79,12 @@ function addInto(acc: Acc, metrics: Metrics): void {
     acc.set(key, (acc.get(key) ?? new Decimal(0)).plus(new Decimal(value)));
   }
 }
-
 function mergeInto(acc: Acc, other: Acc): void {
-  for (const [key, value] of other) {
-    acc.set(key, (acc.get(key) ?? new Decimal(0)).plus(value));
-  }
+  for (const [key, value] of other) acc.set(key, (acc.get(key) ?? new Decimal(0)).plus(value));
 }
-
-/** Renders an accumulator to plain strings; every metric key seen anywhere is present. */
 function render(acc: Acc, keys: Set<string>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const key of keys) {
-    out[key] = (acc.get(key) ?? new Decimal(0)).toString();
-  }
+  for (const key of keys) out[key] = (acc.get(key) ?? new Decimal(0)).toString();
   return out;
 }
 
@@ -89,29 +93,19 @@ export function aggregateAnalytical(
   rows: MeasureRow[],
   knownMetrics: string[] = [],
 ): AnalyticalAggregate {
-  // Every metric key to expose (zero-filled) on all nodes: the caller's declared vocabulary plus
-  // any key actually seen in the rows. Declaring it lets empty data still render 0s.
   const metricKeys = new Set<string>(knownMetrics);
-  for (const r of rows) {
-    for (const k of Object.keys(r.metrics)) metricKeys.add(k);
-  }
+  for (const r of rows) for (const k of Object.keys(r.metrics)) metricKeys.add(k);
 
-  // Index measures by famille, and per-nature unallocated buckets.
-  const byFamille = new Map<string, Acc>();
+  const knownCodes = new Set<string>();
+  for (const n of plan) for (const l of n.lots) for (const f of l.familles) for (const c of f.codes) knownCodes.add(c.id);
+
+  const byCode = new Map<string, Acc>();
   const unallocatedByNature = new Map<AnalyticalNature, Acc>();
-  const knownFamilleNatures = new Map<string, AnalyticalNature>();
-  for (const node of plan) {
-    for (const lot of node.lots) {
-      for (const fam of lot.familles) knownFamilleNatures.set(fam.id, node.nature);
-    }
-  }
-
   for (const row of rows) {
-    const isKnown = row.familleId != null && knownFamilleNatures.has(row.familleId);
-    if (isKnown) {
-      const acc = byFamille.get(row.familleId!) ?? new Map();
+    if (row.codeId != null && knownCodes.has(row.codeId)) {
+      const acc = byCode.get(row.codeId) ?? new Map();
       addInto(acc, row.metrics);
-      byFamille.set(row.familleId!, acc);
+      byCode.set(row.codeId, acc);
     } else {
       const acc = unallocatedByNature.get(row.nature) ?? new Map();
       addInto(acc, row.metrics);
@@ -125,9 +119,14 @@ export function aggregateAnalytical(
     const lots: AggregatedLot[] = node.lots.map((lot) => {
       const lotAcc: Acc = new Map();
       const familles: AggregatedFamille[] = lot.familles.map((fam) => {
-        const famAcc = byFamille.get(fam.id) ?? new Map();
+        const famAcc: Acc = new Map();
+        const codes: AggregatedCode[] = fam.codes.map((code) => {
+          const codeAcc = byCode.get(code.id) ?? new Map();
+          mergeInto(famAcc, codeAcc);
+          return { id: code.id, code: code.code, label: code.label, metrics: render(codeAcc, metricKeys) };
+        });
         mergeInto(lotAcc, famAcc);
-        return { id: fam.id, code: fam.code, label: fam.label, metrics: render(famAcc, metricKeys) };
+        return { id: fam.id, code: fam.code, label: fam.label, metrics: render(famAcc, metricKeys), codes };
       });
       mergeInto(natureAcc, lotAcc);
       return { id: lot.id, code: lot.code, label: lot.label, metrics: render(lotAcc, metricKeys), familles };

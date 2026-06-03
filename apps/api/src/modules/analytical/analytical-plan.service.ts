@@ -20,9 +20,13 @@ export interface LotInput {
   code: string;
   label: string;
 }
-
 export interface FamilleInput {
   lotId: string;
+  code: string;
+  label: string;
+}
+export interface CodeInput {
+  familleId: string;
   code: string;
   label: string;
 }
@@ -39,12 +43,17 @@ interface FamilleRow {
   code: string;
   label: string;
 }
+interface CodeRow {
+  id: string;
+  famille_id: string;
+  code: string;
+  label: string;
+}
 
 /**
  * Plan analytique (cahier des charges §5.8). Manages the tenant's analytical hierarchy
- * nature → lot → famille, seeded from the "plan modèle" template and then tailored. Read by
- * estimating (to classify resources) and by Gestion financière (to aggregate along the
- * analytical axis).
+ * nature → lot → famille → code analytique, seeded from the "plan modèle" template then tailored.
+ * Read by estimating (to classify resources) and by Gestion financière (to aggregate the axis).
  */
 @Injectable()
 export class AnalyticalPlanService {
@@ -53,11 +62,7 @@ export class AnalyticalPlanService {
     private readonly context: TenantContext,
   ) {}
 
-  /**
-   * Idempotently duplicates the plan modèle into the tenant's own rows when the plan is empty.
-   * This is the "duplication du plan modèle"; later it will also run per société at company
-   * creation (company_id is left NULL for now — the single default société).
-   */
+  /** Idempotently duplicates the plan modèle into the tenant's own rows when the plan is empty. */
   async ensurePlan(tenantId = this.context.requireTenantId()): Promise<void> {
     await runInTenant(this.dataSource, tenantId, async (em) => {
       const existing = await em.query(
@@ -72,17 +77,24 @@ export class AnalyticalPlanService {
           [tenantId, lot.nature, lot.code, lot.label],
         );
         for (const fam of lot.familles) {
-          await em.query(
+          const [famRow] = await em.query(
             `INSERT INTO analytical_famille (tenant_id, lot_id, code, label)
-               VALUES ($1, $2, $3, $4)`,
+               VALUES ($1, $2, $3, $4) RETURNING id`,
             [tenantId, lotRow.id, fam.code, fam.label],
           );
+          for (const code of fam.codes) {
+            await em.query(
+              `INSERT INTO analytical_code (tenant_id, famille_id, code, label)
+                 VALUES ($1, $2, $3, $4)`,
+              [tenantId, famRow.id, code.code, code.label],
+            );
+          }
         }
       }
     });
   }
 
-  /** Returns the full plan as an expandable tree nature → lot → famille (cahier §5.8 dashboard). */
+  /** Full plan as an expandable tree nature → lot → famille → code analytique (cahier §5.8). */
   async getTree(tenantId = this.context.requireTenantId()) {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const lots: LotRow[] = await em.query(
@@ -91,9 +103,16 @@ export class AnalyticalPlanService {
       const familles: FamilleRow[] = await em.query(
         `SELECT id, lot_id, code, label FROM analytical_famille ORDER BY code`,
       );
-      const byLot = new Map<string, FamilleRow[]>();
+      const codes: CodeRow[] = await em.query(
+        `SELECT id, famille_id, code, label FROM analytical_code ORDER BY code`,
+      );
+      const famByLot = new Map<string, FamilleRow[]>();
       for (const f of familles) {
-        (byLot.get(f.lot_id) ?? byLot.set(f.lot_id, []).get(f.lot_id)!).push(f);
+        (famByLot.get(f.lot_id) ?? famByLot.set(f.lot_id, []).get(f.lot_id)!).push(f);
+      }
+      const codeByFamille = new Map<string, CodeRow[]>();
+      for (const c of codes) {
+        (codeByFamille.get(c.famille_id) ?? codeByFamille.set(c.famille_id, []).get(c.famille_id)!).push(c);
       }
       return ANALYTICAL_NATURES.map((nature) => ({
         nature,
@@ -104,10 +123,15 @@ export class AnalyticalPlanService {
             id: l.id,
             code: l.code,
             label: l.label,
-            familles: (byLot.get(l.id) ?? []).map((f) => ({
+            familles: (famByLot.get(l.id) ?? []).map((f) => ({
               id: f.id,
               code: f.code,
               label: f.label,
+              codes: (codeByFamille.get(f.id) ?? []).map((c) => ({
+                id: c.id,
+                code: c.code,
+                label: c.label,
+              })),
             })),
           })),
       }));
@@ -153,12 +177,33 @@ export class AnalyticalPlanService {
     });
   }
 
-  /** A code is the société analytical identifier; it must be unique across lots and familles. */
+  async createCode(input: CodeInput) {
+    const tenantId = this.context.requireTenantId();
+    if (!input.code?.trim() || !input.label?.trim()) {
+      throw new BadRequestException('code and label are required');
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const fam = await em.query(`SELECT id FROM analytical_famille WHERE id = $1`, [input.familleId]);
+      if (fam.length === 0) {
+        throw new NotFoundException(`Unknown famille "${input.familleId}"`);
+      }
+      await this.assertCodeFree(em, input.code);
+      const [row] = await em.query(
+        `INSERT INTO analytical_code (tenant_id, famille_id, code, label)
+           VALUES ($1, $2, $3, $4) RETURNING id, famille_id, code, label`,
+        [tenantId, input.familleId, input.code, input.label],
+      );
+      return row;
+    });
+  }
+
+  /** A code is the société analytical identifier; unique across lots, familles and codes analytiques. */
   private async assertCodeFree(em: EntityManager, code: string): Promise<void> {
-    const lot = await em.query(`SELECT 1 FROM analytical_lot WHERE code = $1 LIMIT 1`, [code]);
-    const fam = await em.query(`SELECT 1 FROM analytical_famille WHERE code = $1 LIMIT 1`, [code]);
-    if (lot.length > 0 || fam.length > 0) {
-      throw new ConflictException(`Analytical code "${code}" already exists`);
+    for (const table of ['analytical_lot', 'analytical_famille', 'analytical_code']) {
+      const rows = await em.query(`SELECT 1 FROM ${table} WHERE code = $1 LIMIT 1`, [code]);
+      if (rows.length > 0) {
+        throw new ConflictException(`Analytical code "${code}" already exists`);
+      }
     }
   }
 }

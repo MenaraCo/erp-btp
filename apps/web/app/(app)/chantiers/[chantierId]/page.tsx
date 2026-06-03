@@ -37,11 +37,18 @@ interface Marche {
 }
 
 type Metrics = Record<string, string>;
+interface Code {
+  id: string;
+  code: string;
+  label: string;
+  metrics: Metrics;
+}
 interface Famille {
   id: string;
   code: string;
   label: string;
   metrics: Metrics;
+  codes: Code[];
 }
 interface Lot {
   id: string;
@@ -292,10 +299,20 @@ function NatureRows({ nature }: { nature: AnalyticalNature }) {
             <MetricCells m={lot.metrics} />
           </tr>
           {lot.familles.filter((f) => hasValue(f.metrics)).map((fam) => (
-            <tr key={fam.id} className="muted">
-              <td style={{ paddingLeft: 44 }}>{fam.label}</td>
-              <MetricCells m={fam.metrics} />
-            </tr>
+            <Fragment key={fam.id}>
+              <tr>
+                <td style={{ paddingLeft: 44 }}>{fam.label}</td>
+                <MetricCells m={fam.metrics} />
+              </tr>
+              {fam.codes.filter((c) => hasValue(c.metrics)).map((code) => (
+                <tr key={code.id} className="muted">
+                  <td style={{ paddingLeft: 64 }}>
+                    {code.code} · {code.label}
+                  </td>
+                  <MetricCells m={code.metrics} />
+                </tr>
+              ))}
+            </Fragment>
           ))}
         </Fragment>
       ))}
