@@ -41,6 +41,7 @@
 | POST | `/ouvrages/:id/components` | `estimating.devis.write` | Ajoute un composant (ressource/sous-ouvrage/%) → recalcul ; cycle → 400 |
 | POST | `/affaires` | `estimating.devis.write` | Crée une affaire (+ version 1) |
 | GET | `/affaires` | `estimating.devis.read` | Data-grid |
+| GET | `/affaires/:affaireId` | `estimating.devis.read` | Affaire + ses versions (détail devis) |
 | POST | `/affaires/:affaireId/versions` | `estimating.devis.write` | Nouvelle version |
 | POST | `/versions/:versionId/lines` | `estimating.devis.write` | Ligne de devis (titre/sous-titre/ouvrage/ressource) |
 | GET | `/versions/:versionId/lines` | `estimating.devis.read` | Arbre du corps de devis |

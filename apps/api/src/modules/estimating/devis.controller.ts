@@ -34,6 +34,13 @@ export class DevisController {
     return this.devis.listAffaires(query);
   }
 
+  @Get('affaires/:affaireId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  getAffaire(@Param('affaireId') affaireId: string) {
+    return this.devis.getAffaire(affaireId);
+  }
+
   @Post('affaires/:affaireId/versions')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')

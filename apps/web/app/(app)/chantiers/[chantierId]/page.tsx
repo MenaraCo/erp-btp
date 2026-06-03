@@ -1,0 +1,206 @@
+'use client';
+
+import { Fragment } from 'react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/lib/auth';
+import { apiFetch } from '@/lib/api';
+import { euro } from '@/lib/format';
+
+const NATURE_LABELS: Record<string, string> = {
+  material: 'Matériaux',
+  equipment: 'Matériel',
+  subcontract: 'Sous-traitance',
+  labor: "Main d'œuvre",
+  site_overhead: 'Frais de chantier',
+};
+
+interface NatureResult {
+  nature: string;
+  budgetObjectif: string;
+  engage: string;
+  realise: string;
+  ecart: string;
+}
+interface Results {
+  budgetVenteHt: string | null;
+  byNature: NatureResult[];
+  totals: { budgetObjectif: string; engage: string; realise: string; ecart: string };
+}
+
+type Metrics = Record<string, string>;
+interface Famille {
+  id: string;
+  code: string;
+  label: string;
+  metrics: Metrics;
+}
+interface Lot {
+  id: string;
+  code: string;
+  label: string;
+  metrics: Metrics;
+  familles: Famille[];
+}
+interface AnalyticalNature {
+  nature: string;
+  label: string;
+  metrics: Metrics;
+  unallocated: Metrics;
+  lots: Lot[];
+}
+interface AnalyticalResults {
+  natures: AnalyticalNature[];
+  siteOverhead: { label: string; metrics: Metrics };
+  total: Metrics;
+}
+
+function MetricCells({ m }: { m: Metrics }) {
+  return (
+    <>
+      <td style={{ textAlign: 'right' }}>{euro(m.budgetObjectif)}</td>
+      <td style={{ textAlign: 'right' }}>{euro(m.engage)}</td>
+      <td style={{ textAlign: 'right' }}>{euro(m.realise)}</td>
+    </>
+  );
+}
+
+function hasValue(m: Metrics): boolean {
+  return ['budgetObjectif', 'engage', 'realise'].some((k) => Number(m[k] ?? 0) !== 0);
+}
+
+export default function ChantierDetailPage() {
+  const { token } = useAuth();
+  const params = useParams();
+  const chantierId = String(params.chantierId);
+
+  const chantier = useQuery({
+    queryKey: ['chantier', chantierId],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<{ code: string }>(`/chantiers/${chantierId}`, { token }),
+  });
+  const results = useQuery({
+    queryKey: ['chantier-results', chantierId],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<Results>(`/chantiers/${chantierId}/results`, { token }),
+  });
+  const analytical = useQuery({
+    queryKey: ['chantier-analytical', chantierId],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<AnalyticalResults>(`/chantiers/${chantierId}/analytical-results`, { token }),
+  });
+
+  return (
+    <div>
+      <p className="muted" style={{ marginTop: 0 }}>
+        <Link href="/chantiers" className="link">
+          ← Chantiers
+        </Link>
+      </p>
+      <h1 style={{ marginBottom: 4 }}>Chantier {chantier.data?.code ?? ''}</h1>
+
+      {results.data && (
+        <div className="card-grid" style={{ marginTop: 12 }}>
+          <div className="card">
+            <h2>Budget de vente</h2>
+            <div className="stat">{euro(results.data.budgetVenteHt)}</div>
+          </div>
+          <div className="card">
+            <h2>Budget objectif</h2>
+            <div className="stat">{euro(results.data.totals.budgetObjectif)}</div>
+          </div>
+          <div className="card">
+            <h2>Engagé</h2>
+            <div className="stat">{euro(results.data.totals.engage)}</div>
+          </div>
+          <div className="card">
+            <h2>Réalisé</h2>
+            <div className="stat">{euro(results.data.totals.realise)}</div>
+          </div>
+          <div className="card">
+            <h2>Écart au budget</h2>
+            <div className="stat" style={{ color: Number(results.data.totals.ecart) < 0 ? 'var(--danger)' : undefined }}>
+              {euro(results.data.totals.ecart)}
+            </div>
+          </div>
+        </div>
+      )}
+      {results.isError && <p className="muted">Suivi de chantiers non autorisé pour cet utilisateur.</p>}
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2>Gestion financière — axe analytique</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Budget / engagé / réalisé ventilés par nature → lot → famille (§5.8).
+        </p>
+        {analytical.isLoading && <p className="muted">Chargement…</p>}
+        {analytical.isError && (
+          <p className="muted">Module « Gestion financière » non actif pour cet utilisateur.</p>
+        )}
+        {analytical.data && (
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>Poste</th>
+                <th style={{ textAlign: 'right' }}>Budget objectif</th>
+                <th style={{ textAlign: 'right' }}>Engagé</th>
+                <th style={{ textAlign: 'right' }}>Réalisé</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analytical.data.natures.map((n) => (
+                <NatureRows key={n.nature} nature={n} />
+              ))}
+              <tr>
+                <td>
+                  <strong>{analytical.data.siteOverhead.label}</strong>
+                </td>
+                <MetricCells m={analytical.data.siteOverhead.metrics} />
+              </tr>
+              <tr style={{ borderTop: '2px solid var(--border)' }}>
+                <td>
+                  <strong>Total chantier</strong>
+                </td>
+                <MetricCells m={analytical.data.total} />
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NatureRows({ nature }: { nature: AnalyticalNature }) {
+  return (
+    <>
+      <tr style={{ background: 'var(--bg)' }}>
+        <td>
+          <strong>{NATURE_LABELS[nature.nature] ?? nature.label}</strong>
+        </td>
+        <MetricCells m={nature.metrics} />
+      </tr>
+      {nature.lots.filter((l) => hasValue(l.metrics)).map((lot) => (
+        <Fragment key={lot.id}>
+          <tr>
+            <td style={{ paddingLeft: 24 }}>{lot.label}</td>
+            <MetricCells m={lot.metrics} />
+          </tr>
+          {lot.familles.filter((f) => hasValue(f.metrics)).map((fam) => (
+            <tr key={fam.id} className="muted">
+              <td style={{ paddingLeft: 44 }}>{fam.label}</td>
+              <MetricCells m={fam.metrics} />
+            </tr>
+          ))}
+        </Fragment>
+      ))}
+      {hasValue(nature.unallocated) && (
+        <tr className="muted">
+          <td style={{ paddingLeft: 24, fontStyle: 'italic' }}>Non réparti</td>
+          <MetricCells m={nature.unallocated} />
+        </tr>
+      )}
+    </>
+  );
+}

@@ -13,6 +13,7 @@ const NAV: NavItem[] = [
   { href: '/', label: 'Tableau de bord', section: 'Général' },
   { href: '/directory', label: 'Clients & fournisseurs', section: 'Référentiel' },
   { href: '/estimating', label: 'Études de prix', section: 'Modules' },
+  { href: '/chantiers', label: 'Chantiers', section: 'Modules' },
   { href: '/invoicing', label: 'Facturation', section: 'Modules' },
 ];
 

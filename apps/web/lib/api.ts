@@ -46,3 +46,14 @@ export async function apiFetch<T = unknown>(
   }
   return data as T;
 }
+
+/** Fetches a binary resource (e.g. a PDF) with the bearer token and returns a blob URL. */
+export async function apiFetchBlobUrl(path: string, token: string | null): Promise<string> {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, res.statusText);
+  }
+  return URL.createObjectURL(await res.blob());
+}

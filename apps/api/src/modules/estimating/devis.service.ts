@@ -84,6 +84,23 @@ export class DevisService {
     );
   }
 
+  /** Returns a single affaire with its versions (read-side, for the devis detail screen). */
+  getAffaire(affaireId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const affaire = (await em.query(`SELECT * FROM affaire WHERE id = $1`, [affaireId]))[0];
+      if (!affaire) {
+        throw new NotFoundException(`Unknown affaire "${affaireId}"`);
+      }
+      const versions = await em.query(
+        `SELECT id, version_no, label, created_at FROM affaire_version
+          WHERE affaire_id = $1 ORDER BY version_no ASC`,
+        [affaireId],
+      );
+      return { affaire, versions };
+    });
+  }
+
   createVersion(affaireId: string, label?: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {

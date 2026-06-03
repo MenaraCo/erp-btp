@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
 
 interface Affaire {
   id: string;
@@ -14,18 +16,6 @@ interface AffairesPage {
   rows: Affaire[];
   total: number;
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  open: 'Ouverte',
-  study: 'Étude en cours',
-  coeffs_proposed: 'Coefficients proposés',
-  coeffs_validated: 'Coefficients validés',
-  sent: 'Envoyée',
-  won: 'Gagnée',
-  lost: 'Perdue',
-  followup: 'Relancée',
-  revision: 'Révision',
-};
 
 export default function EstimatingPage() {
   const { token } = useAuth();
@@ -49,14 +39,26 @@ export default function EstimatingPage() {
                 <th>Code</th>
                 <th>Nom</th>
                 <th>Statut</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {data.rows.map((a) => (
                 <tr key={a.id}>
-                  <td>{a.code}</td>
+                  <td>
+                    <Link href={`/estimating/${a.id}`} className="link">
+                      {a.code}
+                    </Link>
+                  </td>
                   <td>{a.name}</td>
-                  <td>{STATUS_LABELS[a.status] ?? a.status}</td>
+                  <td>
+                    <span className="badge">{AFFAIRE_STATUS_LABELS[a.status] ?? a.status}</span>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <Link href={`/estimating/${a.id}`} className="link">
+                      Ouvrir le devis →
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
