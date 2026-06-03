@@ -10,6 +10,7 @@ describe('Site-tracking 3.3 — budget prévisionnel', () => {
   let tenantId: string;
   let userId: string;
   let chantierId: string;
+  let marcheId: string;
   let lineId: string;
 
   function as(method: 'get' | 'post' | 'put', path: string) {
@@ -49,7 +50,9 @@ describe('Site-tracking 3.3 — budget prévisionnel', () => {
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
+    const acc = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body;
+    chantierId = acc.chantier.id;
+    marcheId = acc.marche.id;
     lineId = (await as('get', `/chantiers/${chantierId}`).expect(200)).body.lines[0].id;
   });
 
@@ -63,7 +66,7 @@ describe('Site-tracking 3.3 — budget prévisionnel', () => {
   });
 
   it('initialise le prévisionnel depuis l’objectif à la validation, puis l’ajuste', async () => {
-    const validated = (await as('post', `/chantiers/${chantierId}/contre-etude/validate`).expect(201)).body;
+    const validated = (await as('post', `/marches/${marcheId}/contre-etude/validate`).expect(201)).body;
     // objectif labor = 2 * 40 * 10 = 800 ; prévisionnel initialisé = 800
     expect(byNature(validated, 'objectif').labor).toBe('800.00');
     expect(byNature(validated, 'previsionnel').labor).toBe('800.00');

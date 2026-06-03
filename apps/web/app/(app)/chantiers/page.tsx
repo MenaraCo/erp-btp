@@ -10,13 +10,7 @@ interface Chantier {
   id: string;
   code: string;
   budget_vente_ht: string | null;
-  contre_etude_status: string | null;
 }
-
-const CE_LABELS: Record<string, string> = {
-  draft: 'Contre-étude en cours',
-  validated: 'Contre-étude validée',
-};
 
 export default function ChantiersPage() {
   const { token } = useAuth();
@@ -41,7 +35,6 @@ export default function ChantiersPage() {
               <tr>
                 <th>Code</th>
                 <th>Budget de vente</th>
-                <th>Contre-étude</th>
                 <th></th>
               </tr>
             </thead>
@@ -54,9 +47,6 @@ export default function ChantiersPage() {
                     </Link>
                   </td>
                   <td>{euro(c.budget_vente_ht)}</td>
-                  <td className="muted">
-                    {c.contre_etude_status ? (CE_LABELS[c.contre_etude_status] ?? c.contre_etude_status) : '—'}
-                  </td>
                   <td style={{ textAlign: 'right' }}>
                     <Link href={`/chantiers/${c.id}`} className="link">
                       Tableau de bord →

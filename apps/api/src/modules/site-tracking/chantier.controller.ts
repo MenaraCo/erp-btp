@@ -64,11 +64,11 @@ export class ChantierController {
     return this.chantiers.setComponentQuantity(componentId, body.quantiteObjectif);
   }
 
-  @Post('chantiers/:chantierId/contre-etude/validate')
+  @Post('marches/:marcheId/contre-etude/validate')
   @RequiresCapability('site_tracking.budget')
   @RequiresPermission('site_tracking.write')
-  validate(@Param('chantierId') chantierId: string) {
-    return this.chantiers.validateContreEtude(chantierId);
+  validate(@Param('marcheId') marcheId: string) {
+    return this.chantiers.validateContreEtude(marcheId);
   }
 
   // --- Budget prévisionnel ---

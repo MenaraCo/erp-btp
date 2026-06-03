@@ -45,8 +45,9 @@ describe('Site-tracking 3.6 — résultats analytiques (budget / engagé / réal
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
-    await as('post', `/chantiers/${chantierId}/contre-etude/validate`).expect(201);
+    const acc = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body;
+    chantierId = acc.chantier.id;
+    await as('post', `/marches/${acc.marche.id}/contre-etude/validate`).expect(201);
     lineId = (await as('get', `/chantiers/${chantierId}`).expect(200)).body.lines[0].id;
 
     // réalisé MO via pointages : 10h × 42 = 420

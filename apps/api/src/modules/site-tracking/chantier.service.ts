@@ -292,79 +292,84 @@ export class ChantierService {
     }
   }
 
-  private async assertEditable(em: EntityManager, chantierId: string): Promise<void> {
-    const c = await em.query(`SELECT contre_etude_status FROM chantier WHERE id = $1`, [chantierId]);
-    if (c.length === 0) throw new NotFoundException(`Unknown chantier "${chantierId}"`);
-    if (c[0].contre_etude_status === 'validated') {
+  /** The contre-étude is per-marché (cahier §5.5): a marché's étude d'exécution freezes on its own. */
+  private async assertMarcheEditable(em: EntityManager, marcheId: string): Promise<void> {
+    const m = await em.query(`SELECT contre_etude_status FROM marche WHERE id = $1`, [marcheId]);
+    if (m.length === 0) throw new NotFoundException(`Unknown marché "${marcheId}"`);
+    if (m[0].contre_etude_status === 'validated') {
       throw new ConflictException('Contre-étude is validated (frozen).');
     }
   }
 
-  /** Renegotiate a resource unit price (contre-étude) and recompute the objectif budget. */
+  /** Renegotiate a resource unit price (contre-étude) and recompute the marché's objectif budget. */
   renegotiateResource(chantierId: string, nomenclatureResourceId: string, unitCostObjectif: string | number) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      await this.assertEditable(em, chantierId);
-      const upd = await em.query(
-        `UPDATE nomenclature_resource SET unit_cost_objectif = $1, updated_at = now()
-          WHERE id = $2 AND chantier_id = $3 RETURNING id`,
-        [String(unitCostObjectif), nomenclatureResourceId, chantierId],
+      const nomenc = await em.query(
+        `SELECT marche_id FROM nomenclature_resource WHERE id = $1 AND chantier_id = $2`,
+        [nomenclatureResourceId, chantierId],
       );
-      if (upd.length === 0) throw new NotFoundException('Unknown nomenclature resource');
-      await this.recompute(em, tenantId, chantierId, false);
+      if (nomenc.length === 0) throw new NotFoundException('Unknown nomenclature resource');
+      const marcheId = nomenc[0].marche_id as string;
+      await this.assertMarcheEditable(em, marcheId);
+      await em.query(
+        `UPDATE nomenclature_resource SET unit_cost_objectif = $1, updated_at = now() WHERE id = $2`,
+        [String(unitCostObjectif), nomenclatureResourceId],
+      );
+      await this.recompute(em, tenantId, chantierId, false, marcheId);
       return this.getChantierInTx(em, chantierId);
     });
   }
 
-  /** Adjust a component quantity (contre-étude) and recompute the objectif budget. */
+  /** Adjust a component quantity (contre-étude) and recompute the marché's objectif budget. */
   setComponentQuantity(componentId: string, quantiteObjectif: string | number) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `SELECT el.chantier_id FROM execution_component ec
+        `SELECT el.chantier_id, el.marche_id FROM execution_component ec
            JOIN execution_line el ON el.id = ec.execution_line_id WHERE ec.id = $1`,
         [componentId],
       );
       if (rows.length === 0) throw new NotFoundException(`Unknown component "${componentId}"`);
-      const chantierId = rows[0].chantier_id;
-      await this.assertEditable(em, chantierId);
+      const { chantier_id: chantierId, marche_id: marcheId } = rows[0];
+      await this.assertMarcheEditable(em, marcheId);
       await em.query(
         `UPDATE execution_component SET quantite_objectif = $1, updated_at = now() WHERE id = $2`,
         [String(quantiteObjectif), componentId],
       );
-      await this.recompute(em, tenantId, chantierId, false);
+      await this.recompute(em, tenantId, chantierId, false, marcheId);
       return this.getChantierInTx(em, chantierId);
     });
   }
 
-  /** Validate the contre-étude: freeze the objectif as the control "budget initial". */
-  validateContreEtude(chantierId: string) {
+  /** Validate a marché's contre-étude: freeze its objectif as the control "budget initial". */
+  validateContreEtude(marcheId: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const c = await em.query(`SELECT id FROM chantier WHERE id = $1`, [chantierId]);
-      if (c.length === 0) throw new NotFoundException(`Unknown chantier "${chantierId}"`);
+      const m = await em.query(`SELECT chantier_id FROM marche WHERE id = $1`, [marcheId]);
+      if (m.length === 0) throw new NotFoundException(`Unknown marché "${marcheId}"`);
       await em.query(
-        `UPDATE chantier SET contre_etude_status = 'validated', updated_at = now() WHERE id = $1`,
-        [chantierId],
+        `UPDATE marche SET contre_etude_status = 'validated', updated_at = now() WHERE id = $1`,
+        [marcheId],
       );
-      // Initialise the prévisionnel budget from the validated objectif.
+      // Initialise the prévisionnel budget from the validated objectif (this marché's lines).
       await em.query(
         `UPDATE execution_line_budget b SET montant_previsionnel = b.montant_objectif
            FROM execution_line l
-          WHERE l.id = b.execution_line_id AND l.chantier_id = $1`,
-        [chantierId],
+          WHERE l.id = b.execution_line_id AND l.marche_id = $1`,
+        [marcheId],
       );
-      return this.getChantierInTx(em, chantierId);
+      return this.getChantierInTx(em, m[0].chantier_id);
     });
   }
 
-  /** Adjusts the prévisionnel budget of a line/nature (after the contre-étude is validated). */
+  /** Adjusts the prévisionnel budget of a line/nature (after the marché's contre-étude is validated). */
   setPrevisionnel(lineId: string, nature: string, montant: string | number) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `SELECT l.chantier_id, c.contre_etude_status
-           FROM execution_line l JOIN chantier c ON c.id = l.chantier_id
+        `SELECT l.chantier_id, m.contre_etude_status
+           FROM execution_line l JOIN marche m ON m.id = l.marche_id
           WHERE l.id = $1`,
         [lineId],
       );

@@ -11,6 +11,7 @@ describe('Site-tracking 3.2 — contre-étude (renégociation PU / quantités, g
   let tenantId: string;
   let userId: string;
   let chantierId: string;
+  let marcheId: string;
 
   function as(method: 'get' | 'post' | 'put', path: string) {
     const server = app.getHttpServer();
@@ -57,7 +58,9 @@ describe('Site-tracking 3.2 — contre-étude (renégociation PU / quantités, g
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
+    const acc = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body;
+    chantierId = acc.chantier.id;
+    marcheId = acc.marche.id;
   });
 
   afterAll(async () => {
@@ -99,8 +102,9 @@ describe('Site-tracking 3.2 — contre-étude (renégociation PU / quantités, g
   });
 
   it('valide la contre-étude puis fige (409 sur nouvelle renégociation)', async () => {
-    const validated = (await as('post', `/chantiers/${chantierId}/contre-etude/validate`).expect(201)).body;
-    expect(validated.chantier.contre_etude_status).toBe('validated');
+    await as('post', `/marches/${marcheId}/contre-etude/validate`).expect(201);
+    const marches = (await as('get', `/chantiers/${chantierId}/marches`).expect(200)).body;
+    expect(marches[0].contre_etude_status).toBe('validated');
 
     const nomenc = (await as('get', `/chantiers/${chantierId}/nomenclature`).expect(200)).body;
     const moRes = nomenc.find((n: { code: string }) => n.code === 'MO');
