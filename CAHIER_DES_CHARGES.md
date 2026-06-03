@@ -161,30 +161,37 @@ Seule une affaire **Gagnée** peut être transférée en chantier/facturation (c
 
 ### 5.4 Acceptation de commande (le pont)
 
-Transfert d'une affaire gagnée vers l'aval, en **5 étapes** : choix de l'affaire → destination → options → traitement des prix unitaires → budgétisation.
+Transfert d'une affaire gagnée vers l'aval, en **5 étapes** : choix de l'affaire → destination → options → traitement des prix unitaires → budgétisation. **Chaque transfert crée un MARCHÉ** (un contrat) rattaché à un **chantier** — nouveau ou **existant**. Un chantier peut donc recevoir **plusieurs marchés** (voir 5.5).
 
-- Vers **Suivi de chantiers** : crée un chantier contenant une **étude d'exécution** (issue du déboursé) + un **budget de vente** (montant du devis), pour établir le budget du chantier. Possibilité de transférer le détail des frais généraux.
-- Vers **Facturation** : transfère le devis client (détaillé ou global) pour produire situations et factures.
-- Gère le **marché initial** et les **avenants** (rattachement au chantier/facture existants).
-- **Recodification automatique** des éléments lors des avenants : appliquer un suffixe (ex. `-AV1`) pour préserver les prix initiaux et éviter les collisions de codes quand une même ressource a un prix différent dans l'avenant.
+- Vers **Suivi de chantiers** : rattache le marché à un chantier (création d'un nouveau chantier, ou sélection d'un chantier existant), avec son **étude d'exécution** (issue du déboursé) et son **budget de vente** (montant du devis) qui **s'ajoutent à l'agrégat du chantier**. Possibilité de transférer le détail des frais généraux.
+- Vers **Facturation** : crée la **chaîne de facturation propre au marché** (devis détaillé ou global → situations → factures).
+- **Trois gestes distincts à ne pas confondre** :
+  - **Marché initial** sur un **nouveau** chantier.
+  - **Nouveau marché sur un chantier existant** : un autre lot gagné est rattaché au même chantier ; il a sa **propre chaîne de facturation** et son budget s'ajoute à l'agrégat de suivi.
+  - **Avenant d'un marché existant** : modifie/étend la facturation d'un marché déjà transféré (rattachement à sa chaîne de situations).
+- **Recodification automatique** des éléments lors des avenants : suffixe (ex. `-AV1`) pour préserver les prix initiaux et éviter les collisions de codes.
 - Forme de l'étude d'exécution paramétrable : par ouvrage du devis, par titre de 1er niveau, hiérarchie complète du déboursé, déboursé complet, ou titres seuls.
 
 ### 5.5 Suivi de chantiers
 
-- **Chantier** : `code`, budgets, étude d'exécution, **nomenclature** (catalogue de ressources propre au chantier).
-- **Budgets** : initial, prévisionnel (période à venir), fonction de l'avancement, budget d'approvisionnement lié à l'étude d'exécution. Budgets manuels possibles.
-- **Main d'œuvre** : **pointages** (salarié/équipe, heures, date, chantier, ventilation par ouvrage et par matériel), contrôle, synthèse, régularisation, procédure mensuelle.
-- **Chaîne des achats** : `Demande de prix → Bon de commande → Bon de livraison → Facture`, avec **réservation sur stock**, vérification/rapprochement des factures, extinction des suggestions. Saisie en **grille deux parties** (en-tête + détail), traitement et duplication des bons.
+- **Chantier** : `code`, l'unité de **suivi financier agrégé**. Un chantier **contient un ou plusieurs marchés** (1 → N). C'est au niveau du chantier que s'agrègent tous les coûts (achats, heures, factures fournisseurs) — **un seul tableau de bord pour tous les lots/marchés**.
+- **Marché** : un contrat issu d'un devis gagné, rattaché à un chantier. Porte son **étude d'exécution**, son **budget**, son **montant de vente** (+ avenants), et sa **chaîne de facturation propre**. Exemple : un même chantier avec 3 marchés Peinture / Sols durs / Sols souples chiffrés et gagnés séparément.
+- **Budgets** : initial, prévisionnel, fonction de l'avancement, budget d'approvisionnement lié à l'étude d'exécution ; au niveau marché **et** agrégés au chantier. Budgets manuels possibles.
+- **Main d'œuvre** : **pointages** (salarié/équipe, heures, date, chantier, ventilation par ouvrage et par matériel), contrôle, synthèse, régularisation, procédure mensuelle. Imputés au chantier, classés par l'axe analytique (donc ventilables par lot).
+- **Chaîne des achats** : `Demande de prix → Bon de commande → Bon de livraison → Facture`, avec **réservation sur stock**, rapprochement des factures, extinction des suggestions. Saisie en **grille deux parties**, traitement et duplication des bons. Coûts imputés au chantier + classification analytique (ventilables par lot, et optionnellement attribuables à un marché précis).
 - **Stocks** : valorisation, mouvements, réservations, états (stock arrêté, historiques).
-- **Parc matériel** : affectation, heures matériel, gestion des abonnements/locations.
-- **Résultats / analytique** : éditions de résultats par chantier, intégration analytique, **export comptabilité** (journaux paramétrables, chronos).
+- **Parc matériel** : affectation, heures matériel, abonnements/locations.
+- **Résultats / analytique** : résultats par chantier (tous marchés) **et** par marché, intégration analytique, **export comptabilité** (journaux paramétrables, chronos).
+
+**Modèle de données** : `Chantier` (1) → (N) `Marché`. Le `Marché` (1) → (N) `Situation` / `Facture` / `Avenant` / `DGD`. Les lignes de coût (pointage, ligne d'achat, facture fournisseur) référencent le `Chantier` (+ leur ressource = code analytique) et, optionnellement, un `Marché`.
 
 ### 5.6 Facturation
 
+- **Une chaîne de facturation par marché** : chaque marché d'un chantier a ses propres devis, situations, factures, avenants et DGD (ce sont des contrats distincts). Un chantier à 3 marchés produit donc 3 séries de situations et de factures indépendantes.
 - **Devis** : importable depuis un **DQE/DPGF** (formats d'échange marchés publics).
-- **Situation de travaux** (facturation à l'avancement) : corps (lignes avec **% d'avancement**), **pied TTC** et **pied NAP** (net à payer), **retenue de garantie**, **révision/actualisation de prix**, déduction des situations précédentes, situations intermédiaires.
+- **Situation de travaux** (facturation à l'avancement, par marché) : corps (lignes avec **% d'avancement**), **pied TTC** et **pied NAP**, **retenue de garantie**, **révision/actualisation de prix**, déduction des situations précédentes, situations intermédiaires.
 - **Avenants** : par nouvelle série de situations ou par intégration du devis avenant sur une situation en cours.
-- **DGD** (Décompte Général Définitif) : généré à partir de la dernière situation.
+- **DGD** (Décompte Général Définitif) : généré à partir de la dernière situation **du marché**.
 - **Facture** : générée depuis une situation. Numérotation par **chrono** paramétrable, par société. TVA/TPF.
 - **Conformité e-facturation** : émission Factur-X, transmission Chorus Pro (public) et plateformes agréées (réforme FR), cycle de vie des statuts de facture.
 
@@ -204,7 +211,7 @@ Transfert d'une affaire gagnée vers l'aval, en **5 étapes** : choix de l'affai
 
 #### Modèle économique du chantier — 4 axes
 
-1. **Vente** : `Vente totale = Marché initial + Avenants` (intégrer travaux supplémentaires et travaux supprimés).
+1. **Vente** : `Vente totale = Marché initial + Avenants` (intégrer travaux supplémentaires et travaux supprimés). Un chantier pouvant porter **plusieurs marchés**, la vente du chantier = **somme des ventes de ses marchés** (chacun avec ses avenants) ; la marge se lit au niveau **chantier (agrégé)** et **par marché**.
 2. **Budget** (issu de l'étude de prix) : découpé par **nature** (main d'œuvre, matériaux, matériel, sous-traitance, frais de chantier) et conservé à **tous les niveaux** (chantier global → titre → sous-titre → ouvrage → ressource).
 3. **Engagé** : montants commandés mais pas forcément facturés (bon de commande fournisseur, sous-traitance commandée, location réservée). `Engagé = Σ commandes validées non annulées`, comptabilisé **dès la validation de la commande**.
 4. **Réalisé** : coûts réellement consommés (factures fournisseurs, heures pointées, matériel consommé, sous-traitance facturée). `Réalisé = Σ coûts comptabilisés`.
@@ -273,6 +280,7 @@ Ces règles font la valeur d'un ERP BTP. Testez-les unitairement.
 7. **Workflow bloquant** : une affaire non « Gagnée » ne se transfère pas sans confirmation ; alerter (non bloquant) si déboursé nul ou affaire déjà transférée.
 8. **Multi-tenant strict** : aucune requête ne doit pouvoir lire les données d'un autre tenant. RLS + tests d'isolation.
 9. **Contrôle de gestion — moteur analytique centralisé** (module différenciant, voir 5.8) : tous les indicateurs (`budget avancé`, `engagé`, `réalisé`, `écart au stade`, `EAC`, `marge prévisionnelle`) sont recalculés **en temps réel**, **jamais en traitement nocturne**. Les **formules sont paramétrables et versionnées**, et **calculées dans le moteur `control-management`, jamais dans les écrans**. L'**engagé** est comptabilisé **dès la validation d'une commande** (pas à la facturation). Tester unitairement chaque formule (budget avancé, écart au stade, EAC méthodes 1 et 2, marge prévisionnelle) avec jeux de valeurs connus.
+10. **Chantier ≠ marché** : un **chantier** (unité de suivi financier) peut contenir **plusieurs marchés** (un par devis gagné). Les **coûts** (achats, heures, factures fournisseurs) s'**agrègent au chantier** (un seul tableau de bord, ventilable par lot via l'axe analytique) ; la **facturation est séparée par marché** (situations, factures et DGD propres à chaque contrat). Ne jamais coder « 1 devis = 1 chantier = 1 marché ».
 
 ---
 
@@ -334,6 +342,8 @@ Chaque phase doit être livrable et testée de bout en bout avant la suivante.
 | **DGD** | Décompte Général Définitif : solde final du marché. |
 | **NAP** | Net À Payer. |
 | **Avenant** | Modification du marché initial (travaux supplémentaires/modificatifs). |
+| **Chantier** | Unité de suivi financier agrégé (le site). Contient un ou plusieurs marchés ; un seul tableau de bord de coûts pour tous. |
+| **Marché** | Contrat issu d'un devis gagné, rattaché à un chantier. Porte son budget, sa vente et sa chaîne de facturation propre (situations, factures, DGD). |
 | **Nomenclature** | Catalogue des ressources propre à un chantier. |
 | **Pointage** | Saisie des heures de main d'œuvre par salarié et par chantier. |
 | **Engagé** | Montants commandés mais pas forcément facturés ; comptés dès la validation de la commande. |
