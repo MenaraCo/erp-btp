@@ -10,8 +10,12 @@ export class ChantierController {
   @Post('affaires/:affaireId/transfer-to-chantier')
   @RequiresCapability('site_tracking.budget')
   @RequiresPermission('site_tracking.write')
-  transfer(@Param('affaireId') affaireId: string) {
-    return this.chantiers.transferFromAffaire(affaireId);
+  transfer(
+    @Param('affaireId') affaireId: string,
+    @Body() body?: { chantierId?: string | null },
+  ) {
+    // Optional chantierId: attach this marché to an existing chantier (Chantier 1→N Marché).
+    return this.chantiers.transferFromAffaire(affaireId, body?.chantierId ?? null);
   }
 
   @Get('chantiers')
@@ -26,6 +30,13 @@ export class ChantierController {
   @RequiresPermission('site_tracking.read')
   get(@Param('chantierId') chantierId: string) {
     return this.chantiers.getChantier(chantierId);
+  }
+
+  @Get('chantiers/:chantierId/marches')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  marches(@Param('chantierId') chantierId: string) {
+    return this.chantiers.listMarches(chantierId);
   }
 
   @Get('chantiers/:chantierId/nomenclature')

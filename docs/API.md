@@ -58,6 +58,15 @@
 |---|---|---|---|
 | GET | `/chantiers/:chantierId/analytical-results` | `financial.read` | Budget/engagé/réalisé agrégés sur l'axe analytique nature→lot→famille (§5.8) ; seau « Non réparti » par nature + branche « Frais de chantier » ; totaux réconciliés |
 
+## Acceptation / Suivi de chantiers — Chantier 1→N Marché
+
+L'acceptation d'une affaire gagnée crée un **marché** rattaché à un **chantier** (nouveau ou existant). Un chantier agrège plusieurs marchés ; les coûts s'agrègent au chantier (§5.4/5.5).
+
+| Méthode | Route | Permission | Notes |
+|---|---|---|---|
+| POST | `/affaires/:affaireId/transfer-to-chantier` | `site_tracking.write` | Crée un marché + son étude d'exécution ; corps optionnel `{ chantierId }` pour rattacher à un chantier existant ; double acceptation d'une version → 409 |
+| GET | `/chantiers/:chantierId/marches` | `site_tracking.read` | Liste des marchés agrégés par le chantier |
+
 ## Plan analytique (capacité `estimating.bid`)
 
 Axe analytique nature → lot → famille → ressource (cahier des charges §5.8). La ressource du chiffrage **est** le code analytique.
