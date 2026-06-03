@@ -37,6 +37,8 @@ export interface CalcComponent {
   unitCost?: Decimal.Value;
   /** resource: nature (required for the per-nature breakdown) */
   nature?: Nature;
+  /** resource: arbitrary bucket key for the generic breakdown (e.g. analytical famille id) */
+  bucket?: string;
   /** sub_ouvrage: referenced child ouvrage id */
   childOuvrageId?: string;
   /** percentage: rate as a fraction (e.g. 0.03 for 3%) */
