@@ -155,8 +155,13 @@ async function buildEstimatingDataset(s: {
     unit: 'm2', sourceOuvrageId: mur.id, quantityFormula: 'surface_murs', sortOrder: 2,
   });
   await s.vente.setSaleSheet(version.id, {
-    byNature: { labor: '1.55', material: '1.18', equipment: '1.2', subcontract: '1.1' },
-    fraisCoefficient: '1.1', tvaRate: '0.20',
+    byNature: {
+      labor: { tauxFg: '10', tauxBenefice: '15' },
+      material: { tauxFg: '8', tauxBenefice: '10' },
+      equipment: { tauxFg: '10', tauxBenefice: '10' },
+      subcontract: { tauxFg: '5', tauxBenefice: '5' },
+    },
+    tvaRate: '0.20',
   });
 }
 

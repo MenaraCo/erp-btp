@@ -43,7 +43,7 @@ describe('Site-tracking 3.1 — transfert affaire gagnée → chantier', () => {
       .send({ type: 'ouvrage', code: '1', designation: 'Lot', sourceOuvrageId: ouv.id, quantity: '10' })
       .expect(201);
     await as('put', `/versions/${created.version.id}/sale-sheet`)
-      .send({ byNature: { labor: '1.5', material: '1.2', equipment: '1', subcontract: '1' }, fraisCoefficient: '1', tvaRate: '0.20' })
+      .send({ byNature: { labor: { tauxFg: '50', tauxBenefice: '0' }, material: { tauxFg: '20', tauxBenefice: '0' }, equipment: { tauxFg: '0', tauxBenefice: '0' }, subcontract: { tauxFg: '0', tauxBenefice: '0' } }, tvaRate: '0.20' })
       .expect(200);
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
       await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);

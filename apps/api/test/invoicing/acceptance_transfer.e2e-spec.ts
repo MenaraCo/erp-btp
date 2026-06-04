@@ -43,8 +43,12 @@ describe('Invoicing 2.1 — acceptation : transfert affaire gagnée → marché'
       .expect(201);
     await as('put', `/versions/${versionId}/sale-sheet`)
       .send({
-        byNature: { labor: '1', material: '1.2', equipment: '1', subcontract: '1' },
-        fraisCoefficient: '1',
+        byNature: {
+          labor: { tauxFg: '0', tauxBenefice: '0' },
+          material: { tauxFg: '20', tauxBenefice: '0' },
+          equipment: { tauxFg: '0', tauxBenefice: '0' },
+          subcontract: { tauxFg: '0', tauxBenefice: '0' },
+        },
         tvaRate: '0.20',
       })
       .expect(200);
