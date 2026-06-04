@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
@@ -22,14 +22,51 @@ interface DevisLine {
   unit: string | null;
   quantity: string | null;
   pu: string | null;
+  pu_vente: string | null;
+  pu_vente_force: boolean;
   sort_order: number;
 }
-interface SaleSheet { totalDebourse: string; totalPvHt: string; tva: string; totalTtc: string }
+interface SaleItem {
+  id: string;
+  debourse: string;
+  revient: string;
+  pvComputed: string;
+  pv: string;
+  forced: boolean;
+  margeBrute: string;
+  margeNette: string;
+  ventilatedFrais: string;
+}
+interface SaleSheet {
+  items: SaleItem[];
+  totalDebourse: string;
+  totalRevient: string;
+  pvHorsFrais: string;
+  fraisAnnexes: string;
+  pvDevis: string;
+  remise: string;
+  totalPvHt: string;
+  margeBrute: string;
+  margeNette: string;
+  coeffGlobalReel: string;
+  tva: string;
+  totalTtc: string;
+}
+type Nat = 'labor' | 'material' | 'equipment' | 'subcontract';
+const NATURE_LABELS: Record<Nat, string> = {
+  labor: "Main d'œuvre", material: 'Matériaux', equipment: 'Matériel', subcontract: 'Sous-traitance',
+};
+interface FraisRow { designation: string; type: 'pct' | 'fixe'; valeur: string }
 interface Library { id: string; code: string; name: string }
 interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
 interface Page<T> { rows: T[] }
 
 const TYPE_LABELS: Record<string, string> = { titre: 'Titre', sous_titre: 'Sous-titre', ouvrage: 'Ouvrage', ressource: 'Ressource' };
+/** Étape suivante canonique du workflow d'affaire. */
+const NEXT_STATUS: Record<string, string> = {
+  open: 'study', study: 'coeffs_proposed', coeffs_proposed: 'coeffs_validated',
+  coeffs_validated: 'sent', sent: 'won',
+};
 
 function orderTree(lines: DevisLine[]): { line: DevisLine; depth: number }[] {
   const byParent = new Map<string | null, DevisLine[]>();
@@ -46,9 +83,11 @@ function orderTree(lines: DevisLine[]): { line: DevisLine; depth: number }[] {
 export default function AffaireDetailPage() {
   const { token } = useAuth();
   const qc = useQueryClient();
+  const router = useRouter();
   const affaireId = String(useParams().affaireId);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [marcheMsg, setMarcheMsg] = useState<string | null>(null);
 
   const detail = useQuery({
     queryKey: ['affaire', affaireId],
@@ -82,6 +121,22 @@ export default function AffaireDetailPage() {
     qc.invalidateQueries({ queryKey: ['lines', versionId] });
     qc.invalidateQueries({ queryKey: ['sale-sheet', versionId] });
   }
+
+  const status = detail.data?.affaire.status ?? 'open';
+  const advance = useMutation({
+    mutationFn: () => apiFetch(`/affaires/${affaireId}/transition`, { method: 'POST', body: { to: NEXT_STATUS[status] }, token }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['affaire', affaireId] }),
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
+  const accept = useMutation({
+    mutationFn: () => apiFetch<{ marche: { id: string; code: string } }>(`/affaires/${affaireId}/accept`, { method: 'POST', body: {}, token }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['affaire', affaireId] });
+      setMarcheMsg(`Marché ${res.marche.code} créé.`);
+      router.push(`/invoicing/${res.marche.id}`);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
 
   // --- add line ---
   const [pl, setPl] = useState({ parentId: '', type: 'titre', code: '', designation: '', libId: '', ouvrageId: '', unit: '', quantity: '', formula: '' });
@@ -122,22 +177,62 @@ export default function AffaireDetailPage() {
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
 
-  // --- coefficients (feuille de vente) ---
-  const [coef, setCoef] = useState({ labor: '1.5', material: '1.2', equipment: '1.2', subcontract: '1.1', frais: '1.1', tva: '0.20' });
+  // --- coefficients (feuille de vente) : FG% + Bénéfice% par nature ---
+  const [coef, setCoef] = useState<Record<Nat, { fg: string; ben: string }>>({
+    labor: { fg: '10', ben: '15' },
+    material: { fg: '8', ben: '10' },
+    equipment: { fg: '10', ben: '10' },
+    subcontract: { fg: '5', ben: '5' },
+  });
+  const [remise, setRemise] = useState<{ type: 'pct' | 'fixe'; valeur: string }>({ type: 'pct', valeur: '0' });
+  const [tva, setTva] = useState('0.20');
   const setSale = useMutation({
     mutationFn: () =>
       apiFetch(`/versions/${versionId}/sale-sheet`, {
         method: 'PUT',
         body: {
-          byNature: { labor: coef.labor, material: coef.material, equipment: coef.equipment, subcontract: coef.subcontract },
-          fraisCoefficient: coef.frais,
-          tvaRate: coef.tva,
+          byNature: {
+            labor: { tauxFg: coef.labor.fg, tauxBenefice: coef.labor.ben },
+            material: { tauxFg: coef.material.fg, tauxBenefice: coef.material.ben },
+            equipment: { tauxFg: coef.equipment.fg, tauxBenefice: coef.equipment.ben },
+            subcontract: { tauxFg: coef.subcontract.fg, tauxBenefice: coef.subcontract.ben },
+          },
+          remise: { type: remise.type, valeur: remise.valeur || '0' },
+          tvaRate: tva,
         },
         token,
       }),
     onSuccess: () => refresh(),
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
+
+  // --- frais annexes (liste) ---
+  const [frais, setFrais] = useState<FraisRow[]>([]);
+  const setFraisAnnexes = useMutation({
+    mutationFn: () =>
+      apiFetch(`/versions/${versionId}/frais-annexes`, {
+        method: 'PUT',
+        body: { frais: frais.map((f) => ({ designation: f.designation, type: f.type, valeur: f.valeur || '0' })) },
+        token,
+      }),
+    onSuccess: () => refresh(),
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
+
+  // --- PV forcé par ligne ---
+  const [pvEdit, setPvEdit] = useState<Record<string, string>>({});
+  const setLinePv = useMutation({
+    mutationFn: ({ lineId, puVente, force }: { lineId: string; puVente: string | null; force: boolean }) =>
+      apiFetch(`/versions/${versionId}/lines/${lineId}/pv`, {
+        method: 'PUT', body: { puVente, force }, token,
+      }),
+    onSuccess: () => refresh(),
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
+  const itemById = useMemo(
+    () => new Map((sale.data?.items ?? []).map((i) => [i.id, i])),
+    [sale.data],
+  );
 
   async function downloadPdf() {
     if (!versionId) return;
@@ -164,9 +259,40 @@ export default function AffaireDetailPage() {
             {a.moa ? ` · MOA : ${a.moa}` : ''}{latest ? ` · Version ${latest.version_no}` : ''}
           </p>
 
+          <div className="card" style={{ marginTop: 12 }}>
+            <h2>Workflow & acceptation</h2>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              {NEXT_STATUS[a.status] && (
+                <button className="btn" onClick={() => { setErr(null); advance.mutate(); }} disabled={advance.isPending}>
+                  Avancer → {AFFAIRE_STATUS_LABELS[NEXT_STATUS[a.status]]}
+                </button>
+              )}
+              {a.status === 'won' && (
+                <button className="btn" onClick={() => { setErr(null); accept.mutate(); }} disabled={accept.isPending}>
+                  Accepter (créer le marché)
+                </button>
+              )}
+              {a.status === 'won' && <span className="muted">Affaire gagnée — prête à être acceptée en marché.</span>}
+              {marcheMsg && <span className="muted">{marcheMsg}</span>}
+            </div>
+          </div>
+
           <div className="card-grid" style={{ marginTop: 12 }}>
             <div className="card"><h2>Déboursé</h2><div className="stat">{euro(sale.data?.totalDebourse)}</div></div>
-            <div className="card"><h2>Total HT</h2><div className="stat">{euro(sale.data?.totalPvHt)}</div></div>
+            <div className="card"><h2>Prix de revient</h2><div className="stat">{euro(sale.data?.totalRevient)}</div></div>
+            <div className="card">
+              <h2>Total HT</h2><div className="stat">{euro(sale.data?.totalPvHt)}</div>
+              {sale.data && <p className="muted" style={{ margin: 0 }}>coeff. global {Number(sale.data.coeffGlobalReel).toFixed(3)}</p>}
+            </div>
+            <div className="card">
+              <h2>Marge nette</h2>
+              <div className="stat">{euro(sale.data?.margeNette)}</div>
+              {sale.data && Number(sale.data.totalPvHt) > 0 && (
+                <p className="muted" style={{ margin: 0 }}>
+                  {((Number(sale.data.margeNette) / Number(sale.data.totalPvHt)) * 100).toFixed(1)} % · brute {euro(sale.data.margeBrute)}
+                </p>
+              )}
+            </div>
             <div className="card"><h2>TVA</h2><div className="stat">{euro(sale.data?.tva)}</div></div>
             <div className="card"><h2>Total TTC</h2><div className="stat">{euro(sale.data?.totalTtc)}</div></div>
           </div>
@@ -237,19 +363,81 @@ export default function AffaireDetailPage() {
           </div>
 
           <div className="card" style={{ marginTop: 16 }}>
-            <h2>Feuille de vente — coefficients</h2>
-            <form
-              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}
-              onSubmit={(e) => { e.preventDefault(); setErr(null); setSale.mutate(); }}
-            >
-              <Field label="MO"><input style={{ width: 60 }} value={coef.labor} onChange={(e) => setCoef({ ...coef, labor: e.target.value })} /></Field>
-              <Field label="Matériaux"><input style={{ width: 60 }} value={coef.material} onChange={(e) => setCoef({ ...coef, material: e.target.value })} /></Field>
-              <Field label="Matériel"><input style={{ width: 60 }} value={coef.equipment} onChange={(e) => setCoef({ ...coef, equipment: e.target.value })} /></Field>
-              <Field label="Sous-trait."><input style={{ width: 60 }} value={coef.subcontract} onChange={(e) => setCoef({ ...coef, subcontract: e.target.value })} /></Field>
-              <Field label="Frais"><input style={{ width: 60 }} value={coef.frais} onChange={(e) => setCoef({ ...coef, frais: e.target.value })} /></Field>
-              <Field label="TVA"><input style={{ width: 60 }} value={coef.tva} onChange={(e) => setCoef({ ...coef, tva: e.target.value })} /></Field>
-              <button className="btn" type="submit" disabled={setSale.isPending}>Appliquer</button>
+            <h2>Feuille de vente — coefficients par nature</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Déboursé × (1 + FG %) = prix de revient, puis × (1 + Bénéfice %) = prix de vente.
+            </p>
+            <form onSubmit={(e) => { e.preventDefault(); setErr(null); setSale.mutate(); }}>
+              <table className="grid" style={{ marginBottom: 12 }}>
+                <thead><tr><th>Nature</th><th style={{ textAlign: 'right' }}>FG %</th><th style={{ textAlign: 'right' }}>Bénéfice %</th><th style={{ textAlign: 'right' }}>Coeff.</th></tr></thead>
+                <tbody>
+                  {(Object.keys(NATURE_LABELS) as Nat[]).map((n) => {
+                    const c = coef[n];
+                    const k = (1 + Number(c.fg) / 100) * (1 + Number(c.ben) / 100);
+                    return (
+                      <tr key={n}>
+                        <td>{NATURE_LABELS[n]}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <input style={{ width: 64, textAlign: 'right' }} value={c.fg}
+                            onChange={(e) => setCoef({ ...coef, [n]: { ...c, fg: e.target.value } })} />
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <input style={{ width: 64, textAlign: 'right' }} value={c.ben}
+                            onChange={(e) => setCoef({ ...coef, [n]: { ...c, ben: e.target.value } })} />
+                        </td>
+                        <td style={{ textAlign: 'right' }} className="muted">{k.toFixed(3)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <Field label="Remise">
+                  <select value={remise.type} onChange={(e) => setRemise({ ...remise, type: e.target.value as 'pct' | 'fixe' })}>
+                    <option value="pct">% du devis</option>
+                    <option value="fixe">Montant fixe</option>
+                  </select>
+                </Field>
+                <Field label="Valeur remise"><input style={{ width: 80 }} value={remise.valeur} onChange={(e) => setRemise({ ...remise, valeur: e.target.value })} /></Field>
+                <Field label="TVA (ex: 0.20)"><input style={{ width: 80 }} value={tva} onChange={(e) => setTva(e.target.value)} /></Field>
+                <button className="btn" type="submit" disabled={setSale.isPending}>Appliquer</button>
+              </div>
             </form>
+          </div>
+
+          <div className="card" style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0 }}>Frais annexes</h2>
+              <button className="btn" type="button" onClick={() => setFrais([...frais, { designation: '', type: 'pct', valeur: '0' }])}>+ Poste</button>
+            </div>
+            {frais.length === 0 ? (
+              <p className="muted">Aucun poste. Ex : compte prorata (% du PV) ou installation de chantier (montant fixe).</p>
+            ) : (
+              <form onSubmit={(e) => { e.preventDefault(); setErr(null); setFraisAnnexes.mutate(); }}>
+                <table className="grid" style={{ marginBottom: 12 }}>
+                  <thead><tr><th>Désignation</th><th>Type</th><th style={{ textAlign: 'right' }}>Valeur</th><th /></tr></thead>
+                  <tbody>
+                    {frais.map((f, i) => (
+                      <tr key={i}>
+                        <td><input style={{ width: '100%' }} value={f.designation}
+                          onChange={(e) => setFrais(frais.map((x, j) => j === i ? { ...x, designation: e.target.value } : x))} /></td>
+                        <td>
+                          <select value={f.type} onChange={(e) => setFrais(frais.map((x, j) => j === i ? { ...x, type: e.target.value as 'pct' | 'fixe' } : x))}>
+                            <option value="pct">% du PV</option>
+                            <option value="fixe">Fixe</option>
+                          </select>
+                        </td>
+                        <td style={{ textAlign: 'right' }}><input style={{ width: 80, textAlign: 'right' }} value={f.valeur}
+                          onChange={(e) => setFrais(frais.map((x, j) => j === i ? { ...x, valeur: e.target.value } : x))} /></td>
+                        <td><button className="btn" type="button" onClick={() => setFrais(frais.filter((_, j) => j !== i))}>✕</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <button className="btn" type="submit" disabled={setFraisAnnexes.isPending}>Enregistrer les frais</button>
+                {sale.data && <span className="muted" style={{ marginLeft: 12 }}>Total frais appliqué : {euro(sale.data.fraisAnnexes)}</span>}
+              </form>
+            )}
           </div>
 
           <div className="card" style={{ marginTop: 16 }}>
@@ -260,16 +448,44 @@ export default function AffaireDetailPage() {
             {pdfError && <p className="muted">{pdfError}</p>}
             {ordered.length > 0 ? (
               <table className="grid" style={{ marginTop: 12 }}>
-                <thead><tr><th>Désignation</th><th>Type</th><th style={{ textAlign: 'right' }}>Quantité</th><th style={{ textAlign: 'right' }}>PU</th></tr></thead>
+                <thead><tr>
+                  <th>Désignation</th><th>Type</th>
+                  <th style={{ textAlign: 'right' }}>Quantité</th>
+                  <th style={{ textAlign: 'right' }}>Déboursé</th>
+                  <th style={{ textAlign: 'right' }}>PV calculé</th>
+                  <th style={{ textAlign: 'right' }}>PV retenu</th>
+                  <th />
+                </tr></thead>
                 <tbody>
-                  {ordered.map(({ line, depth }) => (
-                    <tr key={line.id}>
-                      <td style={{ paddingLeft: 8 + depth * 20 }}>{line.code ? <strong>{line.code} </strong> : null}{line.designation}</td>
-                      <td className="muted">{TYPE_LABELS[line.type] ?? line.type}</td>
-                      <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
-                      <td style={{ textAlign: 'right' }}>{line.pu ? euro(line.pu) : '—'}</td>
-                    </tr>
-                  ))}
+                  {ordered.map(({ line, depth }) => {
+                    const item = itemById.get(line.id);
+                    return (
+                      <tr key={line.id} style={item?.forced ? { background: '#fff7ed' } : undefined}>
+                        <td style={{ paddingLeft: 8 + depth * 20 }}>{line.code ? <strong>{line.code} </strong> : null}{line.designation}</td>
+                        <td className="muted">{TYPE_LABELS[line.type] ?? line.type}</td>
+                        <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
+                        <td style={{ textAlign: 'right' }}>{item ? euro(item.debourse) : '—'}</td>
+                        <td style={{ textAlign: 'right' }} className="muted">{item ? euro(item.pvComputed) : '—'}</td>
+                        <td style={{ textAlign: 'right', fontWeight: item?.forced ? 600 : undefined, color: item?.forced ? '#c2410c' : undefined }}>
+                          {item ? euro(item.pv) : '—'}{item?.forced ? ' (forcé)' : ''}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {item && (item.forced ? (
+                            <button className="btn" type="button" disabled={setLinePv.isPending}
+                              onClick={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })}>Libérer</button>
+                          ) : (
+                            <span style={{ display: 'inline-flex', gap: 4 }}>
+                              <input style={{ width: 70, textAlign: 'right' }} placeholder="PU vente"
+                                value={pvEdit[line.id] ?? ''}
+                                onChange={(e) => setPvEdit({ ...pvEdit, [line.id]: e.target.value })} />
+                              <button className="btn" type="button" disabled={setLinePv.isPending || !pvEdit[line.id]}
+                                onClick={() => setLinePv.mutate({ lineId: line.id, puVente: pvEdit[line.id], force: true })}>Forcer</button>
+                            </span>
+                          ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             ) : <p className="muted">Devis vide — ajoutez un titre puis des ouvrages ci-dessus.</p>}
