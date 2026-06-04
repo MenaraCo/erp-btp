@@ -178,4 +178,41 @@ describe('Estimating 1.4 — feuille de vente (FG/Bénéfice par nature, ventila
     expect(fv.fraisAnnexes).toBe('50'); // 10% de 500
     expect(fv.totalPvHt).toBe('520'); // 550 - 30
   });
+
+  it('GET config renvoie les coefficients stockés (préremplissage du formulaire)', async () => {
+    const version = (
+      await as('post', '/affaires').send({ code: 'AV4', name: 'D' }).expect(201)
+    ).body.version;
+
+    // Avant config : non configuré, pas de frais
+    const before = (await as('get', `/versions/${version.id}/sale-sheet/config`).expect(200)).body;
+    expect(before.configured).toBe(false);
+    expect(before.fraisAnnexes).toHaveLength(0);
+
+    await as('put', `/versions/${version.id}/sale-sheet`)
+      .send({
+        byNature: {
+          labor: rate('12', '18'),
+          material: rate('0', '0'),
+          equipment: rate('0', '0'),
+          subcontract: rate('0', '0'),
+        },
+        remise: { type: 'pct', valeur: '5' },
+        tvaRate: '0.10',
+      })
+      .expect(200);
+    await as('put', `/versions/${version.id}/frais-annexes`)
+      .send({ frais: [{ designation: 'PGC', type: 'fixe', valeur: '100' }] })
+      .expect(200);
+
+    const cfg = (await as('get', `/versions/${version.id}/sale-sheet/config`).expect(200)).body;
+    expect(cfg.configured).toBe(true);
+    expect(cfg.byNature.labor).toEqual({ tauxFg: '12', tauxBenefice: '18' });
+    expect(cfg.remise.type).toBe('pct');
+    expect(Number(cfg.remise.valeur)).toBe(5);
+    expect(Number(cfg.tvaRate)).toBe(0.1);
+    expect(cfg.fraisAnnexes).toHaveLength(1);
+    expect(cfg.fraisAnnexes[0].designation).toBe('PGC');
+    expect(Number(cfg.fraisAnnexes[0].valeur)).toBe(100);
+  });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -57,6 +57,13 @@ const NATURE_LABELS: Record<Nat, string> = {
   labor: "Main d'œuvre", material: 'Matériaux', equipment: 'Matériel', subcontract: 'Sous-traitance',
 };
 interface FraisRow { designation: string; type: 'pct' | 'fixe'; valeur: string }
+interface SaleConfig {
+  configured: boolean;
+  byNature: Record<Nat, { tauxFg: string; tauxBenefice: string }> | null;
+  remise: { type: 'pct' | 'fixe'; valeur: string } | null;
+  tvaRate: string | null;
+  fraisAnnexes: { designation: string; type: 'pct' | 'fixe'; valeur: string }[];
+}
 interface Library { id: string; code: string; name: string }
 interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
 interface Page<T> { rows: T[] }
@@ -108,6 +115,12 @@ export default function AffaireDetailPage() {
     retry: false,
     queryFn: () => apiFetch<SaleSheet>(`/versions/${versionId}/sale-sheet`, { token }),
   });
+  const saleConfig = useQuery({
+    queryKey: ['sale-config', versionId],
+    enabled: Boolean(token && versionId),
+    retry: false,
+    queryFn: () => apiFetch<SaleConfig>(`/versions/${versionId}/sale-sheet/config`, { token }),
+  });
   const libs = useQuery({
     queryKey: ['libraries'],
     enabled: Boolean(token),
@@ -120,6 +133,7 @@ export default function AffaireDetailPage() {
   function refresh() {
     qc.invalidateQueries({ queryKey: ['lines', versionId] });
     qc.invalidateQueries({ queryKey: ['sale-sheet', versionId] });
+    qc.invalidateQueries({ queryKey: ['sale-config', versionId] });
   }
 
   const status = detail.data?.affaire.status ?? 'open';
@@ -233,6 +247,28 @@ export default function AffaireDetailPage() {
     () => new Map((sale.data?.items ?? []).map((i) => [i.id, i])),
     [sale.data],
   );
+
+  // Préremplit le formulaire avec la config stockée (une fois par version chargée).
+  const cfgInit = useRef<string | null>(null);
+  useEffect(() => {
+    const cfg = saleConfig.data;
+    if (!cfg || !versionId || cfgInit.current === versionId) return;
+    cfgInit.current = versionId;
+    if (cfg.configured && cfg.byNature) {
+      const b = cfg.byNature;
+      setCoef({
+        labor: { fg: b.labor.tauxFg, ben: b.labor.tauxBenefice },
+        material: { fg: b.material.tauxFg, ben: b.material.tauxBenefice },
+        equipment: { fg: b.equipment.tauxFg, ben: b.equipment.tauxBenefice },
+        subcontract: { fg: b.subcontract.tauxFg, ben: b.subcontract.tauxBenefice },
+      });
+      if (cfg.remise) setRemise({ type: cfg.remise.type, valeur: String(Number(cfg.remise.valeur)) });
+      if (cfg.tvaRate) setTva(String(Number(cfg.tvaRate)));
+    }
+    setFrais((cfg.fraisAnnexes ?? []).map((f) => ({
+      designation: f.designation, type: f.type, valeur: String(Number(f.valeur)),
+    })));
+  }, [saleConfig.data, versionId]);
 
   async function downloadPdf() {
     if (!versionId) return;

@@ -129,6 +129,40 @@ export class VenteService {
     });
   }
 
+  /** Returns the stored feuille de vente config (coefficients, remise, TVA, frais) for prefill. */
+  getConfig(versionId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertVersion(em, versionId);
+      const fraisAnnexes = await em.query(
+        `SELECT designation, type, valeur FROM devis_frais_annexe
+          WHERE affaire_version_id = $1 ORDER BY sort_order ASC`,
+        [versionId],
+      );
+      const rows = await em.query(
+        `SELECT coefficients, tva_rate, remise_type, remise_valeur
+           FROM sale_sheet WHERE affaire_version_id = $1`,
+        [versionId],
+      );
+      if (rows.length === 0) {
+        return { configured: false, byNature: null, remise: null, tvaRate: null, fraisAnnexes };
+      }
+      const c = rows[0];
+      const byNature = {} as Record<Nature, NatureSaleRate>;
+      for (const n of NATURES) {
+        const r = c.coefficients?.[n] ?? {};
+        byNature[n] = { tauxFg: String(r.tauxFg ?? 0), tauxBenefice: String(r.tauxBenefice ?? 0) };
+      }
+      return {
+        configured: true,
+        byNature,
+        remise: { type: c.remise_type as FraisType, valeur: String(c.remise_valeur) },
+        tvaRate: String(c.tva_rate),
+        fraisAnnexes,
+      };
+    });
+  }
+
   /** Computes the feuille de vente of a version (rules #2 and #3). */
   computeForVersion(versionId: string): Promise<VenteResult> {
     const tenantId = this.context.requireTenantId();

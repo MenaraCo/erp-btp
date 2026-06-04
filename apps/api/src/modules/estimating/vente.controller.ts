@@ -24,6 +24,13 @@ export class VenteController {
     return this.vente.computeForVersion(versionId);
   }
 
+  @Get('sale-sheet/config')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  config(@Param('versionId') versionId: string) {
+    return this.vente.getConfig(versionId);
+  }
+
   @Put('frais-annexes')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')
