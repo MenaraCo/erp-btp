@@ -242,6 +242,7 @@ export default function AffaireDetailPage() {
   }
 
   const a = detail.data?.affaire;
+  const [tab, setTab] = useState<'etude' | 'coeffs' | 'client'>('etude');
 
   return (
     <div>
@@ -298,6 +299,20 @@ export default function AffaireDetailPage() {
           </div>
           {sale.isError && <p className="muted">Définissez les coefficients de vente ci-dessous pour calculer les totaux.</p>}
 
+          <div style={{ display: 'flex', gap: 4, marginTop: 16, borderBottom: '1px solid #e5e7eb' }}>
+            {([['etude', 'Étude de prix'], ['coeffs', 'Coefficients & frais'], ['client', 'Devis client']] as const).map(([key, label]) => (
+              <button key={key} type="button" onClick={() => setTab(key)}
+                style={{
+                  padding: '8px 14px', border: 'none', background: 'none', cursor: 'pointer',
+                  borderBottom: tab === key ? '2px solid #1e3a8a' : '2px solid transparent',
+                  fontWeight: tab === key ? 600 : 400, color: tab === key ? '#1e3a8a' : '#6b7280',
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'etude' && (
           <div className="card" style={{ marginTop: 16 }}>
             <h2>Construire le devis</h2>
             <form
@@ -361,7 +376,37 @@ export default function AffaireDetailPage() {
               <button className="btn" type="submit">Définir variable</button>
             </form>
           </div>
+          )}
 
+          {tab === 'etude' && (
+          <div className="card" style={{ marginTop: 16 }}>
+            <h2>Corps du devis — déboursé</h2>
+            {ordered.length > 0 ? (
+              <table className="grid" style={{ marginTop: 12 }}>
+                <thead><tr>
+                  <th>Désignation</th><th>Type</th>
+                  <th style={{ textAlign: 'right' }}>Quantité</th>
+                  <th style={{ textAlign: 'right' }}>Déboursé</th>
+                </tr></thead>
+                <tbody>
+                  {ordered.map(({ line, depth }) => {
+                    const item = itemById.get(line.id);
+                    return (
+                      <tr key={line.id}>
+                        <td style={{ paddingLeft: 8 + depth * 20 }}>{line.code ? <strong>{line.code} </strong> : null}{line.designation}</td>
+                        <td className="muted">{TYPE_LABELS[line.type] ?? line.type}</td>
+                        <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
+                        <td style={{ textAlign: 'right' }}>{item ? euro(item.debourse) : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : <p className="muted">Devis vide — ajoutez un titre puis des ouvrages ci-dessus.</p>}
+          </div>
+          )}
+
+          {tab === 'coeffs' && (
           <div className="card" style={{ marginTop: 16 }}>
             <h2>Feuille de vente — coefficients par nature</h2>
             <p className="muted" style={{ marginTop: 0 }}>
@@ -404,7 +449,9 @@ export default function AffaireDetailPage() {
               </div>
             </form>
           </div>
+          )}
 
+          {tab === 'coeffs' && (
           <div className="card" style={{ marginTop: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ margin: 0 }}>Frais annexes</h2>
@@ -439,10 +486,12 @@ export default function AffaireDetailPage() {
               </form>
             )}
           </div>
+          )}
 
+          {tab === 'client' && (
           <div className="card" style={{ marginTop: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0 }}>Corps du devis</h2>
+              <h2 style={{ margin: 0 }}>Corps du devis — prix de vente</h2>
               <button className="btn" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
             </div>
             {pdfError && <p className="muted">{pdfError}</p>}
@@ -490,6 +539,7 @@ export default function AffaireDetailPage() {
               </table>
             ) : <p className="muted">Devis vide — ajoutez un titre puis des ouvrages ci-dessus.</p>}
           </div>
+          )}
         </>
       )}
     </div>
