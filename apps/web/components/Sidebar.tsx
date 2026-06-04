@@ -14,6 +14,7 @@ const NAV: NavItem[] = [
   { href: '/clients', label: 'Clients', section: 'Référentiel' },
   { href: '/suppliers', label: 'Fournisseurs', section: 'Référentiel' },
   { href: '/estimating', label: 'Devis', section: 'Modules' },
+  { href: '/estimating/bibliotheque', label: 'Bibliothèque', section: 'Modules' },
   { href: '/chantiers', label: 'Chantiers', section: 'Modules' },
   { href: '/invoicing', label: 'Facturation', section: 'Modules' },
 ];
