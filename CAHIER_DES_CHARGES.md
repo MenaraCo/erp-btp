@@ -113,6 +113,24 @@ Quatre couches, toutes nécessaires :
 - `SeatAssignment` / **Jeton** (module_code, user_id) — affectation d'un jeton de module à un utilisateur ; contrainte : `count(assignments par module) ≤ jetons_achetés`.
 - `UsageCounter` (tenant_id, métrique, valeur courante) — comparaison aux quotas en temps réel.
 
+### 3.7 Interfaces de gestion — DEUX écrans distincts (à construire en fin de Phase 1)
+
+Le moteur d'abonnement (3.1–3.6) doit être doublé de **deux interfaces visibles**, à ne pas confondre :
+
+**A. Espace abonnement client** (dans l'app ERP, accessible depuis les paramètres du tenant, réservé aux rôles administrateurs du client) :
+- Voir l'**état de la souscription** : essai en cours (jours restants) ou abonnement actif, modules souscrits, factures.
+- **Choisir / modifier** son pack ou ses modules et le **nombre de jetons** par module ; déclencher le paiement.
+- **Affecter les jetons aux utilisateurs** : écran d'attribution « quel utilisateur a accès à quel module » (équivalent de l'affectation des jetons de l'ERP de référence), avec le compteur jetons affectés / achetés.
+- Le **paiement** s'effectue par **redirection vers la page sécurisée du prestataire** (Stripe ou équivalent) puis retour ; aucune donnée bancaire saisie dans l'app. Accès au **portail client** du prestataire (factures, moyen de paiement).
+
+**B. Back-office éditeur** (console de la plateforme, réservée à l'éditeur — toi — séparée de l'app cliente) :
+- **Piloter le catalogue commercial** : modules, capacités, packs, prix, quotas, remises — le tout **piloté par configuration**.
+- **Vue de tous les tenants/abonnés** : statut (essai, actif, impayé, résilié), modules souscrits, jetons, revenus, dates d'échéance ; classement des essais arrivant à terme.
+- Indicateurs de gestion (MRR, taux de conversion essai→payant, churn), gestion des codes promo, intervention support (prolonger un essai, ajuster une souscription).
+- Accès strictement réservé à l'éditeur (séparation forte des droits) ; ne jamais exposer ce back-office aux clients.
+
+> Priorité de construction : ces deux écrans arrivent **en fin de Phase 1**, quand un premier produit est vendable. Ne pas les bâtir avant d'avoir un module exploitable à vendre.
+
 ---
 
 ## 4. Stack technique imposée
@@ -135,8 +153,8 @@ C'est la partie la plus importante : le modèle métier *est* l'avantage concurr
 
 ### 5.1 Bibliothèques et ressources
 
-- **Bibliothèque** : catalogue réutilisable (multi-bibliothèques par tenant). Peut être convertie depuis une affaire, importée (listing, format type BatiPrix), mise à jour depuis une nomenclature de chantier.
-- **Ressource** : brique élémentaire. Champs : `code` (= **numéro analytique** propre à la société, ex. 280), `libellé`, `unité`, `prix unitaire (déboursé)`. Elle se rattache au **plan analytique** par sa **nature** (MO, matériaux, matériel, sous-traitance), son **lot** (corps d'état) et sa **famille** — voir 5.8. Autrement dit, la ressource **est** le code analytique : sa position dans l'arbre nature → lot → famille assure l'imputation automatique. Une ressource MO porte un rendement/temps.
+- **Bibliothèque d'étude de prix** : catalogue de référence pour le chiffrage (multi-bibliothèques par tenant). Peut être convertie depuis une affaire ou importée (listing, format type BatiPrix). **Distincte de la nomenclature de chantier** (voir 5.5) : aucun lien automatique entre les deux — la seule circulation de données est la copie effectuée au premier transfert (voir 5.4).
+- **Ressource** : article élémentaire. Champs : **`code_produit` (unique par ressource)**, `libellé`, `unité`, `prix unitaire (déboursé)`. Chaque ressource est rattachée à **exactement un code analytique** (voir 5.8) ; c'est par ce code analytique qu'elle hérite de sa famille, son lot et sa nature. Un même code analytique regroupe **plusieurs ressources** (ex. plusieurs colles de marques différentes sous le code analytique COLLE = 280). Une ressource MO porte un rendement/temps.
 - **Élément composé / Ouvrage** : composition récursive de ressources et de sous-ouvrages, chacun avec une **quantité**. Son coût (déboursé sec) est **calculé automatiquement** par agrégation des composants. C'est l'entité reine — modélisez-la en arbre récursif avec recalcul ascendant.
 - **Élément en pourcentage** : ligne dont le montant est un % d'une assiette (frais, aléas).
 - **Étude type** : modèle de devis pré-rempli réutilisable.
@@ -148,7 +166,7 @@ C'est la partie la plus importante : le modèle métier *est* l'avantage concurr
 - **Métré** : quantité calculable par **formule** avec **variables globales** (ex. surface, linéaire réutilisés) et « métré temps ».
 - **Déboursé / sous-détail** : décomposition du coût de revient d'un ouvrage (les ressources qui le composent). Distinguer **déboursé sec** (coût direct).
 - **Titre non vendable / frais de chantier** : coûts d'installation et frais de chantier non facturés en ligne directe, à **ventiler** ensuite sur les ouvrages vendables.
-- **Feuille de vente** : passe du **déboursé** au **prix de vente** par application de **coefficients** par nature (frais généraux, bénéfice, aléas, frais financiers…). Gère la **ventilation des titres non vendables**, l'arrondi global et par PU, les **montants annexes** (forfait, remise/majoration), les lignes Nota / Pour mémoire / Non compris.
+- **Feuille de vente** *(implémentée)* : passe du **déboursé** au **prix de vente** par une **cascade paramétrée par nature** — `déboursé × (1 + FG %) = prix de revient`, puis `× (1 + Bénéfice %) = prix de vente`, où **FG (frais généraux) et Bénéfice sont réglés séparément pour chacune des 4 natures** (main d'œuvre / matériaux / matériel / sous-traitance). Expose le **prix de revient** comme palier distinct et deux marges — **marge brute** (PV − déboursé) et **marge nette** (PV − prix de revient) — plus le **coefficient global réel**. Gère la **ventilation des titres non vendables** (frais de chantier répartis au prorata du déboursé, **nature conservée**), les **frais annexes** (liste de postes nommés, en % du PV hors frais ou montant fixe), une **remise globale** (% ou fixe), la **TVA**, et le **forçage du PV ligne à ligne** (PV saisi à la main, **mémorisé et tracé**, sans recalcul des autres lignes). **Toutes les lignes vendables sont valorisées** (ouvrage de bibliothèque via son sous-détail, ou ligne manuelle via son PU sur une **nature saisie à la main**). **Le calcul vit côté serveur** (jamais dans l'écran) ; un endpoint dédié renvoie la **config stockée** (coefficients, remise, TVA, frais) pour préremplir l'écran. Écran organisé en **3 onglets** (Étude de prix / Coefficients & frais / Devis client) avec synthèse KPI permanente. Lignes Nota / Pour mémoire / Non compris.
 - **TVA** multi-taux, gestion par société (multi-société dans un même tenant).
 
 ### 5.3 Workflow de l'affaire (machine à états)
@@ -163,7 +181,7 @@ Seule une affaire **Gagnée** peut être transférée en chantier/facturation (c
 
 Transfert d'une affaire gagnée vers l'aval, en **5 étapes** : choix de l'affaire → destination → options → traitement des prix unitaires → budgétisation. **Chaque transfert crée un MARCHÉ** (un contrat) rattaché à un **chantier** — nouveau ou **existant**. Un chantier peut donc recevoir **plusieurs marchés** (voir 5.5).
 
-- Vers **Suivi de chantiers** : rattache le marché à un chantier (création d'un nouveau chantier, ou sélection d'un chantier existant), avec son **étude d'exécution** (issue du déboursé) et son **budget de vente** (montant du devis) qui **s'ajoutent à l'agrégat du chantier**. Possibilité de transférer le détail des frais généraux.
+- Vers **Suivi de chantiers** : rattache le marché à un chantier (création d'un nouveau chantier, ou sélection d'un chantier existant), avec son **étude d'exécution** (issue du déboursé) et son **budget de vente** (montant du devis) qui **s'ajoutent à l'agrégat du chantier**. Possibilité de transférer le détail des frais généraux. **Initialisation de la nomenclature de chantier par copie** : au transfert, les **ressources, ouvrages et leur rattachement analytique** (famille, code analytique) du devis sont **copiés** dans la nomenclature du chantier. Cette copie est un instantané : ensuite, bibliothèque d'étude et nomenclature de chantier évoluent **indépendamment** (aucune synchronisation).
 - Vers **Facturation** : crée la **chaîne de facturation propre au marché** (devis détaillé ou global → situations → factures).
 - **Trois gestes distincts à ne pas confondre** :
   - **Marché initial** sur un **nouveau** chantier.
@@ -176,6 +194,7 @@ Transfert d'une affaire gagnée vers l'aval, en **5 étapes** : choix de l'affai
 
 - **Chantier** : `code`, l'unité de **suivi financier agrégé**. Un chantier **contient un ou plusieurs marchés** (1 → N). C'est au niveau du chantier que s'agrègent tous les coûts (achats, heures, factures fournisseurs) — **un seul tableau de bord pour tous les lots/marchés**.
 - **Marché** : un contrat issu d'un devis gagné, rattaché à un chantier. Porte son **étude d'exécution**, son **budget**, son **montant de vente** (+ avenants), et sa **chaîne de facturation propre**. Exemple : un même chantier avec 3 marchés Peinture / Sols durs / Sols souples chiffrés et gagnés séparément.
+- **Nomenclature de chantier** : catalogue de ressources/ouvrages **propre au chantier**, **séparé de la bibliothèque d'étude de prix**. Initialisé par copie au premier transfert (voir 5.4), puis **indépendant** : le conducteur de travaux peut y **ajouter des ressources propres au chantier** (apparues en exécution) sans impacter la bibliothèque d'étude, et inversement — **aucune communication automatique** entre les deux. Toute ressource ajoutée en chantier doit néanmoins être **rattachée à un code analytique** du plan analytique de la société (référence partagée) pour s'agréger correctement dans le tableau de bord.
 - **Budgets** : initial, prévisionnel, fonction de l'avancement, budget d'approvisionnement lié à l'étude d'exécution ; au niveau marché **et** agrégés au chantier. Budgets manuels possibles.
 - **Main d'œuvre** : **pointages** (salarié/équipe, heures, date, chantier, ventilation par ouvrage et par matériel), contrôle, synthèse, régularisation, procédure mensuelle. Imputés au chantier, classés par l'axe analytique (donc ventilables par lot).
 - **Chaîne des achats** : `Demande de prix → Bon de commande → Bon de livraison → Facture`, avec **réservation sur stock**, rapprochement des factures, extinction des suggestions. Saisie en **grille deux parties**, traitement et duplication des bons. Coûts imputés au chantier + classification analytique (ventilables par lot, et optionnellement attribuables à un marché précis).
@@ -234,24 +253,38 @@ Le module distingue **deux axes** d'analyse, disponibles séparément et croisab
 
 **1. Axe structurel** (« où dans le devis/chantier ») : chantier global → titre → sous-titre → ouvrage → ressource.
 
-**2. Axe analytique** (« quel type de dépense ») — hiérarchie à **4 niveaux**, **paramétrable par société** : **nature → lot → famille → ressource (= code analytique)**.
+**2. Axe analytique** (« quel type de dépense ») — hiérarchie **paramétrable par société** : **nature → lot → famille → code analytique → ressource**.
 - **Nature** (niveau 1) : Matériaux, Matériel, Sous-traitant, Main d'œuvre.
 - **Lot** / corps d'état (niveau 2) : `SOLS DURS`, `SOLS SOUPLES`, `PEINTURES`, `GROS-ŒUVRE`…
 - **Famille** (niveau 3) : `COLLES`, `ÉTANCHÉITÉ`, `ENDUITS`, `COFFRAGE`, `BOIS`…
-- **Ressource = code analytique** (niveau 4, la feuille) : poste élémentaire avec **numéro propre à la société**. Ex. `COLLE = 280`, `CARRELAGE = 290`, `BANCHES = 300`.
+- **Code analytique** (niveau 4) : poste de coût avec **numéro propre à la société**. Ex. `COLLE = 280`, `CARRELAGE = 290`, `BANCHES = 300`. **Un code analytique regroupe plusieurs ressources.**
+- **Ressource** (sous le code analytique) : article concret avec **`code_produit` unique** (ex. « Colle C2 Bostik 25 kg »). Une ressource appartient à **un seul** code analytique.
 
-> **Unification clé : la ressource du chiffrage EST le code analytique.** Il n'y a donc pas de champ d'imputation distinct à ressaisir : une ressource porte intrinsèquement sa position dans l'arbre (nature → lot → famille → son code). Dès qu'elle est utilisée (budget d'étude, ligne de commande, pointage), sa classification analytique est connue **automatiquement**.
+> **Relation clé : code analytique (1) → ressources (N)**, et une ressource → **un seul** code analytique. Une ligne de coût référence une **ressource** (par son code produit) ; elle hérite donc automatiquement de son code analytique, puis famille → lot → nature. Pas de double imputation à ressaisir.
 
-Tous les indicateurs (budget, budget avancé, engagé, réalisé, écart, prévision, marge) sont disponibles **à chaque niveau des deux axes**, par **agrégation ascendante** : ressource/code → famille → lot → nature (même logique que le recalcul des ouvrages composés). Le tableau de bord se présente en **arborescence dépliable** : nature → (déplier) lot → (déplier) famille → (déplier) ressource/code.
+Tous les indicateurs (budget, budget avancé, engagé, réalisé, écart, prévision, marge) sont disponibles et **affichés à CHAQUE niveau** des deux axes — **jamais seulement au total chantier**. Le tableau de bord analytique se présente en **menus dépliables niveau par niveau** : nature → (déplier) lot → (déplier) famille → (déplier) **code analytique** (4ᵉ niveau), avec possibilité de descendre jusqu'aux **ressources** individuelles sous un code. Agrégation ascendante : ressource → code analytique → famille → lot → nature → chantier.
 
-**Imputation analytique** : puisque la ressource est le code, l'imputation est intrinsèque. Chaque ligne génératrice de coût (ressource du budget d'étude, **ligne de commande** = engagé, **facture** = réalisé, **pointage** = MO) référence une ressource, donc hérite automatiquement de sa classification analytique complète.
+**Imputation analytique** : chaque ligne génératrice de coût (ressource du budget d'étude, **ligne de commande** = engagé, **facture** = réalisé, **pointage** = MO) référence une **ressource** (code produit), donc hérite automatiquement de tout son chemin analytique (code analytique → famille → lot → nature).
 
-**Modèle de données analytique** (par société, avec **plan modèle dupliqué** à la création d'une société) : `Nature`, `LotAnalytique` (→ nature), `FamilleAnalytique` (→ lot), `Ressource` (= code analytique : numéro société, libellé, unité, déboursé, → famille). **Nesting strict** : une ressource appartient à une seule famille, qui appartient à un seul lot, qui appartient à une seule nature. C'est cette même entité `Ressource` qui sert dans les bibliothèques d'étude de prix (section 5.1).
+**Modèle de données analytique** (par société, avec **plan modèle dupliqué** à la création d'une société) : `Nature`, `LotAnalytique` (→ nature), `FamilleAnalytique` (→ lot), `CodeAnalytique` (numéro société, libellé, → famille), `Ressource` (**`code_produit` unique**, libellé, unité, déboursé, → **un seul** `CodeAnalytique`). **Nesting strict** : ressource → 1 code analytique → 1 famille → 1 lot → 1 nature ; et un code analytique regroupe **N** ressources. C'est cette même entité `Ressource` qui sert dans les bibliothèques d'étude de prix (section 5.1).
+
+#### Gestion mensuelle et temporalité (M / M-1 / CUMUL)
+
+Le contrôle de gestion est **mensuel** : les mouvements sont rattachés à un **mois**, et chaque mois fait l'objet d'un **enregistrement / clôture de période** par chantier (un enregistrement par mois). Cette clôture **fige un instantané** de l'état du chantier en fin de mois (avancement, engagé cumulé, réalisé cumulé, EAC, marge prévisionnelle) et conserve les **flux du mois** (engagé du mois, réalisé du mois). C'est ce qui alimente les comparaisons M-1 et les courbes de pilotage.
+
+**Présentation à 3 colonnes temporelles — règle d'affichage généralisée.** Pour **chaque indicateur** et **à chaque niveau analytique** (nature → lot → famille → code analytique → ressource), le tableau de bord affiche toujours :
+- **Mois M** : les mouvements du mois en cours.
+- **Mois M-1** : les mouvements du mois précédent.
+- **CUMUL** : le cumul depuis le début des mouvements (au stade).
+
+Les indicateurs de **flux** (engagé, réalisé, avancement de la période) se lisent par mois ; les indicateurs **cumulés/au stade** (budget avancé, écart au stade, EAC, marge prévisionnelle) se lisent en colonne CUMUL, avec leur variation M / M-1 pour visualiser la tendance. Chaque ligne de coût (engagé, réalisé, pointage) porte donc son **mois de rattachement**.
+
+**Modèle de données (temporel)** : `PériodeMensuelle` / `ClôtureMensuelle` (chantier, mois, instantané des cumuls + flux du mois, statut ouverte/clôturée) ; toute ligne de mouvement porte un champ `mois` (ou date rattachée à une période). Les agrégats M / M-1 / CUMUL se calculent en filtrant/​cumulant par période — **en temps réel**, jamais en batch nocturne.
 
 #### Tableaux de bord
 
-- **Vue Direction** — portefeuille de chantiers, colonnes : vente, budget, réalisé, engagé, budget avancé, prévision fin de chantier, marge finale prévisionnelle, taux de marge. **Classement automatique des chantiers à risque.**
-- **Vue Conducteur de travaux** — détail d'un chantier, widgets : budget, réalisé, engagé, budget avancé, écart, prévision fin de chantier. **Tableau analytique dépliable nature → lot → famille → ressource/code** avec les indicateurs à chaque niveau, et possibilité de croiser avec l'axe structurel (par titre/ouvrage).
+- **Vue Direction** — portefeuille de chantiers, colonnes : vente, budget, réalisé, engagé, budget avancé, prévision fin de chantier, marge finale prévisionnelle, taux de marge. **Classement automatique des chantiers à risque.** Chaque montant déclinable en M / M-1 / CUMUL.
+- **Vue Conducteur de travaux** — détail d'un chantier, widgets : budget, réalisé, engagé, budget avancé, écart, prévision fin de chantier. **Tableau analytique en menus dépliables niveau par niveau : nature → lot → famille → code analytique**, avec les indicateurs affichés **à chaque niveau** (jamais uniquement le total chantier) et **sur les trois colonnes Mois M / Mois M-1 / CUMUL**, descente possible jusqu'aux **ressources** sous un code. Croisable avec l'axe structurel (par titre/ouvrage) et par marché.
 
 #### Alertes automatiques
 
@@ -272,7 +305,7 @@ Capacités `cost_control.dashboard`, `cost_control.forecast`, `cost_control.aler
 Ces règles font la valeur d'un ERP BTP. Testez-les unitairement.
 
 1. **Recalcul ascendant des ouvrages** : modifier le PU d'une ressource recalcule instantanément le déboursé de tous les ouvrages qui l'utilisent, puis les titres, puis le total — en temps réel dans l'UI.
-2. **Déboursé → vente par coefficients** : la feuille de vente applique des coefficients par nature ; le prix de vente n'est jamais saisi en dur sans traçabilité du coefficient appliqué (sauf forçage explicite du PV avec mémorisation).
+2. **Déboursé → vente par coefficients** *(implémentée, testée)* : la feuille de vente applique une **cascade par nature** — `déboursé × (1 + FG %) = prix de revient`, puis `× (1 + Bénéfice %) = prix de vente`, FG et Bénéfice réglés **séparément par nature** ; elle expose le **prix de revient** et distingue **marge brute** (PV − déboursé) de **marge nette** (PV − prix de revient). Le prix de vente n'est jamais saisi en dur sans traçabilité des coefficients appliqués (sauf **forçage explicite du PV par ligne**, mémorisé et tracé). Calcul **côté serveur**, jamais dans l'écran.
 3. **Ventilation des frais de chantier** : les titres non vendables se répartissent sur les ouvrages vendables selon une clé (au prorata du déboursé, par titre, etc.).
 4. **Gestion des prix sur avenant** : par défaut, recodifier (suffixe) pour figer les prix initiaux ; option « conserver le prix de la nomenclature » vs « reprendre le prix du devis ».
 5. **Cohérence devis ↔ exécution ↔ facturation** : conserver une codification cohérente des ouvrages tout au long de la chaîne pour permettre le rapprochement (option de recodification à l'image de l'étude de prix).
@@ -301,7 +334,7 @@ Ne pas tout construire d'un coup. Ordre recommandé :
 
 **Phase 0 — Socle** : multi-tenant, auth/RBAC, **système d'entitlements (capacités + quotas) et cycle de vie de souscription avec essai 30 j** (section 3), modèle de données de base, CI/CD, data-grid réutilisable, recherche universelle. La garde d'autorisation par capacité doit exister avant tout module métier, pour que chaque fonctionnalité naisse déjà « gatée ». L'intégration du prestataire de facturation récurrente (checkout, portail, webhooks) peut être branchée en fin de phase 1.
 
-**Phase 1 — Études de prix (MVP du cœur)** : bibliothèques + ressources, ouvrages composés avec recalcul, corps de devis hiérarchique, métré simple, déboursé/sous-détails, feuille de vente + coefficients, workflow d'affaire, édition PDF du devis. *C'est le module qui vend le produit — soignez-le.*
+**Phase 1 — Études de prix (MVP du cœur)** : bibliothèques + ressources, ouvrages composés avec recalcul, corps de devis hiérarchique, métré simple, déboursé/sous-détails, feuille de vente + coefficients, workflow d'affaire, édition PDF du devis. *C'est le module qui vend le produit — soignez-le.* **En fin de phase** (premier produit vendable) : les **deux interfaces d'abonnement/licences** (espace client + back-office éditeur, section 3.7) et le branchement au prestataire de paiement.
 
 **Phase 2 — Acceptation + Facturation** : transfert affaire gagnée → devis facturation, situations de travaux à l'avancement, avenants, DGD, génération de factures, Factur-X.
 
@@ -344,7 +377,8 @@ Chaque phase doit être livrable et testée de bout en bout avant la suivante.
 | **Avenant** | Modification du marché initial (travaux supplémentaires/modificatifs). |
 | **Chantier** | Unité de suivi financier agrégé (le site). Contient un ou plusieurs marchés ; un seul tableau de bord de coûts pour tous. |
 | **Marché** | Contrat issu d'un devis gagné, rattaché à un chantier. Porte son budget, sa vente et sa chaîne de facturation propre (situations, factures, DGD). |
-| **Nomenclature** | Catalogue des ressources propre à un chantier. |
+| **Nomenclature** | Catalogue de ressources propre à un chantier, distinct de la bibliothèque d'étude de prix. |
+| **Bibliothèque / nomenclature (séparation)** | Bibliothèque d'étude (chiffrage) et nomenclature de chantier (exécution) sont séparées ; reliées seulement par une copie au premier transfert, puis indépendantes. |
 | **Pointage** | Saisie des heures de main d'œuvre par salarié et par chantier. |
 | **Engagé** | Montants commandés mais pas forcément facturés ; comptés dès la validation de la commande. |
 | **Réalisé** | Coûts réellement consommés (factures, heures pointées, sous-traitance facturée…). |
@@ -356,11 +390,14 @@ Chaque phase doit être livrable et testée de bout en bout avant la suivante.
 | **EAC** | *Estimate At Completion* : prévision du coût total à la clôture du chantier. |
 | **CPI** | *Cost Performance Index* : Budget avancé / Réalisé ; mesure l'efficience des coûts. |
 | **Marge prévisionnelle finale** | Vente totale − EAC, en montant et en pourcentage. |
-| **Plan analytique** | Référentiel de ventilation des coûts, paramétrable par société, à 4 niveaux : nature → lot → famille → ressource (= code analytique). |
-| **Lot (analytique)** | Corps d'état regroupant des familles (ex. SOLS DURS, GROS-ŒUVRE, PEINTURES). Niveau 2 du plan analytique. |
-| **Famille analytique** | Regroupement de ressources/codes (ex. COLLES, COFFRAGE, BOIS). Niveau 3. |
-| **Code analytique** | La ressource elle-même, avec son numéro propre à la société (ex. COLLE = 280, BANCHES = 300). Niveau 4 / feuille. |
-| **Imputation analytique** | Classification d'un coût ; intrinsèque ici, car la ressource utilisée porte déjà sa position nature → lot → famille → code. |
+| **Plan analytique** | Référentiel de ventilation des coûts, paramétrable par société : nature → lot → famille → code analytique → ressource. |
+| **Lot (analytique)** | Corps d'état regroupant des familles (ex. SOLS DURS, GROS-ŒUVRE, PEINTURES). Niveau 2. |
+| **Famille analytique** | Regroupement de codes analytiques (ex. COLLES, COFFRAGE, BOIS). Niveau 3. |
+| **Code analytique** | Poste de coût avec numéro propre à la société (ex. COLLE = 280). Niveau 4 ; regroupe plusieurs ressources. |
+| **Ressource** | Article concret avec un `code_produit` unique (ex. une colle d'une marque précise) ; appartient à un seul code analytique. |
+| **Imputation analytique** | Une ligne de coût référence une ressource ; elle hérite alors de tout son chemin : code analytique → famille → lot → nature. |
+| **Période mensuelle / clôture** | Enregistrement mensuel par chantier figeant l'instantané des cumuls et les flux du mois ; base des comparaisons et de l'historique. |
+| **M / M-1 / CUMUL** | Présentation de chaque indicateur sur trois colonnes : mois en cours, mois précédent, cumul depuis le début des mouvements. |
 
 ---
 
