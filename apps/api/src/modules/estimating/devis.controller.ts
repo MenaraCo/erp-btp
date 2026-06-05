@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -114,6 +115,13 @@ export class DevisController {
   @RequiresPermission('estimating.devis.write')
   updateLine(@Param('lineId') lineId: string, @Body() body: DevisLinePatch) {
     return this.devis.updateLine(lineId, body ?? {});
+  }
+
+  @Delete('lines/:lineId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  deleteLine(@Param('lineId') lineId: string) {
+    return this.devis.deleteLine(lineId);
   }
 
   @Get('versions/:versionId/lines')

@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
+import { Montage, MontageLine } from './Montage';
 
 interface Version { id: string; version_no: number; label: string }
 interface DevisDetail {
@@ -22,8 +23,11 @@ interface DevisLine {
   unit: string | null;
   quantity: string | null;
   pu: string | null;
+  perte: string | null;
   pu_vente: string | null;
   pu_vente_force: boolean;
+  section_type: 'option' | 'variante' | null;
+  source_ouvrage_id: string | null;
   sort_order: number;
 }
 interface SaleItem {
@@ -352,95 +356,30 @@ export default function DevisEditorPage() {
 
           {tab === 'etude' && (
           <div className="card" style={{ marginTop: 16 }}>
-            <h2>Construire le devis</h2>
-            <form
-              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}
-              onSubmit={(e) => {
-                e.preventDefault();
-                setErr(null);
-                if (!pl.designation) { setErr('Désignation requise.'); return; }
-                if (pl.type === 'ouvrage' && !pl.ouvrageId) { setErr('Choisissez un ouvrage.'); return; }
-                addLine.mutate();
-              }}
-            >
-              <Field label="Parent">
-                <select value={pl.parentId} onChange={(e) => setPl({ ...pl, parentId: e.target.value })}>
-                  <option value="">(racine)</option>
-                  {parents.map((p) => <option key={p.line.id} value={p.line.id}>{'— '.repeat(p.depth)}{p.line.code} {p.line.designation}</option>)}
-                </select>
-              </Field>
-              <Field label="Type">
-                <select value={pl.type} onChange={(e) => setPl({ ...pl, type: e.target.value })}>
-                  <option value="titre">Titre</option>
-                  <option value="sous_titre">Sous-titre</option>
-                  <option value="ouvrage">Ouvrage</option>
-                </select>
-              </Field>
-              <Field label="Code"><input style={{ width: 70 }} value={pl.code} onChange={(e) => setPl({ ...pl, code: e.target.value })} /></Field>
-              <Field label="Désignation"><input value={pl.designation} onChange={(e) => setPl({ ...pl, designation: e.target.value })} /></Field>
-              {pl.type === 'ouvrage' && (
-                <>
-                  <Field label="Bibliothèque">
-                    <select value={pl.libId} onChange={(e) => setPl({ ...pl, libId: e.target.value, ouvrageId: '' })}>
-                      <option value="">—</option>
-                      {(libs.data?.rows ?? []).map((l) => <option key={l.id} value={l.id}>{l.code}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Ouvrage">
-                    <select
-                      value={pl.ouvrageId}
-                      onChange={(e) => {
-                        const o = (ouvragesOfLib.data?.rows ?? []).find((x) => x.id === e.target.value);
-                        setPl({ ...pl, ouvrageId: e.target.value, unit: o?.unit ?? pl.unit, designation: pl.designation || (o?.label ?? '') });
-                      }}
-                    >
-                      <option value="">—</option>
-                      {(ouvragesOfLib.data?.rows ?? []).map((o) => <option key={o.id} value={o.id}>{o.code} ({euro(o.debourse)})</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Quantité (métré)"><input style={{ width: 80 }} value={pl.quantity} onChange={(e) => setPl({ ...pl, quantity: e.target.value })} /></Field>
-                  <Field label="ou formule"><input style={{ width: 110 }} placeholder="ex: surface*2" value={pl.formula} onChange={(e) => setPl({ ...pl, formula: e.target.value })} /></Field>
-                </>
-              )}
-              <button className="btn" type="submit" disabled={addLine.isPending}>+ Ligne</button>
-            </form>
-
-            <form
-              style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'flex-end' }}
-              onSubmit={(e) => { e.preventDefault(); setErr(null); if (varForm.name) setVar.mutate(); }}
-            >
-              <Field label="Variable de métré"><input placeholder="nom (ex: surface)" value={varForm.name} onChange={(e) => setVarForm({ ...varForm, name: e.target.value })} /></Field>
-              <Field label="Valeur"><input style={{ width: 90 }} value={varForm.value} onChange={(e) => setVarForm({ ...varForm, value: e.target.value })} /></Field>
-              <button className="btn" type="submit">Définir variable</button>
-            </form>
-          </div>
-          )}
-
-          {tab === 'etude' && (
-          <div className="card" style={{ marginTop: 16 }}>
-            <h2>Corps du devis — déboursé</h2>
-            {ordered.length > 0 ? (
-              <table className="grid" style={{ marginTop: 12 }}>
-                <thead><tr>
-                  <th>Désignation</th><th>Type</th>
-                  <th style={{ textAlign: 'right' }}>Quantité</th>
-                  <th style={{ textAlign: 'right' }}>Déboursé</th>
-                </tr></thead>
-                <tbody>
-                  {ordered.map(({ line, depth }) => {
-                    const item = itemById.get(line.id);
-                    return (
-                      <tr key={line.id}>
-                        <td style={{ paddingLeft: 8 + depth * 20 }}>{line.code ? <strong>{line.code} </strong> : null}{line.designation}</td>
-                        <td className="muted">{TYPE_LABELS[line.type] ?? line.type}</td>
-                        <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
-                        <td style={{ textAlign: 'right' }}>{item ? euro(item.debourse) : '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            ) : <p className="muted">Devis vide — ajoutez un titre puis des ouvrages ci-dessus.</p>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+              <h2 style={{ margin: 0 }}>Corps du devis</h2>
+              <form
+                style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}
+                onSubmit={(e) => { e.preventDefault(); setErr(null); if (varForm.name) setVar.mutate(); }}
+              >
+                <Field label="Variable de métré"><input placeholder="ex: surface" value={varForm.name} onChange={(e) => setVarForm({ ...varForm, name: e.target.value })} /></Field>
+                <Field label="Valeur"><input style={{ width: 80 }} value={varForm.value} onChange={(e) => setVarForm({ ...varForm, value: e.target.value })} /></Field>
+                <button className="btn" type="submit">Définir</button>
+              </form>
+            </div>
+            <p className="muted" style={{ marginTop: 4 }}>
+              Construisez le devis sur place : chaque titre propose « + Sous-titre / + Ouvrage / + Ligne / + Texte ». Les ouvrages copient leur sous-détail (éditable). « V » = variante, « O » = option (hors total).
+            </p>
+            <div style={{ marginTop: 8 }}>
+              <Montage
+                versionId={versionId!}
+                token={token}
+                lines={(lines.data ?? []) as MontageLine[]}
+                deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
+                onChanged={refresh}
+                readOnly={false}
+              />
+            </div>
           </div>
           )}
 

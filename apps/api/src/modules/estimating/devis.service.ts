@@ -555,6 +555,19 @@ export class DevisService {
     });
   }
 
+  /** Deletes a line and (via ON DELETE CASCADE) its whole subtree. */
+  deleteLine(lineId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const exists = await em.query(`SELECT id FROM devis_line WHERE id = $1`, [lineId]);
+      if (exists.length === 0) {
+        throw new NotFoundException(`Unknown devis line "${lineId}"`);
+      }
+      await em.query(`DELETE FROM devis_line WHERE id = $1`, [lineId]);
+      return { deleted: lineId };
+    });
+  }
+
   listLines(versionId: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
