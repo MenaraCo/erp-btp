@@ -17,14 +17,23 @@ import {
   evaluateMetre,
   UnknownVariableError,
 } from './metre-eval';
+import { deriveAffaireStatus } from './affaire-derived-status';
+import { DevisStatus } from './devis-workflow';
 
 export type DevisLineType = 'titre' | 'sous_titre' | 'ouvrage' | 'ressource';
+export type DevisType = 'principal' | 'lot' | 'avenant';
 
 export interface AffaireInput {
   code: string;
   name: string;
   clientId?: string | null;
   moa?: string | null;
+}
+
+export interface DevisInput {
+  designation: string;
+  type?: DevisType;
+  numero?: string | null;
 }
 
 export interface DevisLineInput {
@@ -50,25 +59,65 @@ export class DevisService {
     private readonly context: TenantContext,
   ) {}
 
-  /** Creates an affaire with its first version. */
+  /** Creates an affaire with its first (principal) devis and that devis's first version. */
   createAffaire(input: AffaireInput) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const affaire = (
         await em.query(
-          `INSERT INTO affaire (tenant_id, code, name, client_id, moa)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          `INSERT INTO affaire (tenant_id, code, name, client_id, moa, status)
+           VALUES ($1, $2, $3, $4, $5, 'en_cours') RETURNING *`,
           [tenantId, input.code, input.name, input.clientId ?? null, input.moa ?? null],
+        )
+      )[0];
+      const devis = (
+        await em.query(
+          `INSERT INTO devis (tenant_id, affaire_id, numero, designation, type, status, sort_order)
+           VALUES ($1, $2, $3, $4, 'principal', 'open', 0) RETURNING *`,
+          [tenantId, affaire.id, input.code, input.name],
         )
       )[0];
       const version = (
         await em.query(
-          `INSERT INTO devis_version (tenant_id, affaire_id, version_no, label)
+          `INSERT INTO devis_version (tenant_id, devis_id, version_no, label)
            VALUES ($1, $2, 1, 'v1') RETURNING *`,
-          [tenantId, affaire.id],
+          [tenantId, devis.id],
         )
       )[0];
-      return { affaire, version };
+      return { affaire, devis, version };
+    });
+  }
+
+  /** Adds a devis to an affaire (Lot 2, avenant…). Client/lieu are inherited from the affaire. */
+  createDevis(affaireId: string, input: DevisInput) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const affaire = await em.query(`SELECT id, code FROM affaire WHERE id = $1`, [affaireId]);
+      if (affaire.length === 0) {
+        throw new NotFoundException(`Unknown affaire "${affaireId}"`);
+      }
+      const order = (
+        await em.query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM devis WHERE affaire_id = $1`,
+          [affaireId],
+        )
+      )[0].n;
+      const devis = (
+        await em.query(
+          `INSERT INTO devis (tenant_id, affaire_id, numero, designation, type, status, sort_order)
+           VALUES ($1, $2, $3, $4, $5, 'open', $6) RETURNING *`,
+          [tenantId, affaireId, input.numero ?? null, input.designation, input.type ?? 'lot', order],
+        )
+      )[0];
+      const version = (
+        await em.query(
+          `INSERT INTO devis_version (tenant_id, devis_id, version_no, label)
+           VALUES ($1, $2, 1, 'v1') RETURNING *`,
+          [tenantId, devis.id],
+        )
+      )[0];
+      await this.recomputeAffaireStatus(em, affaireId);
+      return { devis, version };
     });
   }
 
@@ -84,7 +133,7 @@ export class DevisService {
     );
   }
 
-  /** Returns a single affaire with its versions (read-side, for the devis detail screen). */
+  /** Returns a single affaire with its devis (each with their versions), for the affaire screen. */
   getAffaire(affaireId: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
@@ -92,36 +141,82 @@ export class DevisService {
       if (!affaire) {
         throw new NotFoundException(`Unknown affaire "${affaireId}"`);
       }
-      const versions = await em.query(
-        `SELECT id, version_no, label, created_at FROM devis_version
-          WHERE affaire_id = $1 ORDER BY version_no ASC`,
+      const devis = await em.query(
+        `SELECT id, numero, designation, type, status, sort_order FROM devis
+          WHERE affaire_id = $1 ORDER BY sort_order ASC, created_at ASC`,
         [affaireId],
       );
-      return { affaire, versions };
+      const versions = await em.query(
+        `SELECT v.id, v.devis_id, v.version_no, v.label, v.created_at FROM devis_version v
+           JOIN devis d ON d.id = v.devis_id
+          WHERE d.affaire_id = $1 ORDER BY v.version_no ASC`,
+        [affaireId],
+      );
+      return {
+        affaire,
+        devis: devis.map((d: { id: string }) => ({
+          ...d,
+          versions: versions.filter((v: { devis_id: string }) => v.devis_id === d.id),
+        })),
+      };
     });
   }
 
-  createVersion(affaireId: string, label?: string) {
+  /** Returns a devis with its versions (read-side, for the devis editor). */
+  getDevis(devisId: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const affaire = await em.query(`SELECT id FROM affaire WHERE id = $1`, [affaireId]);
-      if (affaire.length === 0) {
-        throw new NotFoundException(`Unknown affaire "${affaireId}"`);
+      const devis = (
+        await em.query(
+          `SELECT d.*, a.client_id, a.lieu_execution
+             FROM devis d JOIN affaire a ON a.id = d.affaire_id
+            WHERE d.id = $1`,
+          [devisId],
+        )
+      )[0];
+      if (!devis) {
+        throw new NotFoundException(`Unknown devis "${devisId}"`);
+      }
+      const versions = await em.query(
+        `SELECT id, version_no, label, created_at FROM devis_version
+          WHERE devis_id = $1 ORDER BY version_no ASC`,
+        [devisId],
+      );
+      return { devis, versions };
+    });
+  }
+
+  createVersion(devisId: string, label?: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const devis = await em.query(`SELECT id FROM devis WHERE id = $1`, [devisId]);
+      if (devis.length === 0) {
+        throw new NotFoundException(`Unknown devis "${devisId}"`);
       }
       const next = (
         await em.query(
-          `SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM devis_version WHERE affaire_id = $1`,
-          [affaireId],
+          `SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM devis_version WHERE devis_id = $1`,
+          [devisId],
         )
       )[0].n;
       return (
         await em.query(
-          `INSERT INTO devis_version (tenant_id, affaire_id, version_no, label)
+          `INSERT INTO devis_version (tenant_id, devis_id, version_no, label)
            VALUES ($1, $2, $3, $4) RETURNING *`,
-          [tenantId, affaireId, next, label ?? `v${next}`],
+          [tenantId, devisId, next, label ?? `v${next}`],
         )
       )[0];
     });
+  }
+
+  /** Recomputes the affaire's derived status from the statuses of its devis. */
+  async recomputeAffaireStatus(em: EntityManager, affaireId: string): Promise<void> {
+    const rows = await em.query(`SELECT status FROM devis WHERE affaire_id = $1`, [affaireId]);
+    const derived = deriveAffaireStatus(rows.map((r: { status: DevisStatus }) => r.status));
+    await em.query(`UPDATE affaire SET status = $1, updated_at = now() WHERE id = $2`, [
+      derived,
+      affaireId,
+    ]);
   }
 
   addLine(versionId: string, input: DevisLineInput) {

@@ -37,7 +37,8 @@ describe('Estimating 1.3 — corps de devis hiérarchique + métré', () => {
       .send({ code: 'AFF-1', name: 'Maison Dupont' })
       .expect(201);
     expect(res.body.affaire.id).toBeTruthy();
-    expect(res.body.affaire.status).toBe('open');
+    expect(res.body.affaire.status).toBe('en_cours');
+    expect(res.body.devis.status).toBe('open');
     expect(res.body.version.version_no).toBe(1);
   });
 

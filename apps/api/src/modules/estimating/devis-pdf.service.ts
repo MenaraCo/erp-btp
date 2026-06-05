@@ -34,7 +34,9 @@ export class DevisPdfService {
       async (em) => {
         const v = await em.query(
           `SELECT av.id, av.version_no, a.code, a.name, a.moa
-             FROM devis_version av JOIN affaire a ON a.id = av.affaire_id
+             FROM devis_version av
+             JOIN devis d ON d.id = av.devis_id
+             JOIN affaire a ON a.id = d.affaire_id
             WHERE av.id = $1`,
           [versionId],
         );

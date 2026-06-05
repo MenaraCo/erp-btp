@@ -29,13 +29,15 @@ describe('Estimating — lecture d’une affaire avec ses versions (détail devi
 
   it('retourne l’affaire et ses versions', async () => {
     const created = (await as('post', '/affaires').send({ code: 'D-1', name: 'Villa' }).expect(201)).body;
-    await as('post', `/affaires/${created.affaire.id}/versions`).send({ label: 'v2' }).expect(201);
+    await as('post', `/devis/${created.devis.id}/versions`).send({ label: 'v2' }).expect(201);
 
     const detail = (await as('get', `/affaires/${created.affaire.id}`).expect(200)).body;
     expect(detail.affaire.code).toBe('D-1');
-    expect(detail.versions).toHaveLength(2);
-    expect(detail.versions[0].version_no).toBe(1);
-    expect(detail.versions[1].version_no).toBe(2);
+    expect(detail.devis).toHaveLength(1);
+    const versions = detail.devis[0].versions;
+    expect(versions).toHaveLength(2);
+    expect(versions[0].version_no).toBe(1);
+    expect(versions[1].version_no).toBe(2);
   });
 
   it('refuse l’accès sans le module Études de prix (403)', async () => {

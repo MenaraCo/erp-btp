@@ -41,12 +41,15 @@ export class ChantierService {
     args: {
       tenantId: string;
       affaire: { id: string; code: string; name: string };
+      marcheCode: string;
+      marcheName: string;
       versionId: string;
       venteTotal: string;
       targetChantierId?: string | null;
     },
   ) {
-    const { tenantId, affaire, versionId, venteTotal, targetChantierId } = args;
+    const { tenantId, affaire, marcheCode, marcheName, versionId, venteTotal, targetChantierId } =
+      args;
     if ((await em.query(`SELECT id FROM marche WHERE devis_version_id = $1`, [versionId])).length > 0) {
       throw new ConflictException('This affaire version has already been accepted (marché exists).');
     }
@@ -76,7 +79,7 @@ export class ChantierService {
            (tenant_id, affaire_id, devis_version_id, chantier_id, code, name, total_ht,
             execution_form, contre_etude_status, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'by_ouvrage','draft','active') RETURNING *`,
-        [tenantId, affaire.id, versionId, chantierId, affaire.code, affaire.name, venteTotal],
+        [tenantId, affaire.id, versionId, chantierId, marcheCode, marcheName, venteTotal],
       )
     )[0];
   }

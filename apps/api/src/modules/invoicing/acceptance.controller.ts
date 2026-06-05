@@ -11,11 +11,11 @@ export class AcceptanceController {
    * Acceptation unifiée (cahier §5.4) : un seul marché sur un chantier (nouveau ou existant)
    * portant facturation + étude d'exécution. Corps optionnel `{ chantierId }`.
    */
-  @Post('affaires/:affaireId/accept')
+  @Post('devis/:devisId/accept')
   @RequiresCapability('invoicing.situations')
   @RequiresPermission('invoicing.write')
-  accept(@Param('affaireId') affaireId: string, @Body() body?: { chantierId?: string | null }) {
-    return this.acceptance.accept(affaireId, body?.chantierId ?? null);
+  accept(@Param('devisId') devisId: string, @Body() body?: { chantierId?: string | null }) {
+    return this.acceptance.accept(devisId, body?.chantierId ?? null);
   }
 
   @Get('marches')

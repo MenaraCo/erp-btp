@@ -8,7 +8,7 @@ import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
-import { isTransferable } from '../estimating/affaire-workflow';
+import { isTransferable } from '../estimating/devis-workflow';
 import { VenteService } from '../estimating/vente.service';
 import { ChantierService } from '../site-tracking/chantier.service';
 
@@ -34,26 +34,36 @@ export class AcceptanceService {
    * chantier (nouveau ou existant), portant À LA FOIS sa chaîne de facturation (lignes de marché)
    * ET son étude d'exécution (déboursé). Remplace les deux anciens transferts séparés.
    */
-  async accept(affaireId: string, targetChantierId?: string | null) {
+  async accept(devisId: string, targetChantierId?: string | null) {
     const tenantId = this.context.requireTenantId();
 
-    const affaire = await runInTenant(this.dataSource, tenantId, (em) =>
-      em.query(`SELECT id, code, name, status FROM affaire WHERE id = $1`, [affaireId]),
+    const devisRows = await runInTenant(this.dataSource, tenantId, (em) =>
+      em.query(
+        `SELECT d.id, d.status, d.numero, d.designation, d.affaire_id,
+                a.code AS affaire_code, a.name AS affaire_name
+           FROM devis d JOIN affaire a ON a.id = d.affaire_id
+          WHERE d.id = $1`,
+        [devisId],
+      ),
     );
-    if (affaire.length === 0) {
-      throw new NotFoundException(`Unknown affaire "${affaireId}"`);
+    if (devisRows.length === 0) {
+      throw new NotFoundException(`Unknown devis "${devisId}"`);
     }
-    if (!isTransferable(affaire[0].status)) {
-      throw new ConflictException('Only a won affaire can be accepted.');
+    const devis = devisRows[0];
+    if (!isTransferable(devis.status)) {
+      throw new ConflictException('Only a won devis can be accepted.');
     }
+    const affaire = [{ id: devis.affaire_id, code: devis.affaire_code, name: devis.affaire_name }];
+    const marcheCode = (devis.numero as string | null) ?? `${devis.affaire_code}-${devisId.slice(0, 8)}`;
+    const marcheName = devis.designation as string;
     const versionRow = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT id FROM devis_version WHERE affaire_id = $1 ORDER BY version_no DESC LIMIT 1`,
-        [affaireId],
+        `SELECT id FROM devis_version WHERE devis_id = $1 ORDER BY version_no DESC LIMIT 1`,
+        [devisId],
       ),
     );
     if (versionRow.length === 0) {
-      throw new ConflictException('Affaire has no version to accept.');
+      throw new ConflictException('Devis has no version to accept.');
     }
     const versionId = versionRow[0].id as string;
     const fv = await this.vente.computeForVersion(versionId);
@@ -70,13 +80,15 @@ export class AcceptanceService {
 
     // Phase B — create the marché (on a chantier) + its facturation lines in one transaction.
     const marche = await runInTenant(this.dataSource, tenantId, async (em) => {
-      const current = await em.query(`SELECT status FROM affaire WHERE id = $1 FOR UPDATE`, [affaireId]);
+      const current = await em.query(`SELECT status FROM devis WHERE id = $1 FOR UPDATE`, [devisId]);
       if (!isTransferable(current[0].status)) {
-        throw new ConflictException('Only a won affaire can be accepted.');
+        throw new ConflictException('Only a won devis can be accepted.');
       }
       const m = await this.chantiers.createMarche(em, {
         tenantId,
         affaire: affaire[0],
+        marcheCode,
+        marcheName,
         versionId,
         venteTotal: fv.totalPvHt,
         targetChantierId: targetChantierId ?? null,

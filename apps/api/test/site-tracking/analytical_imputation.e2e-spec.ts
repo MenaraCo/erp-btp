@@ -53,9 +53,9 @@ describe('Imputation analytique engagé/réalisé B.0d (§5.8)', () => {
       .send({ byNature: { labor: '1', material: '1', equipment: '1', subcontract: '1' }, fraisCoefficient: '1', tvaRate: '0.20' })
       .expect(200);
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
-      await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
+      await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
+    chantierId = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body.chantier.id;
 
     const tree = (await as('get', '/analytical/plan').expect(200)).body;
     const fam = tree

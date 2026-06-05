@@ -36,7 +36,7 @@ describe('Invoicing 2.1 — acceptation : transfert affaire gagnée → marché'
       .expect(201);
 
     const created = (await as('post', '/affaires').send({ code, name: code }).expect(201)).body;
-    const affaireId = created.affaire.id;
+    const devisId = created.devis.id;
     const versionId = created.version.id;
     await as('post', `/versions/${versionId}/lines`)
       .send({ type: 'ouvrage', designation: 'Ligne', sourceOuvrageId: ouv.id, quantity: '10' })
@@ -52,12 +52,12 @@ describe('Invoicing 2.1 — acceptation : transfert affaire gagnée → marché'
         tvaRate: '0.20',
       })
       .expect(200);
-    return affaireId;
+    return devisId;
   }
 
-  async function winAffaire(affaireId: string) {
+  async function winAffaire(devisId: string) {
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
-      await as('post', `/affaires/${affaireId}/transition`).send({ to }).expect(201);
+      await as('post', `/devis/${devisId}/transition`).send({ to }).expect(201);
     }
   }
 
@@ -73,10 +73,10 @@ describe('Invoicing 2.1 — acceptation : transfert affaire gagnée → marché'
   });
 
   it('transfère une affaire gagnée en marché avec lignes valorisées', async () => {
-    const affaireId = await buildCostedAffaire('ACC-1');
-    await winAffaire(affaireId);
+    const devisId = await buildCostedAffaire('ACC-1');
+    await winAffaire(devisId);
 
-    const res = await as('post', `/affaires/${affaireId}/accept`).expect(201);
+    const res = await as('post', `/devis/${devisId}/accept`).expect(201);
     expect(res.body.lineCount).toBe(1);
     // PV = déboursé 200 * 1.2 = 240 ; quantité 10 -> montant 2400, PU 240
     expect(res.body.marche.total_ht).toBe('2400.00');
@@ -88,14 +88,14 @@ describe('Invoicing 2.1 — acceptation : transfert affaire gagnée → marché'
   });
 
   it('refuse (409) le transfert d’une affaire non gagnée', async () => {
-    const affaireId = await buildCostedAffaire('ACC-2'); // stays 'open'
-    await as('post', `/affaires/${affaireId}/accept`).expect(409);
+    const devisId = await buildCostedAffaire('ACC-2'); // stays 'open'
+    await as('post', `/devis/${devisId}/accept`).expect(409);
   });
 
   it('refuse (409) un double transfert de la même version', async () => {
-    const affaireId = await buildCostedAffaire('ACC-3');
-    await winAffaire(affaireId);
-    await as('post', `/affaires/${affaireId}/accept`).expect(201);
-    await as('post', `/affaires/${affaireId}/accept`).expect(409);
+    const devisId = await buildCostedAffaire('ACC-3');
+    await winAffaire(devisId);
+    await as('post', `/devis/${devisId}/accept`).expect(201);
+    await as('post', `/devis/${devisId}/accept`).expect(409);
   });
 });

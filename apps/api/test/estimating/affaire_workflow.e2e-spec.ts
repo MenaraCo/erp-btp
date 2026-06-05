@@ -4,7 +4,7 @@ import request from 'supertest';
 import { createTestDataSource } from '../support/datasource';
 import { buildSocleApp, entitleUser } from '../support/socle-app';
 
-describe('Estimating 1.5 — workflow d’affaire (rule #7)', () => {
+describe('Estimating 1.5 — workflow de devis (rule #7)', () => {
   let app: INestApplication;
   let ds: DataSource;
   let tenantId: string;
@@ -16,8 +16,8 @@ describe('Estimating 1.5 — workflow d’affaire (rule #7)', () => {
     return base.set('Host', 'localhost').set('X-Tenant-Id', tenantId).set('X-User-Id', userId);
   }
 
-  async function newAffaire(code: string) {
-    return (await as('post', '/affaires').send({ code, name: code }).expect(201)).body.affaire;
+  async function newDevis(code: string) {
+    return (await as('post', '/affaires').send({ code, name: code }).expect(201)).body.devis;
   }
 
   beforeAll(async () => {
@@ -32,29 +32,29 @@ describe('Estimating 1.5 — workflow d’affaire (rule #7)', () => {
   });
 
   it('suit le chemin nominal open -> ... -> won', async () => {
-    const affaire = await newAffaire('WF-1');
-    expect(affaire.status).toBe('open');
+    const devis = await newDevis('WF-1');
+    expect(devis.status).toBe('open');
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
-      const res = await as('post', `/affaires/${affaire.id}/transition`).send({ to }).expect(201);
-      expect(res.body.affaire.status).toBe(to);
+      const res = await as('post', `/devis/${devis.id}/transition`).send({ to }).expect(201);
+      expect(res.body.devis.status).toBe(to);
     }
   });
 
   it('refuse (409) une transition non autorisée', async () => {
-    const affaire = await newAffaire('WF-2');
-    await as('post', `/affaires/${affaire.id}/transition`).send({ to: 'won' }).expect(409);
+    const devis = await newDevis('WF-2');
+    await as('post', `/devis/${devis.id}/transition`).send({ to: 'won' }).expect(409);
   });
 
-  it('transfer-check : bloquant tant que non Gagnée, ok une fois Gagnée', async () => {
-    const affaire = await newAffaire('WF-3');
-    const before = (await as('get', `/affaires/${affaire.id}/transfer-check`).expect(200)).body;
+  it('transfer-check : bloquant tant que non Gagné, ok une fois Gagné', async () => {
+    const devis = await newDevis('WF-3');
+    const before = (await as('get', `/devis/${devis.id}/transfer-check`).expect(200)).body;
     expect(before.transferable).toBe(false);
     expect(before.alerts.some((a: { level: string }) => a.level === 'blocking')).toBe(true);
 
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
-      await as('post', `/affaires/${affaire.id}/transition`).send({ to }).expect(201);
+      await as('post', `/devis/${devis.id}/transition`).send({ to }).expect(201);
     }
-    const after = (await as('get', `/affaires/${affaire.id}/transfer-check`).expect(200)).body;
+    const after = (await as('get', `/devis/${devis.id}/transfer-check`).expect(200)).body;
     expect(after.transferable).toBe(true);
     // déboursé nul -> alerte non bloquante (warning)
     expect(after.alerts.some((a: { level: string }) => a.level === 'warning')).toBe(true);

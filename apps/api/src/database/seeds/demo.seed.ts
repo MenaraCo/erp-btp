@@ -335,19 +335,22 @@ async function ensureSampleChantier(
       ),
     );
   } else {
-    const affaire = (await runInTenant(ds, tenantId, (em) =>
-      em.query(`SELECT id, status FROM affaire WHERE code = 'DEMO-2026-001'`),
+    const devis = (await runInTenant(ds, tenantId, (em) =>
+      em.query(
+        `SELECT d.id, d.status FROM devis d JOIN affaire a ON a.id = d.affaire_id
+          WHERE a.code = 'DEMO-2026-001' ORDER BY d.sort_order ASC LIMIT 1`,
+      ),
     ))[0];
-    if (!affaire) return;
+    if (!devis) return;
 
     const path = ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won'];
-    if (affaire.status !== 'won') {
+    if (devis.status !== 'won') {
       for (const to of path) {
-        await s.workflow.transition(affaire.id, to);
+        await s.workflow.transition(devis.id, to);
       }
     }
 
-    chantierId = (await s.acceptance.accept(affaire.id)).chantier.id;
+    chantierId = (await s.acceptance.accept(devis.id)).chantier.id;
 
     // Engagé + réalisé imputés au code analytique Bétons.
     const order = await s.purchasing.createOrder(chantierId, { code: 'BC-2026-001' });

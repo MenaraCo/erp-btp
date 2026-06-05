@@ -7,7 +7,7 @@
  * Only a "won" (Gagnée) affaire is transferable downstream (phase 2). Codes are in English,
  * labels stay in French (business glossary).
  */
-export type AffaireStatus =
+export type DevisStatus =
   | 'open'
   | 'study'
   | 'coeffs_proposed'
@@ -18,7 +18,7 @@ export type AffaireStatus =
   | 'followup'
   | 'revision';
 
-export const AFFAIRE_STATUS_LABELS: Record<AffaireStatus, string> = {
+export const DEVIS_STATUS_LABELS: Record<DevisStatus, string> = {
   open: 'Ouverte',
   study: 'Étude en cours',
   coeffs_proposed: 'Coefficients proposés',
@@ -30,7 +30,7 @@ export const AFFAIRE_STATUS_LABELS: Record<AffaireStatus, string> = {
   revision: 'Révision',
 };
 
-export const AFFAIRE_TRANSITIONS: Record<AffaireStatus, AffaireStatus[]> = {
+export const DEVIS_TRANSITIONS: Record<DevisStatus, DevisStatus[]> = {
   open: ['study'],
   study: ['coeffs_proposed'],
   coeffs_proposed: ['coeffs_validated', 'study'],
@@ -44,33 +44,33 @@ export const AFFAIRE_TRANSITIONS: Record<AffaireStatus, AffaireStatus[]> = {
 
 export class InvalidTransitionError extends Error {
   constructor(
-    public readonly from: AffaireStatus,
-    public readonly to: AffaireStatus,
+    public readonly from: DevisStatus,
+    public readonly to: DevisStatus,
   ) {
     super(`Invalid affaire transition: ${from} -> ${to}`);
     this.name = 'InvalidTransitionError';
   }
 }
 
-export function isAffaireStatus(value: string): value is AffaireStatus {
-  return value in AFFAIRE_TRANSITIONS;
+export function isDevisStatus(value: string): value is DevisStatus {
+  return value in DEVIS_TRANSITIONS;
 }
 
-export function nextStates(from: AffaireStatus): AffaireStatus[] {
-  return AFFAIRE_TRANSITIONS[from] ?? [];
+export function nextStates(from: DevisStatus): DevisStatus[] {
+  return DEVIS_TRANSITIONS[from] ?? [];
 }
 
-export function canTransition(from: AffaireStatus, to: AffaireStatus): boolean {
+export function canTransition(from: DevisStatus, to: DevisStatus): boolean {
   return nextStates(from).includes(to);
 }
 
-export function assertTransition(from: AffaireStatus, to: AffaireStatus): void {
+export function assertTransition(from: DevisStatus, to: DevisStatus): void {
   if (!canTransition(from, to)) {
     throw new InvalidTransitionError(from, to);
   }
 }
 
 /** Only a won affaire may be transferred downstream (phase 2). */
-export function isTransferable(status: AffaireStatus): boolean {
+export function isTransferable(status: DevisStatus): boolean {
   return status === 'won';
 }

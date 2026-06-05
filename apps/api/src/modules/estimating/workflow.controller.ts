@@ -3,24 +3,24 @@ import { RequiresCapability } from '../../core/entitlements/requires-capability.
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { WorkflowService } from './workflow.service';
 
-@Controller('affaires/:affaireId')
+@Controller('devis/:devisId')
 export class WorkflowController {
   constructor(private readonly workflow: WorkflowService) {}
 
   @Post('transition')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')
-  transition(@Param('affaireId') affaireId: string, @Body() body: { to?: string }) {
+  transition(@Param('devisId') devisId: string, @Body() body: { to?: string }) {
     if (!body?.to) {
       throw new BadRequestException('to (target status) is required');
     }
-    return this.workflow.transition(affaireId, body.to);
+    return this.workflow.transition(devisId, body.to);
   }
 
   @Get('transfer-check')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.read')
-  transferCheck(@Param('affaireId') affaireId: string) {
-    return this.workflow.transferCheck(affaireId);
+  transferCheck(@Param('devisId') devisId: string) {
+    return this.workflow.transferCheck(devisId);
   }
 }

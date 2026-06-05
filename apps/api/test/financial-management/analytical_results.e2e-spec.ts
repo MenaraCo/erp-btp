@@ -79,9 +79,9 @@ describe('Tableau de bord analytique 5 niveaux (§5.8) — imputation au code an
     await as('post', `/versions/${created.version.id}/lines`).send({ type: 'ouvrage', code: '1', designation: 'Lot', sourceOuvrageId: ouv.id, quantity: '10' }).expect(201);
     await as('put', `/versions/${created.version.id}/sale-sheet`).send({ byNature: { labor: '1', material: '1', equipment: '1', subcontract: '1' }, fraisCoefficient: '1', tvaRate: '0.20' }).expect(200);
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
-      await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
+      await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
+    chantierId = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body.chantier.id;
 
     // engagé 950 + réalisé 900 imputés au code analytique
     const ddp = (await as('post', `/chantiers/${chantierId}/purchase-requests`).send({ code: 'DDP' }).expect(201)).body;

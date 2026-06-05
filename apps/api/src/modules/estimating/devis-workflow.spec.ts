@@ -4,9 +4,9 @@ import {
   InvalidTransitionError,
   isTransferable,
   nextStates,
-} from './affaire-workflow';
+} from './devis-workflow';
 
-describe('affaire-workflow — machine à états (rule #7)', () => {
+describe('devis-workflow — machine à états (rule #7)', () => {
   it('autorise le chemin nominal jusqu’à Gagnée', () => {
     expect(canTransition('open', 'study')).toBe(true);
     expect(canTransition('study', 'coeffs_proposed')).toBe(true);

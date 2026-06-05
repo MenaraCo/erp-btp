@@ -11,7 +11,7 @@ import {
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { DataGridQuery } from '../../core/common/data-grid/data-grid';
-import { AffaireInput, DevisLineInput, DevisService } from './devis.service';
+import { AffaireInput, DevisInput, DevisLineInput, DevisService } from './devis.service';
 
 @Controller()
 export class DevisController {
@@ -41,11 +41,28 @@ export class DevisController {
     return this.devis.getAffaire(affaireId);
   }
 
-  @Post('affaires/:affaireId/versions')
+  @Post('affaires/:affaireId/devis')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')
-  createVersion(@Param('affaireId') affaireId: string, @Body() body: { label?: string }) {
-    return this.devis.createVersion(affaireId, body?.label);
+  createDevis(@Param('affaireId') affaireId: string, @Body() body: DevisInput) {
+    if (!body?.designation) {
+      throw new BadRequestException('designation is required');
+    }
+    return this.devis.createDevis(affaireId, body);
+  }
+
+  @Get('devis/:devisId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  getDevis(@Param('devisId') devisId: string) {
+    return this.devis.getDevis(devisId);
+  }
+
+  @Post('devis/:devisId/versions')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  createVersion(@Param('devisId') devisId: string, @Body() body: { label?: string }) {
+    return this.devis.createVersion(devisId, body?.label);
   }
 
   @Post('versions/:versionId/lines')

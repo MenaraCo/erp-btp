@@ -40,9 +40,9 @@ describe('Gestion financière B.1 — paramètres versionnés + avancement', () 
     await as('post', `/versions/${created.version.id}/lines`).send({ type: 'ouvrage', code: '1', designation: 'Lot', sourceOuvrageId: ouv.id, quantity: '10' }).expect(201);
     await as('put', `/versions/${created.version.id}/sale-sheet`).send({ byNature: { labor: '1', material: '1', equipment: '1', subcontract: '1' }, fraisCoefficient: '1', tvaRate: '0.20' }).expect(200);
     for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
-      await as('post', `/affaires/${created.affaire.id}/transition`).send({ to }).expect(201);
+      await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
-    chantierId = (await as('post', `/affaires/${created.affaire.id}/accept`).expect(201)).body.chantier.id;
+    chantierId = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body.chantier.id;
   });
 
   afterAll(async () => {
