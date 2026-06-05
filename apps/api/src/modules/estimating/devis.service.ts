@@ -67,6 +67,8 @@ export interface DevisLineInput {
   sortOrder?: number;
   /** false for titres non vendables / frais de chantier (ventilated by the feuille de vente). */
   vendable?: boolean;
+  /** marks a titre/sous-titre as option/variante (propagates to descendants). */
+  sectionType?: 'option' | 'variante' | null;
 }
 
 @Injectable()
@@ -348,8 +350,9 @@ export class DevisService {
         await em.query(
           `INSERT INTO devis_line
              (tenant_id, devis_version_id, parent_line_id, type, code, designation, unit,
-              quantity, quantity_formula, pu, source_ouvrage_id, source_resource_id, sort_order, vendable)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+              quantity, quantity_formula, pu, source_ouvrage_id, source_resource_id, sort_order,
+              vendable, section_type)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
           [
             tenantId,
             versionId,
@@ -365,9 +368,26 @@ export class DevisService {
             input.sourceResourceId ?? null,
             input.sortOrder ?? 0,
             input.vendable !== false,
+            input.sectionType ?? null,
           ],
         )
       )[0];
+    });
+  }
+
+  /** Marks a titre/sous-titre (or any line) as option/variante, or clears it (null). */
+  setLineSection(lineId: string, sectionType: 'option' | 'variante' | null) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const exists = await em.query(`SELECT id FROM devis_line WHERE id = $1`, [lineId]);
+      if (exists.length === 0) {
+        throw new NotFoundException(`Unknown devis line "${lineId}"`);
+      }
+      await em.query(
+        `UPDATE devis_line SET section_type = $1, updated_at = now() WHERE id = $2`,
+        [sectionType, lineId],
+      );
+      return (await em.query(`SELECT * FROM devis_line WHERE id = $1`, [lineId]))[0];
     });
   }
 

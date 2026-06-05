@@ -104,6 +104,20 @@ export class DevisController {
     return this.devis.listLines(versionId);
   }
 
+  @Put('lines/:lineId/section')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  setLineSection(
+    @Param('lineId') lineId: string,
+    @Body() body: { sectionType?: 'option' | 'variante' | null },
+  ) {
+    const st = body?.sectionType ?? null;
+    if (st !== null && st !== 'option' && st !== 'variante') {
+      throw new BadRequestException('sectionType must be option, variante or null');
+    }
+    return this.devis.setLineSection(lineId, st);
+  }
+
   @Put('versions/:versionId/variables/:name')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')

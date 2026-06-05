@@ -68,7 +68,9 @@ export class AcceptanceService {
     const versionId = versionRow[0].id as string;
     const fv = await this.vente.computeForVersion(versionId);
     const pvByLine = new Map(fv.items.map((i) => [i.id, i.pv]));
-    const devisLines: DevisLineMeta[] = await runInTenant(this.dataSource, tenantId, (em) =>
+    // Only "main" lines enter the contract: options/variantes are excluded from the marché.
+    const mainLineIds = new Set(fv.items.filter((i) => i.section === 'main').map((i) => i.id));
+    const allLines: DevisLineMeta[] = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
         `SELECT id, code, designation, unit, quantity FROM devis_line
           WHERE devis_version_id = $1 AND type = 'ouvrage' AND vendable = true
@@ -77,6 +79,7 @@ export class AcceptanceService {
         [versionId],
       ),
     );
+    const devisLines = allLines.filter((l) => mainLineIds.has(l.id));
 
     // Phase B — create the marché (on a chantier) + its facturation lines in one transaction.
     const marche = await runInTenant(this.dataSource, tenantId, async (em) => {

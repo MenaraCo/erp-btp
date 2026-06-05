@@ -47,12 +47,16 @@ export interface Remise {
   valeur: Decimal.Value;
 }
 
+export type SectionKind = 'main' | 'option' | 'variante';
+
 export interface VenteItemInput {
   id: string;
   debourseByNature: Partial<Record<Nature, Decimal.Value>>;
   vendable: boolean;
   /** explicit PV override (memorised, line-level "pv forcé") */
   forcedPv?: Decimal.Value | null;
+  /** option/variante are priced but excluded from the contract total; default 'main' */
+  section?: SectionKind;
 }
 
 export interface SaleCoefficients {
@@ -74,6 +78,7 @@ export interface VenteItemResult {
   forced: boolean;
   margeBrute: string;
   margeNette: string;
+  section: SectionKind;
   appliedRates: Record<Nature, { fg: string; benefice: string }>;
 }
 
@@ -91,6 +96,10 @@ export interface VenteResult {
   margeBrute: string;
   margeNette: string;
   coeffGlobalReel: string;
+  /** PV des options (hors total principal) */
+  optionsPvHt: string;
+  /** PV des variantes (hors total principal) */
+  variantesPvHt: string;
   tva: string;
   totalTtc: string;
 }
@@ -130,6 +139,53 @@ function computeRemise(remise: Remise | null | undefined, pvDevis: Decimal): Dec
   return remise.type === 'pct' ? pvDevis.times(v).dividedBy(100) : v;
 }
 
+/** Prices one item from its effective déboursé breakdown (ventilation already folded in). */
+function priceItem(
+  input: VenteItemInput,
+  effBreakdown: NatureBreakdown,
+  ownDebourse: Decimal,
+  coeffs: SaleCoefficients,
+  section: SectionKind,
+): VenteItemResult {
+  let debourse = new Decimal(0);
+  let revient = new Decimal(0);
+  let pvComputed = new Decimal(0);
+  const appliedRates = {} as Record<Nature, { fg: string; benefice: string }>;
+
+  for (const n of NATURES) {
+    const rate = coeffs.byNature[n] ?? { tauxFg: 0, tauxBenefice: 0 };
+    const fg = new Decimal(rate.tauxFg);
+    const ben = new Decimal(rate.tauxBenefice);
+    appliedRates[n] = { fg: fg.toString(), benefice: ben.toString() };
+
+    const eff = effBreakdown[n];
+    const revientN = eff.times(new Decimal(1).plus(fg.dividedBy(100)));
+    const pvN = revientN.times(new Decimal(1).plus(ben.dividedBy(100)));
+    debourse = debourse.plus(eff);
+    revient = revient.plus(revientN);
+    pvComputed = pvComputed.plus(pvN);
+  }
+
+  const ventilatedFrais = debourse.minus(ownDebourse);
+  pvComputed = round2(pvComputed);
+  const forced = input.forcedPv != null;
+  const pv = forced ? round2(new Decimal(input.forcedPv as Decimal.Value)) : pvComputed;
+
+  return {
+    id: input.id,
+    debourse: round2(debourse).toString(),
+    ventilatedFrais: round2(ventilatedFrais).toString(),
+    revient: round2(revient).toString(),
+    pvComputed: pvComputed.toString(),
+    pv: pv.toString(),
+    forced,
+    margeBrute: round2(pv.minus(debourse)).toString(),
+    margeNette: round2(pv.minus(revient)).toString(),
+    section,
+    appliedRates,
+  };
+}
+
 export function computeFeuilleDeVente(
   items: VenteItemInput[],
   coeffs: SaleCoefficients,
@@ -139,13 +195,17 @@ export function computeFeuilleDeVente(
   const prepared = items.map((it) => ({
     input: it,
     breakdown: toBreakdown(it.debourseByNature),
+    section: it.section ?? 'main',
   }));
 
-  const vendable = prepared.filter((p) => p.input.vendable);
+  // Only "main" items count in the contract total and in frais ventilation.
+  const main = prepared.filter((p) => p.section === 'main');
+  const extras = prepared.filter((p) => p.section !== 'main');
+  const vendable = main.filter((p) => p.input.vendable);
 
-  // Per-nature frais totals from non-vendable items, ventilated pro rata over vendable déboursé.
+  // Per-nature frais totals from non-vendable MAIN items, ventilated pro rata over vendable déboursé.
   const fraisByNature = zeroBreakdown();
-  for (const p of prepared) {
+  for (const p of main) {
     if (!p.input.vendable) {
       for (const n of NATURES) {
         fraisByNature[n] = fraisByNature[n].plus(p.breakdown[n]);
@@ -169,48 +229,29 @@ export function computeFeuilleDeVente(
       vendableDebourseTotal.isZero() || fraisTotal.isZero()
         ? new Decimal(0)
         : ownDebourse.dividedBy(vendableDebourseTotal);
-
-    let debourse = new Decimal(0);
-    let revient = new Decimal(0);
-    let pvComputed = new Decimal(0);
-    const appliedRates = {} as Record<Nature, { fg: string; benefice: string }>;
-
+    const eff = zeroBreakdown();
     for (const n of NATURES) {
-      const rate = coeffs.byNature[n] ?? { tauxFg: 0, tauxBenefice: 0 };
-      const fg = new Decimal(rate.tauxFg);
-      const ben = new Decimal(rate.tauxBenefice);
-      appliedRates[n] = { fg: fg.toString(), benefice: ben.toString() };
-
-      // own déboursé of this nature + its ventilated share of the frais of the same nature
-      const eff = p.breakdown[n].plus(fraisByNature[n].times(share));
-      const revientN = eff.times(new Decimal(1).plus(fg.dividedBy(100)));
-      const pvN = revientN.times(new Decimal(1).plus(ben.dividedBy(100)));
-      debourse = debourse.plus(eff);
-      revient = revient.plus(revientN);
-      pvComputed = pvComputed.plus(pvN);
+      eff[n] = p.breakdown[n].plus(fraisByNature[n].times(share));
     }
+    const r = priceItem(p.input, eff, ownDebourse, coeffs, 'main');
+    results.push(r);
+    totalDebourse = totalDebourse.plus(r.debourse);
+    totalRevient = totalRevient.plus(r.revient);
+    pvHorsFrais = pvHorsFrais.plus(r.pv);
+  }
 
-    const ventilatedFrais = debourse.minus(ownDebourse);
-    pvComputed = round2(pvComputed);
-    const forced = p.input.forcedPv != null;
-    const pv = forced ? round2(new Decimal(p.input.forcedPv as Decimal.Value)) : pvComputed;
-
-    results.push({
-      id: p.input.id,
-      debourse: round2(debourse).toString(),
-      ventilatedFrais: round2(ventilatedFrais).toString(),
-      revient: round2(revient).toString(),
-      pvComputed: pvComputed.toString(),
-      pv: pv.toString(),
-      forced,
-      margeBrute: round2(pv.minus(debourse)).toString(),
-      margeNette: round2(pv.minus(revient)).toString(),
-      appliedRates,
-    });
-
-    totalDebourse = totalDebourse.plus(debourse);
-    totalRevient = totalRevient.plus(revient);
-    pvHorsFrais = pvHorsFrais.plus(pv);
+  // Options / variantes : priced standalone (no ventilation), excluded from the contract total.
+  let optionsPvHt = new Decimal(0);
+  let variantesPvHt = new Decimal(0);
+  for (const p of extras) {
+    const own = sum(p.breakdown);
+    const r = priceItem(p.input, p.breakdown, own, coeffs, p.section);
+    results.push(r);
+    if (p.section === 'option') {
+      optionsPvHt = optionsPvHt.plus(r.pv);
+    } else {
+      variantesPvHt = variantesPvHt.plus(r.pv);
+    }
   }
 
   pvHorsFrais = round2(pvHorsFrais);
@@ -237,6 +278,8 @@ export function computeFeuilleDeVente(
     margeBrute: round2(pvNet.minus(totalDebourse)).toString(),
     margeNette: round2(pvNet.minus(totalRevient)).toString(),
     coeffGlobalReel: coeffGlobalReel.toString(),
+    optionsPvHt: round2(optionsPvHt).toString(),
+    variantesPvHt: round2(variantesPvHt).toString(),
     tva: tva.toString(),
     totalTtc: round2(totalTtc).toString(),
   };

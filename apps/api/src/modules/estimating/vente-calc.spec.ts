@@ -137,6 +137,32 @@ describe('vente-calc — feuille de vente', () => {
     expect(res.coeffGlobalReel).toBe('1.32');
   });
 
+  it('options/variantes : valorisées mais exclues du total principal', () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'BASE', vendable: true, debourseByNature: { material: '1000' } },
+        { id: 'OPT', vendable: true, section: 'option', debourseByNature: { material: '500' } },
+        { id: 'VAR', vendable: true, section: 'variante', debourseByNature: { material: '300' } },
+      ],
+      coeffs({
+        byNature: {
+          labor: rate('0', '0'),
+          material: rate('20', '0'), // ×1.2
+          equipment: rate('0', '0'),
+          subcontract: rate('0', '0'),
+        },
+      }),
+    );
+    // total principal = base seule : 1000 × 1.2 = 1200
+    expect(res.totalPvHt).toBe('1200');
+    expect(res.optionsPvHt).toBe('600'); // 500 × 1.2
+    expect(res.variantesPvHt).toBe('360'); // 300 × 1.2
+    // l'option/variante ne reçoit pas de ventilation et garde sa section
+    expect(res.items.find((i) => i.id === 'OPT')!.section).toBe('option');
+    expect(res.items.find((i) => i.id === 'VAR')!.section).toBe('variante');
+    expect(res.items.find((i) => i.id === 'BASE')!.section).toBe('main');
+  });
+
   it('TVA et TTC sur le PV net', () => {
     const res = computeFeuilleDeVente(
       [{ id: 'A', vendable: true, debourseByNature: { material: '390' } }],

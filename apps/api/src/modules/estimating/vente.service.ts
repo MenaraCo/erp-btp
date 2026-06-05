@@ -18,6 +18,7 @@ import {
   FraisType,
   NatureSaleRate,
   SaleCoefficients,
+  SectionKind,
   VenteItemInput,
   VenteResult,
   computeFeuilleDeVente,
@@ -222,10 +223,11 @@ export class VenteService {
       pu_vente: string | null;
       pu_vente_force: boolean;
       vendable: boolean;
+      section_type: 'option' | 'variante' | null;
     }> = await em.query(
       `SELECT dl.id, dl.parent_line_id, dl.type, dl.source_ouvrage_id, dl.source_resource_id,
               dl.nature, r.nature AS resource_nature,
-              dl.quantity, dl.pu, dl.pu_vente, dl.pu_vente_force, dl.vendable
+              dl.quantity, dl.pu, dl.pu_vente, dl.pu_vente_force, dl.vendable, dl.section_type
          FROM devis_line dl
          LEFT JOIN resource r ON r.id = dl.source_resource_id
         WHERE dl.devis_version_id = $1`,
@@ -239,6 +241,19 @@ export class VenteService {
         priceableParents.add(l.parent_line_id);
       }
     }
+
+    // A line's section (option/variante) is inherited from the nearest ancestor that carries one.
+    const byId = new Map(lines.map((l) => [l.id, l]));
+    const resolveSection = (start: (typeof lines)[number]): SectionKind => {
+      let cur: (typeof lines)[number] | undefined = start;
+      while (cur) {
+        if (cur.section_type) {
+          return cur.section_type;
+        }
+        cur = cur.parent_line_id ? byId.get(cur.parent_line_id) : undefined;
+      }
+      return 'main';
+    };
 
     const items: VenteItemInput[] = [];
     for (const l of lines) {
@@ -266,7 +281,13 @@ export class VenteService {
           ? new Decimal(l.pu_vente).times(qty).toString()
           : null;
 
-      items.push({ id: l.id, vendable: l.vendable, debourseByNature, forcedPv });
+      items.push({
+        id: l.id,
+        vendable: l.vendable,
+        debourseByNature,
+        forcedPv,
+        section: resolveSection(l),
+      });
     }
     return items;
   }
