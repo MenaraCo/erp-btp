@@ -19,6 +19,23 @@ import {
 } from './metre-eval';
 import { deriveAffaireStatus } from './affaire-derived-status';
 import { DevisStatus } from './devis-workflow';
+import { VenteService } from './vente.service';
+
+export interface AffairePatch {
+  name?: string;
+  clientId?: string | null;
+  moa?: string | null;
+  lieuExecution?: Record<string, unknown> | null;
+  budgetObjectif?: number | string | null;
+  responsable?: string | null;
+  notes?: string | null;
+}
+
+export interface DevisPatch {
+  designation?: string;
+  numero?: string | null;
+  type?: DevisType;
+}
 
 export type DevisLineType = 'titre' | 'sous_titre' | 'ouvrage' | 'ressource';
 export type DevisType = 'principal' | 'lot' | 'avenant';
@@ -57,6 +74,7 @@ export class DevisService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
+    private readonly vente: VenteService,
   ) {}
 
   /** Creates an affaire with its first (principal) devis and that devis's first version. */
@@ -133,10 +151,14 @@ export class DevisService {
     );
   }
 
-  /** Returns a single affaire with its devis (each with their versions), for the affaire screen. */
-  getAffaire(affaireId: string) {
+  /**
+   * Returns a single affaire with its devis (each with versions + aggregated KPIs from its latest
+   * version's feuille de vente), for the affaire screen. KPIs are computed outside the read
+   * transaction to avoid nesting runInTenant.
+   */
+  async getAffaire(affaireId: string) {
     const tenantId = this.context.requireTenantId();
-    return runInTenant(this.dataSource, tenantId, async (em) => {
+    const base = await runInTenant(this.dataSource, tenantId, async (em) => {
       const affaire = (await em.query(`SELECT * FROM affaire WHERE id = $1`, [affaireId]))[0];
       if (!affaire) {
         throw new NotFoundException(`Unknown affaire "${affaireId}"`);
@@ -152,14 +174,36 @@ export class DevisService {
           WHERE d.affaire_id = $1 ORDER BY v.version_no ASC`,
         [affaireId],
       );
-      return {
-        affaire,
-        devis: devis.map((d: { id: string }) => ({
-          ...d,
-          versions: versions.filter((v: { devis_id: string }) => v.devis_id === d.id),
-        })),
-      };
+      return { affaire, devis, versions };
     });
+
+    const devis = [];
+    let totals = { debourse: 0, revient: 0, pvHt: 0, margeBrute: 0, margeNette: 0 };
+    for (const d of base.devis as Array<{ id: string }>) {
+      const dv = (base.versions as Array<{ id: string; devis_id: string; version_no: number }>)
+        .filter((v) => v.devis_id === d.id)
+        .sort((a, b) => b.version_no - a.version_no);
+      let kpis = null;
+      if (dv.length > 0) {
+        const fv = await this.vente.computeForVersion(dv[0].id);
+        kpis = {
+          debourse: fv.totalDebourse,
+          revient: fv.totalRevient,
+          pvHt: fv.totalPvHt,
+          margeBrute: fv.margeBrute,
+          margeNette: fv.margeNette,
+        };
+        totals = {
+          debourse: totals.debourse + Number(fv.totalDebourse),
+          revient: totals.revient + Number(fv.totalRevient),
+          pvHt: totals.pvHt + Number(fv.totalPvHt),
+          margeBrute: totals.margeBrute + Number(fv.margeBrute),
+          margeNette: totals.margeNette + Number(fv.margeNette),
+        };
+      }
+      devis.push({ ...d, versions: dv.sort((a, b) => a.version_no - b.version_no), kpis });
+    }
+    return { affaire: base.affaire, devis, totals };
   }
 
   /** Returns a devis with its versions (read-side, for the devis editor). */
@@ -183,6 +227,61 @@ export class DevisService {
         [devisId],
       );
       return { devis, versions };
+    });
+  }
+
+  /** Updates affaire metadata (lieu d'exécution structuré, budget, responsable, notes…). */
+  updateAffaire(affaireId: string, patch: AffairePatch) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const exists = await em.query(`SELECT id FROM affaire WHERE id = $1`, [affaireId]);
+      if (exists.length === 0) {
+        throw new NotFoundException(`Unknown affaire "${affaireId}"`);
+      }
+      await em.query(
+        `UPDATE affaire SET
+           name = COALESCE($2, name),
+           client_id = $3,
+           moa = $4,
+           lieu_execution = $5::jsonb,
+           budget_objectif = $6,
+           responsable = $7,
+           notes = $8,
+           updated_at = now()
+         WHERE id = $1`,
+        [
+          affaireId,
+          patch.name ?? null,
+          patch.clientId ?? null,
+          patch.moa ?? null,
+          patch.lieuExecution != null ? JSON.stringify(patch.lieuExecution) : null,
+          patch.budgetObjectif != null ? String(patch.budgetObjectif) : null,
+          patch.responsable ?? null,
+          patch.notes ?? null,
+        ],
+      );
+      return (await em.query(`SELECT * FROM affaire WHERE id = $1`, [affaireId]))[0];
+    });
+  }
+
+  /** Updates a devis's metadata (designation, numero, type). */
+  updateDevis(devisId: string, patch: DevisPatch) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const exists = await em.query(`SELECT id FROM devis WHERE id = $1`, [devisId]);
+      if (exists.length === 0) {
+        throw new NotFoundException(`Unknown devis "${devisId}"`);
+      }
+      await em.query(
+        `UPDATE devis SET
+           designation = COALESCE($2, designation),
+           numero = $3,
+           type = COALESCE($4, type),
+           updated_at = now()
+         WHERE id = $1`,
+        [devisId, patch.designation ?? null, patch.numero ?? null, patch.type ?? null],
+      );
+      return (await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]))[0];
     });
   }
 

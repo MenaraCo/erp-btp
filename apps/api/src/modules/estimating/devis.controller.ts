@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -11,7 +12,14 @@ import {
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { DataGridQuery } from '../../core/common/data-grid/data-grid';
-import { AffaireInput, DevisInput, DevisLineInput, DevisService } from './devis.service';
+import {
+  AffaireInput,
+  AffairePatch,
+  DevisInput,
+  DevisLineInput,
+  DevisPatch,
+  DevisService,
+} from './devis.service';
 
 @Controller()
 export class DevisController {
@@ -39,6 +47,20 @@ export class DevisController {
   @RequiresPermission('estimating.devis.read')
   getAffaire(@Param('affaireId') affaireId: string) {
     return this.devis.getAffaire(affaireId);
+  }
+
+  @Patch('affaires/:affaireId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  updateAffaire(@Param('affaireId') affaireId: string, @Body() body: AffairePatch) {
+    return this.devis.updateAffaire(affaireId, body ?? {});
+  }
+
+  @Patch('devis/:devisId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  updateDevis(@Param('devisId') devisId: string, @Body() body: DevisPatch) {
+    return this.devis.updateDevis(devisId, body ?? {});
   }
 
   @Post('affaires/:affaireId/devis')
