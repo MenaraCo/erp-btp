@@ -161,25 +161,27 @@ C'est la partie la plus importante : le modèle métier *est* l'avantage concurr
 
 ### 5.2 Étude de prix (affaire)
 
-- **Affaire / Étude** : `code`, `client`, `architecte/MOA`, dates, **statut workflow**, **version**. Une affaire gère plusieurs **versions** (versioning).
-- **Corps du devis** : arbre hiérarchique de lignes typées — **Titre → Sous-titre → Ouvrage → Ressource** (profondeur libre). Chaque ligne : code, désignation, unité, quantité (métré), PU.
+- **Affaire → Devis → Version** *(implémenté)* : une **affaire** (pivot commercial) regroupe **plusieurs devis** (ex. Lot 1 Peinture, Lot 2 Sols, avenant). **Tous les devis d'une affaire partagent le même client et le même lieu d'exécution** (hérités, non saisissables au niveau devis). L'affaire porte : `code`, `client`, `MOA`, **lieu d'exécution structuré** (objet : adresse/CP/ville/pays, +coordonnées — pour enrichissement IA), **budget objectif**, **responsable**, notes. Chaque **devis** porte : numéro, désignation, type (principal/lot/avenant), **statut workflow** (open→…→gagné/perdu) et gère plusieurs **versions** (versioning). Le **statut de l'affaire est DÉRIVÉ** de ses devis : `en cours` / **`gagnée partiellement`** (une partie des devis gagnés) / `gagnée` (tous) / `perdue`. **C'est le devis (pas l'affaire) qui est transféré en marché** à l'acceptation. Modèle : `Affaire` 1→N `Devis` 1→N `Version` ; agrégation des KPI (déboursé, revient, PV, marges) au niveau affaire.
+- **Corps du devis & montage in-place** : arbre hiérarchique de lignes typées — **Titre → Sous-titre → Ouvrage → Ressource** (profondeur libre). Chaque ligne : code, désignation, unité, quantité (métré), PU. **Montage sur place** : chaque section porte des actions inline (+ Sous-titre / + Ouvrage [copie le sous-détail] / + Ligne / + Texte libre), sous-totaux par niveau, suppression en cascade.
+- **Sous-détail d'ouvrage copié & modifiable** *(implémenté)* : poser un ouvrage de bibliothèque **copie ses composants** en lignes ressource enfants **éditables** (ratio/quantité, perte, PU, nature), **découplées de la bibliothèque** (instantané). Le conducteur ajuste le sous-détail pour CE devis sans impacter la bibliothèque.
+- **Options & variantes** *(implémenté)* : un titre/sous-titre peut être marqué **option** ou **variante** (propagé à ses descendants) ; ces lignes sont **valorisées mais exclues** du total contractuel, des marges, de la ventilation et du marché — présentées à part (PV propre).
 - **Métré** : quantité calculable par **formule** avec **variables globales** (ex. surface, linéaire réutilisés) et « métré temps ».
 - **Déboursé / sous-détail** : décomposition du coût de revient d'un ouvrage (les ressources qui le composent). Distinguer **déboursé sec** (coût direct).
 - **Titre non vendable / frais de chantier** : coûts d'installation et frais de chantier non facturés en ligne directe, à **ventiler** ensuite sur les ouvrages vendables.
 - **Feuille de vente** *(implémentée)* : passe du **déboursé** au **prix de vente** par une **cascade paramétrée par nature** — `déboursé × (1 + FG %) = prix de revient`, puis `× (1 + Bénéfice %) = prix de vente`, où **FG (frais généraux) et Bénéfice sont réglés séparément pour chacune des 4 natures** (main d'œuvre / matériaux / matériel / sous-traitance). Expose le **prix de revient** comme palier distinct et deux marges — **marge brute** (PV − déboursé) et **marge nette** (PV − prix de revient) — plus le **coefficient global réel**. Gère la **ventilation des titres non vendables** (frais de chantier répartis au prorata du déboursé, **nature conservée**), les **frais annexes** (liste de postes nommés, en % du PV hors frais ou montant fixe), une **remise globale** (% ou fixe), la **TVA**, et le **forçage du PV ligne à ligne** (PV saisi à la main, **mémorisé et tracé**, sans recalcul des autres lignes). **Toutes les lignes vendables sont valorisées** (ouvrage de bibliothèque via son sous-détail, ou ligne manuelle via son PU sur une **nature saisie à la main**). **Le calcul vit côté serveur** (jamais dans l'écran) ; un endpoint dédié renvoie la **config stockée** (coefficients, remise, TVA, frais) pour préremplir l'écran. Écran organisé en **3 onglets** (Étude de prix / Coefficients & frais / Devis client) avec synthèse KPI permanente. Lignes Nota / Pour mémoire / Non compris.
 - **TVA** multi-taux, gestion par société (multi-société dans un même tenant).
 
-### 5.3 Workflow de l'affaire (machine à états)
+### 5.3 Workflow du devis (machine à états)
 
-Implémentez une machine à états explicite :
+Le workflow vit **au niveau du devis** (pas de l'affaire). Machine à états explicite *(implémentée)* :
 
-`Ouverte/Planifiée → Étude en cours → Coefficients proposés → Coefficients validés → Envoyée → {Gagnée | Perdue | Relancée | Révision}`
+`Ouvert/Planifié → Étude en cours → Coefficients proposés → Coefficients validés → Envoyé → {Gagné | Perdu | Relancé | Révision}`
 
-Seule une affaire **Gagnée** peut être transférée en chantier/facturation (cf. module Acceptation).
+Seul un **devis Gagné** peut être transféré en chantier/facturation (cf. module Acceptation). Le **statut de l'affaire en découle** (dérivé : en cours / gagnée partiellement / gagnée / perdue).
 
 ### 5.4 Acceptation de commande (le pont)
 
-Transfert d'une affaire gagnée vers l'aval, en **5 étapes** : choix de l'affaire → destination → options → traitement des prix unitaires → budgétisation. **Chaque transfert crée un MARCHÉ** (un contrat) rattaché à un **chantier** — nouveau ou **existant**. Un chantier peut donc recevoir **plusieurs marchés** (voir 5.5).
+Transfert d'un **devis gagné** (et non de l'affaire entière) vers l'aval, en **5 étapes** : choix du devis → destination → options → traitement des prix unitaires → budgétisation. **Chaque transfert crée un MARCHÉ** (un contrat) rattaché à un **chantier** — nouveau ou **existant**. Un chantier peut donc recevoir **plusieurs marchés** (voir 5.5). Les options/variantes du devis sont **exclues** du marché.
 
 - Vers **Suivi de chantiers** : rattache le marché à un chantier (création d'un nouveau chantier, ou sélection d'un chantier existant), avec son **étude d'exécution** (issue du déboursé) et son **budget de vente** (montant du devis) qui **s'ajoutent à l'agrégat du chantier**. Possibilité de transférer le détail des frais généraux. **Initialisation de la nomenclature de chantier par copie** : au transfert, les **ressources, ouvrages et leur rattachement analytique** (famille, code analytique) du devis sont **copiés** dans la nomenclature du chantier. Cette copie est un instantané : ensuite, bibliothèque d'étude et nomenclature de chantier évoluent **indépendamment** (aucune synchronisation).
 - Vers **Facturation** : crée la **chaîne de facturation propre au marché** (devis détaillé ou global → situations → factures).
