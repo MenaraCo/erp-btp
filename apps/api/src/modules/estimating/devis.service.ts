@@ -20,6 +20,24 @@ import {
 import { deriveAffaireStatus } from './affaire-derived-status';
 import { DevisStatus } from './devis-workflow';
 import { VenteService } from './vente.service';
+import { flattenOuvrageToResources, RawOuvrage } from './ouvrage-flatten';
+
+export interface InsertOuvrageInput {
+  ouvrageId: string;
+  parentLineId?: string | null;
+  quantity?: string | number | null;
+  designation?: string | null;
+  sortOrder?: number;
+}
+
+export interface DevisLinePatch {
+  designation?: string;
+  quantity?: string | number | null;
+  unit?: string | null;
+  pu?: string | number | null;
+  perte?: string | number | null;
+  nature?: string | null;
+}
 
 export interface AffairePatch {
   name?: string;
@@ -386,6 +404,152 @@ export class DevisService {
       await em.query(
         `UPDATE devis_line SET section_type = $1, updated_at = now() WHERE id = $2`,
         [sectionType, lineId],
+      );
+      return (await em.query(`SELECT * FROM devis_line WHERE id = $1`, [lineId]))[0];
+    });
+  }
+
+  /** Loads all ouvrages + components (with resource meta) for the pure flatten. */
+  private async loadRawOuvrages(em: EntityManager): Promise<Map<string, RawOuvrage>> {
+    const ouvrages = await em.query(`SELECT id FROM ouvrage`);
+    const components = await em.query(
+      `SELECT oc.parent_ouvrage_id, oc.kind, oc.quantity, oc.rate,
+              oc.child_ouvrage_id, oc.child_resource_id,
+              r.code, r.label, r.nature, r.unit, r.unit_cost
+         FROM ouvrage_component oc
+         LEFT JOIN resource r ON r.id = oc.child_resource_id`,
+    );
+    const map = new Map<string, RawOuvrage>();
+    for (const o of ouvrages) {
+      map.set(o.id, { id: o.id, components: [] });
+    }
+    for (const c of components) {
+      const parent = map.get(c.parent_ouvrage_id);
+      if (!parent) {
+        continue;
+      }
+      parent.components.push({
+        kind: c.kind,
+        quantity: c.quantity ?? 0,
+        rate: c.rate ?? 0,
+        childOuvrageId: c.child_ouvrage_id ?? null,
+        resourceId: c.child_resource_id ?? null,
+        code: c.code ?? null,
+        designation: c.label ?? 'Ressource',
+        nature: c.nature ?? 'material',
+        unit: c.unit ?? null,
+        unitCost: c.unit_cost ?? 0,
+      });
+    }
+    return map;
+  }
+
+  /**
+   * Inserts a library ouvrage into a version, COPYING its sous-détail into editable child
+   * ressource lines (M.4). The copy is a snapshot, decoupled from the library.
+   */
+  insertOuvrageFromLibrary(versionId: string, input: InsertOuvrageInput) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const version = await em.query(`SELECT id FROM devis_version WHERE id = $1`, [versionId]);
+      if (version.length === 0) {
+        throw new NotFoundException(`Unknown version "${versionId}"`);
+      }
+      if (input.parentLineId) {
+        const parent = await em.query(
+          `SELECT id FROM devis_line WHERE id = $1 AND devis_version_id = $2`,
+          [input.parentLineId, versionId],
+        );
+        if (parent.length === 0) {
+          throw new BadRequestException('parent line does not belong to this version');
+        }
+      }
+      const ouvrage = (
+        await em.query(`SELECT id, code, label, unit FROM ouvrage WHERE id = $1`, [input.ouvrageId])
+      )[0];
+      if (!ouvrage) {
+        throw new BadRequestException(`Unknown ouvrage "${input.ouvrageId}"`);
+      }
+
+      const ouvrageLine = (
+        await em.query(
+          `INSERT INTO devis_line
+             (tenant_id, devis_version_id, parent_line_id, type, code, designation, unit,
+              quantity, source_ouvrage_id, sort_order, vendable)
+           VALUES ($1,$2,$3,'ouvrage',$4,$5,$6,$7,$8,$9,true) RETURNING *`,
+          [
+            tenantId,
+            versionId,
+            input.parentLineId ?? null,
+            ouvrage.code ?? null,
+            input.designation ?? ouvrage.label,
+            ouvrage.unit ?? null,
+            input.quantity != null ? String(input.quantity) : '1',
+            input.ouvrageId,
+            input.sortOrder ?? 0,
+          ],
+        )
+      )[0];
+
+      const raws = await this.loadRawOuvrages(em);
+      const flat = flattenOuvrageToResources(input.ouvrageId, raws);
+      const components = [];
+      for (let i = 0; i < flat.length; i++) {
+        const f = flat[i];
+        const child = (
+          await em.query(
+            `INSERT INTO devis_line
+               (tenant_id, devis_version_id, parent_line_id, type, code, designation, unit,
+                quantity, pu, perte, nature, source_resource_id, sort_order, vendable)
+             VALUES ($1,$2,$3,'ressource',$4,$5,$6,$7,$8,0,$9,$10,$11,true) RETURNING *`,
+            [
+              tenantId,
+              versionId,
+              ouvrageLine.id,
+              f.code,
+              f.designation,
+              f.unit,
+              f.qtyPerUnit,
+              f.unitCost,
+              f.nature,
+              f.resourceId,
+              i,
+            ],
+          )
+        )[0];
+        components.push(child);
+      }
+      return { ouvrage: ouvrageLine, components };
+    });
+  }
+
+  /** Updates an editable devis line (designation, quantity, unit, pu, perte, nature). */
+  updateLine(lineId: string, patch: DevisLinePatch) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const exists = await em.query(`SELECT id FROM devis_line WHERE id = $1`, [lineId]);
+      if (exists.length === 0) {
+        throw new NotFoundException(`Unknown devis line "${lineId}"`);
+      }
+      await em.query(
+        `UPDATE devis_line SET
+           designation = COALESCE($2, designation),
+           quantity = COALESCE($3, quantity),
+           unit = COALESCE($4, unit),
+           pu = COALESCE($5, pu),
+           perte = COALESCE($6, perte),
+           nature = COALESCE($7, nature),
+           updated_at = now()
+         WHERE id = $1`,
+        [
+          lineId,
+          patch.designation ?? null,
+          patch.quantity != null ? String(patch.quantity) : null,
+          patch.unit ?? null,
+          patch.pu != null ? String(patch.pu) : null,
+          patch.perte != null ? String(patch.perte) : null,
+          patch.nature ?? null,
+        ],
       );
       return (await em.query(`SELECT * FROM devis_line WHERE id = $1`, [lineId]))[0];
     });

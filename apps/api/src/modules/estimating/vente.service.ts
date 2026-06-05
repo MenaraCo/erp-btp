@@ -200,10 +200,11 @@ export class VenteService {
   }
 
   /**
-   * Builds one vente item per priceable leaf line (type ouvrage/ressource without a priceable
-   * child, to avoid double counting). Déboursé comes from the ouvrage breakdown when the line
-   * references a library ouvrage, otherwise from pu × quantity on the line's manual nature
-   * (resource nature as fallback). A forced unit sale price (pu_vente_force) becomes forcedPv.
+   * Builds the priced items of a version. An OUVRAGE line is the priced unit: its déboursé comes
+   * from its editable copied children (ressource lines) when present (M.4), otherwise from the
+   * live library breakdown. A RESSOURCE line is priced only when standalone (not a child of an
+   * ouvrage — those are the ouvrage's sous-détail). Effective quantity of a child = ouvrage qty ×
+   * line qty × (1 + perte%). A forced unit sale price (pu_vente_force) becomes forcedPv.
    */
   private async buildItems(
     em: EntityManager,
@@ -220,6 +221,7 @@ export class VenteService {
       resource_nature: Nature | null;
       quantity: string | null;
       pu: string | null;
+      perte: string | null;
       pu_vente: string | null;
       pu_vente_force: boolean;
       vendable: boolean;
@@ -227,23 +229,24 @@ export class VenteService {
     }> = await em.query(
       `SELECT dl.id, dl.parent_line_id, dl.type, dl.source_ouvrage_id, dl.source_resource_id,
               dl.nature, r.nature AS resource_nature,
-              dl.quantity, dl.pu, dl.pu_vente, dl.pu_vente_force, dl.vendable, dl.section_type
+              dl.quantity, dl.pu, dl.perte, dl.pu_vente, dl.pu_vente_force, dl.vendable, dl.section_type
          FROM devis_line dl
          LEFT JOIN resource r ON r.id = dl.source_resource_id
         WHERE dl.devis_version_id = $1`,
       [versionId],
     );
 
-    // Parents that hold a priceable child are containers, not priced themselves.
-    const priceableParents = new Set<string>();
+    const byId = new Map(lines.map((l) => [l.id, l]));
+    const childrenByParent = new Map<string, typeof lines>();
     for (const l of lines) {
-      if ((l.type === 'ouvrage' || l.type === 'ressource') && l.parent_line_id) {
-        priceableParents.add(l.parent_line_id);
+      if (l.type === 'ressource' && l.parent_line_id) {
+        const arr = childrenByParent.get(l.parent_line_id) ?? [];
+        arr.push(l);
+        childrenByParent.set(l.parent_line_id, arr);
       }
     }
 
     // A line's section (option/variante) is inherited from the nearest ancestor that carries one.
-    const byId = new Map(lines.map((l) => [l.id, l]));
     const resolveSection = (start: (typeof lines)[number]): SectionKind => {
       let cur: (typeof lines)[number] | undefined = start;
       while (cur) {
@@ -255,25 +258,49 @@ export class VenteService {
       return 'main';
     };
 
+    const addNature = (
+      bucket: Partial<Record<Nature, string>>,
+      nature: Nature,
+      amount: Decimal,
+    ) => {
+      bucket[nature] = new Decimal(bucket[nature] ?? 0).plus(amount).toString();
+    };
+    const effQty = (l: (typeof lines)[number], ouvrageQty: Decimal) =>
+      ouvrageQty
+        .times(new Decimal(l.quantity ?? 0))
+        .times(new Decimal(1).plus(new Decimal(l.perte ?? 0).dividedBy(100)));
+
     const items: VenteItemInput[] = [];
     for (const l of lines) {
-      if (l.type !== 'ouvrage' && l.type !== 'ressource') {
+      // Ressource children of an ouvrage are detail (priced via their parent ouvrage), not items.
+      const parent = l.parent_line_id ? byId.get(l.parent_line_id) : undefined;
+      if (l.type === 'ressource' && parent?.type === 'ouvrage') {
         continue;
       }
-      if (priceableParents.has(l.id)) {
-        continue; // container line is its priceable children's sum
+      if (l.type !== 'ouvrage' && l.type !== 'ressource') {
+        continue;
       }
       const qty = new Decimal(l.quantity ?? 0);
       const debourseByNature: Partial<Record<Nature, string>> = {};
 
-      if (l.type === 'ouvrage' && l.source_ouvrage_id) {
-        const unit = breakdowns.get(l.source_ouvrage_id) ?? zeroBreakdown();
-        for (const n of NATURES) {
-          debourseByNature[n] = unit[n].times(qty).toString();
+      if (l.type === 'ouvrage') {
+        const children = childrenByParent.get(l.id) ?? [];
+        if (children.length > 0) {
+          // déboursé agrégé depuis le sous-détail copié & éditable
+          for (const c of children) {
+            const nature: Nature = c.nature ?? c.resource_nature ?? 'material';
+            addNature(debourseByNature, nature, new Decimal(c.pu ?? 0).times(effQty(c, qty)));
+          }
+        } else if (l.source_ouvrage_id) {
+          const unit = breakdowns.get(l.source_ouvrage_id) ?? zeroBreakdown();
+          for (const n of NATURES) {
+            debourseByNature[n] = unit[n].times(qty).toString();
+          }
         }
       } else {
+        // ressource autonome (sous un titre) : pu × qty × (1+perte)
         const nature: Nature = l.nature ?? l.resource_nature ?? 'material';
-        debourseByNature[nature] = new Decimal(l.pu ?? 0).times(qty).toString();
+        addNature(debourseByNature, nature, new Decimal(l.pu ?? 0).times(effQty(l, new Decimal(1))));
       }
 
       const forcedPv =

@@ -17,8 +17,10 @@ import {
   AffairePatch,
   DevisInput,
   DevisLineInput,
+  DevisLinePatch,
   DevisPatch,
   DevisService,
+  InsertOuvrageInput,
 } from './devis.service';
 
 @Controller()
@@ -95,6 +97,23 @@ export class DevisController {
       throw new BadRequestException('type and designation are required');
     }
     return this.devis.addLine(versionId, body);
+  }
+
+  @Post('versions/:versionId/ouvrages')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  insertOuvrage(@Param('versionId') versionId: string, @Body() body: InsertOuvrageInput) {
+    if (!body?.ouvrageId) {
+      throw new BadRequestException('ouvrageId is required');
+    }
+    return this.devis.insertOuvrageFromLibrary(versionId, body);
+  }
+
+  @Patch('lines/:lineId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  updateLine(@Param('lineId') lineId: string, @Body() body: DevisLinePatch) {
+    return this.devis.updateLine(lineId, body ?? {});
   }
 
   @Get('versions/:versionId/lines')
