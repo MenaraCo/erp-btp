@@ -468,6 +468,65 @@ table.grid tbody tr:hover {
   background: #94a3b8;
 }
 
+/* ── Éditeur de devis : contenu + panneau synthèse à droite ── */
+.editor-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.editor-main {
+  min-width: 0;
+}
+
+.synthese-panel {
+  position: sticky;
+  top: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.synthese-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.synthese-row:last-child {
+  border-bottom: none;
+}
+.synthese-row .lbl {
+  color: var(--muted);
+}
+.synthese-row .val {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-strong);
+}
+
+.editor-tab {
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .editor-grid {
+    grid-template-columns: 1fr;
+  }
+  .synthese-panel {
+    position: static;
+  }
+}
+
 /* ── Container queries (panneaux denses) ── */
 [data-panel] {
   container-type: inline-size;

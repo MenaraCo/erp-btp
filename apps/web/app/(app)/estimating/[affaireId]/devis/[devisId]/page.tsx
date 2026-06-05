@@ -205,7 +205,7 @@ export default function DevisEditorPage() {
     subcontract: { fg: '5', ben: '5' },
   });
   const [remise, setRemise] = useState<{ type: 'pct' | 'fixe'; valeur: string }>({ type: 'pct', valeur: '0' });
-  const [tva, setTva] = useState('0.20');
+  const [tva, setTva] = useState('20'); // saisi en % (20 = 20 %)
   const setSale = useMutation({
     mutationFn: () =>
       apiFetch(`/versions/${versionId}/sale-sheet`, {
@@ -218,7 +218,7 @@ export default function DevisEditorPage() {
             subcontract: { tauxFg: coef.subcontract.fg, tauxBenefice: coef.subcontract.ben },
           },
           remise: { type: remise.type, valeur: remise.valeur || '0' },
-          tvaRate: tva,
+          tvaRate: String((Number(tva) || 0) / 100), // % → fraction pour le stockage
         },
         token,
       }),
@@ -253,6 +253,18 @@ export default function DevisEditorPage() {
     () => new Map((sale.data?.items ?? []).map((i) => [i.id, i])),
     [sale.data],
   );
+  // Onglet « Devis client » : titres + lignes valorisées, SANS le sous-détail ressources
+  // (les ressources enfants d'un ouvrage sont du détail de débours, pas du devis client).
+  const ouvrageIds = useMemo(
+    () => new Set((lines.data ?? []).filter((l) => l.type === 'ouvrage').map((l) => l.id)),
+    [lines.data],
+  );
+  const clientLines = useMemo(
+    () => ordered.filter(
+      (o) => !(o.line.type === 'ressource' && o.line.parent_line_id && ouvrageIds.has(o.line.parent_line_id)),
+    ),
+    [ordered, ouvrageIds],
+  );
 
   // Préremplit le formulaire avec la config stockée (une fois par version chargée).
   const cfgInit = useRef<string | null>(null);
@@ -269,7 +281,7 @@ export default function DevisEditorPage() {
         subcontract: { fg: b.subcontract.tauxFg, ben: b.subcontract.tauxBenefice },
       });
       if (cfg.remise) setRemise({ type: cfg.remise.type, valeur: String(Number(cfg.remise.valeur)) });
-      if (cfg.tvaRate) setTva(String(Number(cfg.tvaRate)));
+      if (cfg.tvaRate) setTva(String(Number(cfg.tvaRate) * 100)); // fraction → %
     }
     setFrais((cfg.fraisAnnexes ?? []).map((f) => ({
       designation: f.designation, type: f.type, valeur: String(Number(f.valeur)),
@@ -320,39 +332,20 @@ export default function DevisEditorPage() {
             </div>
           </div>
 
-          <div className="card-grid" style={{ marginTop: 12 }}>
-            <div className="card"><h2>Déboursé</h2><div className="stat">{euro(sale.data?.totalDebourse)}</div></div>
-            <div className="card"><h2>Prix de revient</h2><div className="stat">{euro(sale.data?.totalRevient)}</div></div>
-            <div className="card">
-              <h2>Total HT</h2><div className="stat">{euro(sale.data?.totalPvHt)}</div>
-              {sale.data && <p className="muted" style={{ margin: 0 }}>coeff. global {Number(sale.data.coeffGlobalReel).toFixed(3)}</p>}
-            </div>
-            <div className="card">
-              <h2>Marge nette</h2>
-              <div className="stat">{euro(sale.data?.margeNette)}</div>
-              {sale.data && Number(sale.data.totalPvHt) > 0 && (
-                <p className="muted" style={{ margin: 0 }}>
-                  {((Number(sale.data.margeNette) / Number(sale.data.totalPvHt)) * 100).toFixed(1)} % · brute {euro(sale.data.margeBrute)}
-                </p>
-              )}
-            </div>
-            <div className="card"><h2>TVA</h2><div className="stat">{euro(sale.data?.tva)}</div></div>
-            <div className="card"><h2>Total TTC</h2><div className="stat">{euro(sale.data?.totalTtc)}</div></div>
-          </div>
-          {sale.isError && <p className="muted">Définissez les coefficients de vente ci-dessous pour calculer les totaux.</p>}
-
-          <div style={{ display: 'flex', gap: 4, marginTop: 16, borderBottom: '1px solid #e5e7eb' }}>
+          <div style={{ display: 'flex', gap: 4, marginTop: 12, borderBottom: '1px solid var(--border)' }}>
             {([['etude', 'Étude de prix'], ['coeffs', 'Coefficients & frais'], ['client', 'Devis client']] as const).map(([key, label]) => (
-              <button key={key} type="button" onClick={() => setTab(key)}
+              <button key={key} type="button" onClick={() => setTab(key)} className="editor-tab"
                 style={{
-                  padding: '8px 14px', border: 'none', background: 'none', cursor: 'pointer',
-                  borderBottom: tab === key ? '2px solid #1e3a8a' : '2px solid transparent',
-                  fontWeight: tab === key ? 600 : 400, color: tab === key ? '#1e3a8a' : '#6b7280',
+                  borderBottom: tab === key ? '2px solid var(--primary)' : '2px solid transparent',
+                  fontWeight: tab === key ? 600 : 400, color: tab === key ? 'var(--primary)' : 'var(--muted)',
                 }}>
                 {label}
               </button>
             ))}
           </div>
+
+          <div className="editor-grid">
+            <div className="editor-main" data-panel="1">
 
           {tab === 'etude' && (
           <div className="card" style={{ marginTop: 16 }}>
@@ -421,7 +414,7 @@ export default function DevisEditorPage() {
                   </select>
                 </Field>
                 <Field label="Valeur remise"><input style={{ width: 80 }} value={remise.valeur} onChange={(e) => setRemise({ ...remise, valeur: e.target.value })} /></Field>
-                <Field label="TVA (ex: 0.20)"><input style={{ width: 80 }} value={tva} onChange={(e) => setTva(e.target.value)} /></Field>
+                <Field label="TVA %"><input style={{ width: 80 }} value={tva} onChange={(e) => setTva(e.target.value)} /></Field>
                 <button className="btn" type="submit" disabled={setSale.isPending}>Appliquer</button>
               </div>
             </form>
@@ -468,43 +461,57 @@ export default function DevisEditorPage() {
           {tab === 'client' && (
           <div className="card" style={{ marginTop: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0 }}>Corps du devis — prix de vente</h2>
-              <button className="btn" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
+              <h2 style={{ margin: 0 }}>Prix de vente par ligne</h2>
+              <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
             </div>
+            <p className="muted" style={{ marginTop: 2 }}>Vue commerciale : prix de vente par ligne, sans le sous-détail de débours.</p>
             {pdfError && <p className="muted">{pdfError}</p>}
-            {ordered.length > 0 ? (
+            {clientLines.length > 0 ? (
               <table className="grid" style={{ marginTop: 12 }}>
                 <thead><tr>
-                  <th>Désignation</th><th>Type</th>
-                  <th style={{ textAlign: 'right' }}>Quantité</th>
-                  <th style={{ textAlign: 'right' }}>Déboursé</th>
-                  <th style={{ textAlign: 'right' }}>PV calculé</th>
-                  <th style={{ textAlign: 'right' }}>PV retenu</th>
+                  <th>Désignation</th>
+                  <th style={{ textAlign: 'right' }}>Qté</th>
+                  <th style={{ textAlign: 'right' }}>PV HT / U</th>
+                  <th style={{ textAlign: 'right' }}>Total HT</th>
                   <th />
                 </tr></thead>
                 <tbody>
-                  {ordered.map(({ line, depth }) => {
+                  {clientLines.map(({ line, depth }) => {
                     const item = itemById.get(line.id);
+                    if (line.type === 'titre' || line.type === 'sous_titre') {
+                      return (
+                        <tr key={line.id} style={{ background: 'var(--surface)' }}>
+                          <td colSpan={5} style={{ paddingLeft: 8 + depth * 16, fontWeight: 600 }}>
+                            {line.code ? <strong>{line.code} </strong> : null}{line.designation}
+                          </td>
+                        </tr>
+                      );
+                    }
+                    if (line.type === 'texte') {
+                      return (
+                        <tr key={line.id}><td colSpan={5} style={{ paddingLeft: 8 + depth * 16, fontStyle: 'italic', color: 'var(--muted)' }}>{line.designation}</td></tr>
+                      );
+                    }
+                    const qty = Number(line.quantity) || 0;
+                    const puVente = item && qty ? Number(item.pv) / qty : null;
                     return (
                       <tr key={line.id} style={item?.forced ? { background: '#fff7ed' } : undefined}>
-                        <td style={{ paddingLeft: 8 + depth * 20 }}>{line.code ? <strong>{line.code} </strong> : null}{line.designation}</td>
-                        <td className="muted">{TYPE_LABELS[line.type] ?? line.type}</td>
+                        <td style={{ paddingLeft: 8 + depth * 16 }}>{line.designation}</td>
                         <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
-                        <td style={{ textAlign: 'right' }}>{item ? euro(item.debourse) : '—'}</td>
-                        <td style={{ textAlign: 'right' }} className="muted">{item ? euro(item.pvComputed) : '—'}</td>
-                        <td style={{ textAlign: 'right', fontWeight: item?.forced ? 600 : undefined, color: item?.forced ? '#c2410c' : undefined }}>
-                          {item ? euro(item.pv) : '—'}{item?.forced ? ' (forcé)' : ''}
+                        <td style={{ textAlign: 'right', color: item?.forced ? 'var(--accent)' : undefined, fontWeight: item?.forced ? 600 : undefined }}>
+                          {puVente != null ? euro(puVente) : '—'}
                         </td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? euro(item.pv) : '—'}</td>
+                        <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
                           {item && (item.forced ? (
-                            <button className="btn" type="button" disabled={setLinePv.isPending}
+                            <button className="btn-ghost" type="button" disabled={setLinePv.isPending}
                               onClick={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })}>Libérer</button>
                           ) : (
                             <span style={{ display: 'inline-flex', gap: 4 }}>
-                              <input style={{ width: 70, textAlign: 'right' }} placeholder="PU vente"
+                              <input style={{ width: 60, textAlign: 'right' }} placeholder="PU"
                                 value={pvEdit[line.id] ?? ''}
                                 onChange={(e) => setPvEdit({ ...pvEdit, [line.id]: e.target.value })} />
-                              <button className="btn" type="button" disabled={setLinePv.isPending || !pvEdit[line.id]}
+                              <button className="btn-ghost" type="button" disabled={setLinePv.isPending || !pvEdit[line.id]}
                                 onClick={() => setLinePv.mutate({ lineId: line.id, puVente: pvEdit[line.id], force: true })}>Forcer</button>
                             </span>
                           ))}
@@ -514,9 +521,59 @@ export default function DevisEditorPage() {
                   })}
                 </tbody>
               </table>
-            ) : <p className="muted">Devis vide — ajoutez un titre puis des ouvrages ci-dessus.</p>}
+            ) : <p className="muted">Devis vide — construisez-le dans l’onglet Étude de prix.</p>}
           </div>
           )}
+
+            </div>
+
+            <aside className="synthese-panel" data-panel="2">
+              {tab === 'client' ? (
+                <>
+                  <div className="form-section-title">Récapitulatif client</div>
+                  <div className="synthese-row"><span className="lbl">Total HT</span><span className="val">{euro(sale.data?.totalPvHt)}</span></div>
+                  {sale.data && Number(sale.data.remise) > 0 && (
+                    <div className="synthese-row"><span className="lbl">Remise</span><span className="val">− {euro(sale.data.remise)}</span></div>
+                  )}
+                  <div className="synthese-row"><span className="lbl">TVA</span><span className="val">{euro(sale.data?.tva)}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--primary)', color: '#fff', margin: '10px -16px 0', padding: '10px 16px' }}>
+                    <span style={{ fontWeight: 600, fontSize: 12 }}>Total TTC</span>
+                    <span style={{ fontWeight: 700, fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{euro(sale.data?.totalTtc)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="form-section-title">Récapitulatif débours</div>
+                  <div className="synthese-row"><span className="lbl">Total débours HT</span><span className="val" style={{ color: 'var(--accent)', fontSize: 13 }}>{euro(sale.data?.totalDebourse)}</span></div>
+                </>
+              )}
+
+              <div className="form-section-title" style={{ marginTop: 18 }}>Synthèse financière</div>
+              <div className="synthese-row"><span className="lbl">Déboursé total</span><span className="val">{euro(sale.data?.totalDebourse)}</span></div>
+              <div className="synthese-row"><span className="lbl">Frais annexes</span><span className="val">{euro(sale.data?.fraisAnnexes)}</span></div>
+              <div className="synthese-row"><span className="lbl">Prix de revient</span><span className="val">{euro(sale.data?.totalRevient)}</span></div>
+              <div className="synthese-row"><span className="lbl">PV net</span><span className="val">{euro(sale.data?.totalPvHt)}</span></div>
+              <div className="synthese-row">
+                <span className="lbl">Marge brute</span>
+                <span className="val" style={{ color: 'var(--success)' }}>{euro(sale.data?.margeBrute)}{marginPct(sale.data?.margeBrute, sale.data?.totalPvHt)}</span>
+              </div>
+              <div className="synthese-row">
+                <span className="lbl">Marge nette</span>
+                <span className="val" style={{ color: 'var(--success)' }}>{euro(sale.data?.margeNette)}{marginPct(sale.data?.margeNette, sale.data?.totalPvHt)}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <div style={{ flex: 1, background: 'var(--surface)', borderRadius: 'var(--radius-sm)', padding: 8, textAlign: 'center' }}>
+                  <div className="label" style={{ marginBottom: 2 }}>PV / Débours</div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>×{coeffStr(sale.data?.pvHorsFrais, sale.data?.totalDebourse)}</div>
+                </div>
+                <div style={{ flex: 1, background: '#fff7ed', borderRadius: 'var(--radius-sm)', padding: 8, textAlign: 'center' }}>
+                  <div className="label" style={{ marginBottom: 2, color: 'var(--accent)' }}>PV / PR</div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--accent)' }}>×{coeffStr(sale.data?.pvHorsFrais, sale.data?.totalRevient)}</div>
+                </div>
+              </div>
+              {sale.isError && <p className="muted" style={{ marginTop: 10 }}>Définissez les coefficients pour calculer les totaux.</p>}
+            </aside>
+          </div>
         </>
       )}
     </div>
@@ -525,4 +582,17 @@ export default function DevisEditorPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="field" style={{ marginBottom: 0 }}><label>{label}</label>{children}</div>;
+}
+
+/** « (X %) » de marge par rapport au PV net, ou '' */
+function marginPct(value?: string, base?: string): string {
+  const v = Number(value), b = Number(base);
+  if (!b) return '';
+  return ` (${((v / b) * 100).toFixed(1)} %)`;
+}
+/** coefficient num/den à 3 décimales, ou '—' */
+function coeffStr(num?: string, den?: string): string {
+  const n = Number(num), d = Number(den);
+  if (!d) return '—';
+  return (n / d).toFixed(3);
 }
