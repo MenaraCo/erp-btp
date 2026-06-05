@@ -298,7 +298,7 @@ export default function DevisEditorPage() {
         <>
           <h1 style={{ marginBottom: 4 }}>{d.numero ? `${d.numero} — ` : ''}{d.designation}</h1>
           <p className="muted" style={{ marginTop: 0 }}>
-            <span className="badge">{AFFAIRE_STATUS_LABELS[d.status] ?? d.status}</span>
+            <span className={d.status === "won" ? "badge success" : d.status === "lost" ? "badge danger" : (d.status === "sent" || d.status === "coeffs_validated") ? "badge info" : "badge"}>{AFFAIRE_STATUS_LABELS[d.status] ?? d.status}</span>
             {` · ${d.type}`}{latest ? ` · Version ${latest.version_no}` : ''}
           </p>
 

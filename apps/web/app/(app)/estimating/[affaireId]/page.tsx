@@ -33,6 +33,12 @@ const AFFAIRE_DERIVED_LABELS: Record<string, string> = {
   en_cours: 'En cours', gagnee_partielle: 'Gagnée partiellement', gagnee: 'Gagnée', perdue: 'Perdue',
 };
 const DEVIS_TYPE_LABELS: Record<string, string> = { principal: 'Principal', lot: 'Lot', avenant: 'Avenant' };
+/** badge variant for a derived affaire status */
+const affaireBadge = (s: string) =>
+  s === 'gagnee' ? 'badge success' : s === 'perdue' ? 'badge danger' : s === 'gagnee_partielle' ? 'badge info' : 'badge';
+/** badge variant for a devis workflow status */
+const devisBadge = (s: string) =>
+  s === 'won' ? 'badge success' : s === 'lost' ? 'badge danger' : s === 'sent' || s === 'coeffs_validated' ? 'badge info' : 'badge';
 
 export default function AffaireDetailPage() {
   const { token } = useAuth();
@@ -104,7 +110,7 @@ export default function AffaireDetailPage() {
         <>
           <h1 style={{ marginBottom: 4 }}>{a.code} — {a.name}</h1>
           <p className="muted" style={{ marginTop: 0 }}>
-            <span className="badge">{AFFAIRE_DERIVED_LABELS[a.status] ?? a.status}</span>
+            <span className={affaireBadge(a.status)}>{AFFAIRE_DERIVED_LABELS[a.status] ?? a.status}</span>
             {a.responsable ? ` · Resp. ${a.responsable}` : ''}
             {a.lieu_execution?.ville ? ` · ${a.lieu_execution.ville}` : ''}
             {a.moa ? ` · MOA : ${a.moa}` : ''}
@@ -139,7 +145,7 @@ export default function AffaireDetailPage() {
                     <tr key={dv.id}>
                       <td>{dv.numero ? <strong>{dv.numero} </strong> : null}{dv.designation}</td>
                       <td className="muted">{DEVIS_TYPE_LABELS[dv.type] ?? dv.type}</td>
-                      <td><span className="badge">{AFFAIRE_STATUS_LABELS[dv.status] ?? dv.status}</span></td>
+                      <td><span className={devisBadge(dv.status)}>{AFFAIRE_STATUS_LABELS[dv.status] ?? dv.status}</span></td>
                       <td style={{ textAlign: 'right' }}>{euro(dv.kpis?.debourse)}</td>
                       <td style={{ textAlign: 'right' }}>{euro(dv.kpis?.pvHt)}</td>
                       <td style={{ textAlign: 'right' }}>{euro(dv.kpis?.margeNette)}</td>
