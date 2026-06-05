@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import { euro } from '@/lib/format';
 
 interface Marche {
   id: string;
@@ -37,14 +39,20 @@ export default function InvoicingPage() {
                 <th>Code</th>
                 <th>Nom</th>
                 <th>Total HT</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {data.map((m) => (
                 <tr key={m.id}>
-                  <td>{m.code}</td>
+                  <td>
+                    <Link href={`/invoicing/${m.id}`} className="link">{m.code}</Link>
+                  </td>
                   <td>{m.name}</td>
-                  <td>{m.total_ht} €</td>
+                  <td>{euro(m.total_ht)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <Link href={`/invoicing/${m.id}`} className="link">Situations →</Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
