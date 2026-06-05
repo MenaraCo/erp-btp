@@ -265,6 +265,52 @@ export default function DevisEditorPage() {
     ),
     [ordered, ouvrageIds],
   );
+  // Récapitulatif débours par titre de niveau 1 (somme du sous-arbre).
+  const titreRecap = useMemo(() => {
+    const byId = new Map((lines.data ?? []).map((l) => [l.id, l]));
+    const rootOf = (id: string) => {
+      let cur = byId.get(id);
+      while (cur && cur.parent_line_id) cur = byId.get(cur.parent_line_id);
+      return cur;
+    };
+    const totals = new Map<string, number>();
+    for (const it of sale.data?.items ?? []) {
+      const root = rootOf(it.id);
+      if (root) totals.set(root.id, (totals.get(root.id) ?? 0) + Number(it.debourse));
+    }
+    return (lines.data ?? [])
+      .filter((l) => !l.parent_line_id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((r) => ({ line: r, total: totals.get(r.id) ?? 0 }));
+  }, [lines.data, sale.data]);
+
+  // Export du déboursé par ressource (CSV — s'ouvre dans Excel).
+  function exportDebours() {
+    const byId = new Map((lines.data ?? []).map((l) => [l.id, l]));
+    const agg = new Map<string, { code: string; designation: string; qty: number; pu: number; montant: number }>();
+    for (const l of lines.data ?? []) {
+      if (l.type !== 'ressource') continue;
+      const parent = l.parent_line_id ? byId.get(l.parent_line_id) : undefined;
+      const ouvrageQty = parent?.type === 'ouvrage' ? Number(parent.quantity) || 0 : 1;
+      const qty = ouvrageQty * (Number(l.quantity) || 0) * (1 + (Number(l.perte) || 0) / 100);
+      const pu = Number(l.pu) || 0;
+      const key = `${l.code ?? ''}|${l.designation}`;
+      const cur = agg.get(key) ?? { code: l.code ?? '', designation: l.designation, qty: 0, pu, montant: 0 };
+      cur.qty += qty;
+      cur.montant += qty * pu;
+      agg.set(key, cur);
+    }
+    const rows: (string | number)[][] = [['Code', 'Désignation', 'Quantité', 'PU déboursé', 'Montant HT']];
+    for (const r of agg.values()) rows.push([r.code, r.designation, r.qty.toFixed(3), r.pu.toFixed(4), r.montant.toFixed(2)]);
+    const csv = rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `debours_${d?.numero || devisId}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   // Préremplit le formulaire avec la config stockée (une fois par version chargée).
   const cfgInit = useRef<string | null>(null);
@@ -531,10 +577,21 @@ export default function DevisEditorPage() {
               {tab === 'client' ? (
                 <>
                   <div className="form-section-title">Récapitulatif client</div>
+                  <div className="synthese-row"><span className="lbl">PV brut HT</span><span className="val">{euro(sale.data?.pvDevis)}</span></div>
+                  <div className="synthese-row">
+                    <span className="lbl">Remise</span>
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      <input style={{ width: 56, textAlign: 'right' }} value={remise.valeur}
+                        onChange={(e) => setRemise({ ...remise, valeur: e.target.value })} />
+                      <button type="button" className="btn-ghost" style={{ fontWeight: 700 }}
+                        onClick={() => setRemise({ ...remise, type: remise.type === 'pct' ? 'fixe' : 'pct' })}>
+                        {remise.type === 'pct' ? '%' : '€'}
+                      </button>
+                      <button type="button" className="btn-secondary" style={{ padding: '4px 8px' }}
+                        onClick={() => { setErr(null); setSale.mutate(); }} disabled={setSale.isPending}>OK</button>
+                    </span>
+                  </div>
                   <div className="synthese-row"><span className="lbl">Total HT</span><span className="val">{euro(sale.data?.totalPvHt)}</span></div>
-                  {sale.data && Number(sale.data.remise) > 0 && (
-                    <div className="synthese-row"><span className="lbl">Remise</span><span className="val">− {euro(sale.data.remise)}</span></div>
-                  )}
                   <div className="synthese-row"><span className="lbl">TVA</span><span className="val">{euro(sale.data?.tva)}</span></div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--primary)', color: '#fff', margin: '10px -16px 0', padding: '10px 16px' }}>
                     <span style={{ fontWeight: 600, fontSize: 12 }}>Total TTC</span>
@@ -544,7 +601,22 @@ export default function DevisEditorPage() {
               ) : (
                 <>
                   <div className="form-section-title">Récapitulatif débours</div>
-                  <div className="synthese-row"><span className="lbl">Total débours HT</span><span className="val" style={{ color: 'var(--accent)', fontSize: 13 }}>{euro(sale.data?.totalDebourse)}</span></div>
+                  {titreRecap.map(({ line, total }, i) => (
+                    <div key={line.id} className="synthese-row">
+                      <span className="lbl" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>
+                        <span style={{ fontFamily: 'monospace', color: 'var(--muted)', marginRight: 6 }}>{i + 1}</span>
+                        {line.designation}
+                      </span>
+                      <span className="val" style={{ color: 'var(--accent)' }}>{euro(total)}</span>
+                    </div>
+                  ))}
+                  <div className="synthese-row" style={{ borderTop: '2px solid var(--border)', borderBottom: 'none', marginTop: 4, fontWeight: 700 }}>
+                    <span>Total débours HT</span>
+                    <span className="val" style={{ color: 'var(--accent)', fontSize: 14 }}>{euro(sale.data?.totalDebourse)}</span>
+                  </div>
+                  <button type="button" className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: 10 }} onClick={exportDebours}>
+                    Export Débours
+                  </button>
                 </>
               )}
 
