@@ -68,9 +68,9 @@ export class VenteService {
       return (
         await em.query(
           `INSERT INTO sale_sheet
-             (tenant_id, affaire_version_id, coefficients, tva_rate, remise_type, remise_valeur)
+             (tenant_id, devis_version_id, coefficients, tva_rate, remise_type, remise_valeur)
            VALUES ($1, $2, $3::jsonb, $4, $5, $6)
-           ON CONFLICT (affaire_version_id)
+           ON CONFLICT (devis_version_id)
            DO UPDATE SET coefficients = EXCLUDED.coefficients,
                          tva_rate = EXCLUDED.tva_rate,
                          remise_type = EXCLUDED.remise_type,
@@ -95,18 +95,18 @@ export class VenteService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertVersion(em, versionId);
-      await em.query(`DELETE FROM devis_frais_annexe WHERE affaire_version_id = $1`, [versionId]);
+      await em.query(`DELETE FROM devis_frais_annexe WHERE devis_version_id = $1`, [versionId]);
       for (let i = 0; i < frais.length; i++) {
         const f = frais[i];
         await em.query(
           `INSERT INTO devis_frais_annexe
-             (tenant_id, affaire_version_id, designation, type, valeur, sort_order)
+             (tenant_id, devis_version_id, designation, type, valeur, sort_order)
            VALUES ($1, $2, $3, $4, $5, $6)`,
           [tenantId, versionId, f.designation, f.type, String(f.valeur ?? 0), f.sortOrder ?? i],
         );
       }
       return em.query(
-        `SELECT * FROM devis_frais_annexe WHERE affaire_version_id = $1 ORDER BY sort_order ASC`,
+        `SELECT * FROM devis_frais_annexe WHERE devis_version_id = $1 ORDER BY sort_order ASC`,
         [versionId],
       );
     });
@@ -136,12 +136,12 @@ export class VenteService {
       await this.assertVersion(em, versionId);
       const fraisAnnexes = await em.query(
         `SELECT designation, type, valeur FROM devis_frais_annexe
-          WHERE affaire_version_id = $1 ORDER BY sort_order ASC`,
+          WHERE devis_version_id = $1 ORDER BY sort_order ASC`,
         [versionId],
       );
       const rows = await em.query(
         `SELECT coefficients, tva_rate, remise_type, remise_valeur
-           FROM sale_sheet WHERE affaire_version_id = $1`,
+           FROM sale_sheet WHERE devis_version_id = $1`,
         [versionId],
       );
       if (rows.length === 0) {
@@ -178,7 +178,7 @@ export class VenteService {
   }
 
   private async assertVersion(em: EntityManager, versionId: string): Promise<void> {
-    const version = await em.query(`SELECT id FROM affaire_version WHERE id = $1`, [versionId]);
+    const version = await em.query(`SELECT id FROM devis_version WHERE id = $1`, [versionId]);
     if (version.length === 0) {
       throw new NotFoundException(`Unknown version "${versionId}"`);
     }
@@ -228,7 +228,7 @@ export class VenteService {
               dl.quantity, dl.pu, dl.pu_vente, dl.pu_vente_force, dl.vendable
          FROM devis_line dl
          LEFT JOIN resource r ON r.id = dl.source_resource_id
-        WHERE dl.affaire_version_id = $1`,
+        WHERE dl.devis_version_id = $1`,
       [versionId],
     );
 
@@ -277,7 +277,7 @@ export class VenteService {
   ): Promise<SaleCoefficients> {
     const fraisRows = await em.query(
       `SELECT designation, type, valeur FROM devis_frais_annexe
-        WHERE affaire_version_id = $1 ORDER BY sort_order ASC`,
+        WHERE devis_version_id = $1 ORDER BY sort_order ASC`,
       [versionId],
     );
     const fraisAnnexes: FraisAnnexe[] = fraisRows.map(
@@ -290,7 +290,7 @@ export class VenteService {
 
     const rows = await em.query(
       `SELECT coefficients, tva_rate, remise_type, remise_valeur
-         FROM sale_sheet WHERE affaire_version_id = $1`,
+         FROM sale_sheet WHERE devis_version_id = $1`,
       [versionId],
     );
     if (rows.length === 0) {

@@ -47,7 +47,7 @@ export class ChantierService {
     },
   ) {
     const { tenantId, affaire, versionId, venteTotal, targetChantierId } = args;
-    if ((await em.query(`SELECT id FROM marche WHERE affaire_version_id = $1`, [versionId])).length > 0) {
+    if ((await em.query(`SELECT id FROM marche WHERE devis_version_id = $1`, [versionId])).length > 0) {
       throw new ConflictException('This affaire version has already been accepted (marché exists).');
     }
     let chantierId: string;
@@ -64,7 +64,7 @@ export class ChantierService {
     } else {
       chantierId = (
         await em.query(
-          `INSERT INTO chantier (tenant_id, code, name, affaire_id, affaire_version_id, budget_vente_ht)
+          `INSERT INTO chantier (tenant_id, code, name, affaire_id, devis_version_id, budget_vente_ht)
            VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
           [tenantId, `${affaire.code}-CH`, affaire.name, affaire.id, versionId, venteTotal],
         )
@@ -73,7 +73,7 @@ export class ChantierService {
     return (
       await em.query(
         `INSERT INTO marche
-           (tenant_id, affaire_id, affaire_version_id, chantier_id, code, name, total_ht,
+           (tenant_id, affaire_id, devis_version_id, chantier_id, code, name, total_ht,
             execution_form, contre_etude_status, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'by_ouvrage','draft','active') RETURNING *`,
         [tenantId, affaire.id, versionId, chantierId, affaire.code, affaire.name, venteTotal],
@@ -90,14 +90,14 @@ export class ChantierService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const marcheRows = await em.query(
-        `SELECT chantier_id, affaire_version_id FROM marche WHERE id = $1`,
+        `SELECT chantier_id, devis_version_id FROM marche WHERE id = $1`,
         [marcheId],
       );
       if (marcheRows.length === 0) {
         throw new NotFoundException(`Unknown marché "${marcheId}"`);
       }
       const chantier = { id: marcheRows[0].chantier_id as string };
-      const versionId = marcheRows[0].affaire_version_id as string;
+      const versionId = marcheRows[0].devis_version_id as string;
       if ((await em.query(`SELECT 1 FROM execution_line WHERE marche_id = $1 LIMIT 1`, [marcheId])).length > 0) {
         return 0;
       }
@@ -205,7 +205,7 @@ export class ChantierService {
       const devisLines = await em.query(
         `SELECT id, code, designation, unit, quantity, vendable, source_ouvrage_id
            FROM devis_line
-          WHERE affaire_version_id = $1 AND type = 'ouvrage' AND source_ouvrage_id IS NOT NULL
+          WHERE devis_version_id = $1 AND type = 'ouvrage' AND source_ouvrage_id IS NOT NULL
           ORDER BY sort_order ASC, created_at ASC`,
         [versionId],
       );

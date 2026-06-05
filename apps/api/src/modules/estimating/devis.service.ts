@@ -63,7 +63,7 @@ export class DevisService {
       )[0];
       const version = (
         await em.query(
-          `INSERT INTO affaire_version (tenant_id, affaire_id, version_no, label)
+          `INSERT INTO devis_version (tenant_id, affaire_id, version_no, label)
            VALUES ($1, $2, 1, 'v1') RETURNING *`,
           [tenantId, affaire.id],
         )
@@ -93,7 +93,7 @@ export class DevisService {
         throw new NotFoundException(`Unknown affaire "${affaireId}"`);
       }
       const versions = await em.query(
-        `SELECT id, version_no, label, created_at FROM affaire_version
+        `SELECT id, version_no, label, created_at FROM devis_version
           WHERE affaire_id = $1 ORDER BY version_no ASC`,
         [affaireId],
       );
@@ -110,13 +110,13 @@ export class DevisService {
       }
       const next = (
         await em.query(
-          `SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM affaire_version WHERE affaire_id = $1`,
+          `SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM devis_version WHERE affaire_id = $1`,
           [affaireId],
         )
       )[0].n;
       return (
         await em.query(
-          `INSERT INTO affaire_version (tenant_id, affaire_id, version_no, label)
+          `INSERT INTO devis_version (tenant_id, affaire_id, version_no, label)
            VALUES ($1, $2, $3, $4) RETURNING *`,
           [tenantId, affaireId, next, label ?? `v${next}`],
         )
@@ -127,7 +127,7 @@ export class DevisService {
   addLine(versionId: string, input: DevisLineInput) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const version = await em.query(`SELECT id FROM affaire_version WHERE id = $1`, [
+      const version = await em.query(`SELECT id FROM devis_version WHERE id = $1`, [
         versionId,
       ]);
       if (version.length === 0) {
@@ -135,7 +135,7 @@ export class DevisService {
       }
       if (input.parentLineId) {
         const parent = await em.query(
-          `SELECT id FROM devis_line WHERE id = $1 AND affaire_version_id = $2`,
+          `SELECT id FROM devis_line WHERE id = $1 AND devis_version_id = $2`,
           [input.parentLineId, versionId],
         );
         if (parent.length === 0) {
@@ -153,7 +153,7 @@ export class DevisService {
       return (
         await em.query(
           `INSERT INTO devis_line
-             (tenant_id, affaire_version_id, parent_line_id, type, code, designation, unit,
+             (tenant_id, devis_version_id, parent_line_id, type, code, designation, unit,
               quantity, quantity_formula, pu, source_ouvrage_id, source_resource_id, sort_order, vendable)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
           [
@@ -181,7 +181,7 @@ export class DevisService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT * FROM devis_line WHERE affaire_version_id = $1
+        `SELECT * FROM devis_line WHERE devis_version_id = $1
           ORDER BY sort_order ASC, created_at ASC`,
         [versionId],
       ),
@@ -192,16 +192,16 @@ export class DevisService {
   setVariable(versionId: string, name: string, value: string | number) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const version = await em.query(`SELECT id FROM affaire_version WHERE id = $1`, [
+      const version = await em.query(`SELECT id FROM devis_version WHERE id = $1`, [
         versionId,
       ]);
       if (version.length === 0) {
         throw new NotFoundException(`Unknown version "${versionId}"`);
       }
       await em.query(
-        `INSERT INTO metre_variable (tenant_id, affaire_version_id, name, value)
+        `INSERT INTO metre_variable (tenant_id, devis_version_id, name, value)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (affaire_version_id, name) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+         ON CONFLICT (devis_version_id, name) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
         [tenantId, versionId, name, String(value)],
       );
       await this.recomputeFormulas(em, versionId);
@@ -212,7 +212,7 @@ export class DevisService {
     const vars = await this.loadVariables(em, versionId);
     const lines = await em.query(
       `SELECT id, quantity_formula FROM devis_line
-        WHERE affaire_version_id = $1 AND quantity_formula IS NOT NULL`,
+        WHERE devis_version_id = $1 AND quantity_formula IS NOT NULL`,
       [versionId],
     );
     for (const line of lines) {
@@ -231,7 +231,7 @@ export class DevisService {
     versionId: string,
   ): Promise<Record<string, number>> {
     const rows = await em.query(
-      `SELECT name, value FROM metre_variable WHERE affaire_version_id = $1`,
+      `SELECT name, value FROM metre_variable WHERE devis_version_id = $1`,
       [versionId],
     );
     const out: Record<string, number> = {};

@@ -34,7 +34,7 @@ export class DevisPdfService {
       async (em) => {
         const v = await em.query(
           `SELECT av.id, av.version_no, a.code, a.name, a.moa
-             FROM affaire_version av JOIN affaire a ON a.id = av.affaire_id
+             FROM devis_version av JOIN affaire a ON a.id = av.affaire_id
             WHERE av.id = $1`,
           [versionId],
         );
@@ -43,7 +43,7 @@ export class DevisPdfService {
         }
         const l: DevisLineRow[] = await em.query(
           `SELECT id, parent_line_id, type, code, designation, unit, quantity, pu, sort_order
-             FROM devis_line WHERE affaire_version_id = $1
+             FROM devis_line WHERE devis_version_id = $1
             ORDER BY sort_order ASC, created_at ASC`,
           [versionId],
         );

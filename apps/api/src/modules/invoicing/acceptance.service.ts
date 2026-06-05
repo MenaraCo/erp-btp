@@ -48,7 +48,7 @@ export class AcceptanceService {
     }
     const versionRow = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT id FROM affaire_version WHERE affaire_id = $1 ORDER BY version_no DESC LIMIT 1`,
+        `SELECT id FROM devis_version WHERE affaire_id = $1 ORDER BY version_no DESC LIMIT 1`,
         [affaireId],
       ),
     );
@@ -61,7 +61,7 @@ export class AcceptanceService {
     const devisLines: DevisLineMeta[] = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
         `SELECT id, code, designation, unit, quantity FROM devis_line
-          WHERE affaire_version_id = $1 AND type = 'ouvrage' AND vendable = true
+          WHERE devis_version_id = $1 AND type = 'ouvrage' AND vendable = true
             AND source_ouvrage_id IS NOT NULL
           ORDER BY sort_order ASC, created_at ASC`,
         [versionId],

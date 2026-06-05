@@ -81,7 +81,7 @@ export class WorkflowService {
       const debourse = await em.query(
         `SELECT COALESCE(SUM(o.debourse * COALESCE(dl.quantity, 0)), 0) AS total
            FROM devis_line dl
-           JOIN affaire_version av ON av.id = dl.affaire_version_id
+           JOIN devis_version av ON av.id = dl.devis_version_id
            JOIN ouvrage o ON o.id = dl.source_ouvrage_id
           WHERE av.affaire_id = $1 AND dl.type = 'ouvrage'`,
         [affaireId],
