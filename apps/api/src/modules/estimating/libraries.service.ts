@@ -18,6 +18,18 @@ export interface LibraryInput {
   description?: string | null;
 }
 
+/** Coercition numérique sûre : accepte virgule ou point, renvoie une chaîne numérique ou un défaut. */
+function numOr(v: string | number | null | undefined, def: string): string {
+  if (v === null || v === undefined || v === '') return def;
+  const n = Number(String(v).replace(',', '.'));
+  return Number.isFinite(n) ? String(n) : def;
+}
+function numOrNull(v: string | number | null | undefined): string | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(String(v).replace(',', '.'));
+  return Number.isFinite(n) ? String(n) : null;
+}
+
 export interface ResourceInput {
   code: string;
   label: string;
@@ -113,13 +125,13 @@ export class LibrariesService {
           label: input.label,
           unit: input.unit,
           nature: input.nature,
-          unitCost: String(input.unitCost),
-          output: input.output == null ? null : String(input.output),
+          unitCost: numOr(input.unitCost, '0'),
+          output: input.output == null ? null : numOrNull(input.output),
           codeProduit: input.codeProduit ?? input.code,
           codeAnalytiqueId: input.codeAnalytiqueId ?? null,
-          prixPublic: input.prixPublic == null ? null : String(input.prixPublic),
+          prixPublic: numOrNull(input.prixPublic),
           uniteAchat: input.uniteAchat ?? null,
-          coeffConversion: input.coeffConversion == null ? '1' : String(input.coeffConversion),
+          coeffConversion: numOr(input.coeffConversion, '1'),
           supplierId: input.supplierId ?? null,
           refFournisseur: input.refFournisseur ?? null,
           conditionnement: input.conditionnement ?? null,
@@ -169,12 +181,12 @@ export class LibrariesService {
           input.label ?? null,
           input.unit ?? null,
           input.nature ?? null,
-          input.unitCost == null ? null : String(input.unitCost),
+          input.unitCost == null ? null : numOr(input.unitCost, '0'),
           input.codeProduit ?? null,
           input.codeAnalytiqueId ?? null,
-          input.prixPublic == null ? null : String(input.prixPublic),
+          numOrNull(input.prixPublic),
           input.uniteAchat ?? null,
-          input.coeffConversion == null ? null : String(input.coeffConversion),
+          input.coeffConversion == null ? null : numOr(input.coeffConversion, '1'),
           input.supplierId ?? null,
           input.refFournisseur ?? null,
           input.conditionnement ?? null,

@@ -94,17 +94,28 @@ export function ResourceModal({ libId, resource, onClose }: {
     }
   }, [f.codeAnalytiqueId, codes.data]);
 
+  /* Champs numériques : n'autorise que chiffres + un séparateur décimal (virgule → point). */
+  function numClean(v: string): string {
+    let s = v.replace(',', '.').replace(/[^0-9.]/g, '');
+    const dot = s.indexOf('.');
+    if (dot !== -1) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '');
+    return s;
+  }
+
   /* PU Débours auto-calculé = PU Public ÷ coeff (modifiable) */
-  function setPrixPublic(v: string) {
+  function setPrixPublic(raw: string) {
+    const v = numClean(raw);
     const coeff = Number(f.coeffConversion) || 0;
     const pub = Number(v) || 0;
     setF((s) => ({ ...s, prixPublic: v, unitCost: coeff > 0 && pub > 0 ? String(+(pub / coeff).toFixed(4)) : s.unitCost }));
   }
-  function setCoeff(v: string) {
+  function setCoeff(raw: string) {
+    const v = numClean(raw);
     const coeff = Number(v) || 0;
     const pub = Number(f.prixPublic) || 0;
     setF((s) => ({ ...s, coeffConversion: v, unitCost: coeff > 0 && pub > 0 ? String(+(pub / coeff).toFixed(4)) : s.unitCost }));
   }
+  const setUnitCost = (raw: string) => setF((s) => ({ ...s, unitCost: numClean(raw) }));
 
   const debCalcule = (() => {
     const coeff = Number(f.coeffConversion) || 0;
@@ -136,10 +147,21 @@ export function ResourceModal({ libId, resource, onClose }: {
       qc.invalidateQueries({ queryKey: ['ouvrages', libId] });
       onClose();
     },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+    onError: (e) => {
+      const msg = e instanceof ApiError ? e.message : '';
+      // Traduction des erreurs serveur génériques
+      if (!msg || /internal server error/i.test(msg)) {
+        setErr("Impossible d'enregistrer la ressource. Vérifiez les champs (les prix et coefficients doivent être des nombres).");
+      } else {
+        setErr(msg);
+      }
+    },
   });
 
-  const codesFiltered = (codes.data ?? []).filter((c) => !familleFilter || c.famille_id === familleFilter);
+  // Cascade : codes de la famille choisie ; repli sur TOUS les codes si la famille n'en a aucun
+  const allCodes = codes.data ?? [];
+  const codesOfFamille = familleFilter ? allCodes.filter((c) => c.famille_id === familleFilter) : allCodes;
+  const codesFiltered = codesOfFamille.length > 0 ? codesOfFamille : allCodes;
   const unitOptions = units.data ?? [];
 
   return (
@@ -187,11 +209,11 @@ export function ResourceModal({ libId, resource, onClose }: {
         <SectionTitle>Tarification</SectionTitle>
         <Grid>
           <Field label="PU Public (€)">
-            <input className="input" value={f.prixPublic} onChange={(e) => setPrixPublic(e.target.value)} />
+            <input className="input" inputMode="decimal" value={f.prixPublic} onChange={(e) => setPrixPublic(e.target.value)} />
             <Hint>Prix catalogue — pour 1 {f.uniteAchat || "unité d'achat"}</Hint>
           </Field>
           <Field label="PU Débours (€)">
-            <input className="input" value={f.unitCost} onChange={(e) => setF({ ...f, unitCost: e.target.value })} />
+            <input className="input" inputMode="decimal" value={f.unitCost} onChange={(e) => setUnitCost(e.target.value)} />
             <Hint>Prix d'achat réel — pour 1 {f.unit || "unité d'emploi"}</Hint>
           </Field>
         </Grid>
@@ -233,7 +255,7 @@ export function ResourceModal({ libId, resource, onClose }: {
         </Grid>
         <Field label="Coefficient de conversion">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <input className="input" style={{ width: 100 }} value={f.coeffConversion} onChange={(e) => setCoeff(e.target.value)} />
+            <input className="input" inputMode="decimal" style={{ width: 100 }} value={f.coeffConversion} onChange={(e) => setCoeff(e.target.value)} />
             {f.uniteAchat && f.unit && Number(f.coeffConversion) > 0 && (
               <span style={{ ...infoBox, margin: 0, flex: 1 }}>
                 1 {f.uniteAchat} = {fmtNum(f.coeffConversion, nbDec)} {f.unit} · 1 {f.unit} = {fmtNum(1 / Number(f.coeffConversion), nbDec)} {f.uniteAchat}
