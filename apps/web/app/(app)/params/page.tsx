@@ -527,6 +527,9 @@ function TabPreferences({ token }: { token: string }) {
       qc.invalidateQueries({ queryKey: ['params-preferences'] });
       setForm({});
     },
+    onError: (err: unknown) => {
+      alert('Erreur lors de l\'enregistrement : ' + (err instanceof Error ? err.message : String(err)));
+    },
   });
 
   if (!prefs) return <p className="muted">Chargement…</p>;

@@ -346,9 +346,9 @@ export class ParamsService {
            devis_prefix       = COALESCE($4, devis_prefix),
            devis_separator    = COALESCE($5, devis_separator),
            couleur_principale = COALESCE($6, couleur_principale),
-           taux_tva           = COALESCE($7, taux_tva),
+           taux_tva           = COALESCE($7::jsonb, taux_tva),
            default_tab        = COALESCE($8, default_tab),
-           nb_decimales       = COALESCE($9, nb_decimales),
+           nb_decimales       = COALESCE($9::smallint, nb_decimales),
            updated_at         = now()
          WHERE company_id = $1`,
         [
@@ -363,7 +363,18 @@ export class ParamsService {
           input.nbDecimales ?? null,
         ],
       );
-      return this.getPreferences();
+      // Retourner le résultat dans la MÊME transaction (évite le deadlock de connexion)
+      const updated = await em.query(
+        `SELECT p.*, c.name AS company_name, c.code AS company_code
+         FROM company_preferences p JOIN company c ON c.id = p.company_id
+         WHERE p.company_id = $1`,
+        [companyId],
+      );
+      const row = updated[0];
+      if (row && typeof row.taux_tva === 'string') {
+        try { row.taux_tva = JSON.parse(row.taux_tva); } catch { row.taux_tva = [0, 5.5, 10, 20]; }
+      }
+      return row ?? null;
     });
   }
 
