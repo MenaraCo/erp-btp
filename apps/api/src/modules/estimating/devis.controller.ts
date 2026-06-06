@@ -20,6 +20,7 @@ import {
   DevisLineInput,
   DevisLinePatch,
   DevisPatch,
+  DevisPlanningPatch,
   DevisService,
   InsertOuvrageInput,
 } from './devis.service';
@@ -64,6 +65,13 @@ export class DevisController {
   @RequiresPermission('estimating.devis.write')
   updateDevis(@Param('devisId') devisId: string, @Body() body: DevisPatch) {
     return this.devis.updateDevis(devisId, body ?? {});
+  }
+
+  @Patch('devis/:devisId/planning')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  setPlanning(@Param('devisId') devisId: string, @Body() body: DevisPlanningPatch) {
+    return this.devis.setDevisPlanning(devisId, body ?? {});
   }
 
   @Post('affaires/:affaireId/devis')

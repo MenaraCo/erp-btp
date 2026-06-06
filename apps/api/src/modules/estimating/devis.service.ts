@@ -57,6 +57,13 @@ export interface DevisPatch {
   type?: DevisType;
 }
 
+export interface DevisPlanningPatch {
+  responsable?: string | null;
+  priorite?: 'basse' | 'normale' | 'urgente' | 'critique';
+  dateDebut?: string | null;
+  dateEcheance?: string | null;
+}
+
 export type DevisLineType = 'titre' | 'sous_titre' | 'ouvrage' | 'ressource';
 export type DevisType = 'principal' | 'lot' | 'avenant';
 
@@ -234,6 +241,9 @@ export class DevisService {
     return runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
         `SELECT d.id, d.numero, d.designation, d.type, d.status, d.affaire_id,
+                d.responsable, d.priorite,
+                to_char(d.date_debut, 'YYYY-MM-DD') AS date_debut,
+                to_char(d.date_echeance, 'YYYY-MM-DD') AS date_echeance,
                 a.code AS affaire_code, a.name AS affaire_name
            FROM devis d JOIN affaire a ON a.id = d.affaire_id
           ORDER BY d.created_at DESC`,
@@ -315,6 +325,38 @@ export class DevisService {
            updated_at = now()
          WHERE id = $1`,
         [devisId, patch.designation ?? null, patch.numero ?? null, patch.type ?? null],
+      );
+      return (await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]))[0];
+    });
+  }
+
+  /** Sets a devis's planning fields (responsable, priorité, échéances). */
+  setDevisPlanning(
+    devisId: string,
+    p: { responsable?: string | null; priorite?: string; dateDebut?: string | null; dateEcheance?: string | null },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const exists = await em.query(`SELECT id FROM devis WHERE id = $1`, [devisId]);
+      if (exists.length === 0) {
+        throw new NotFoundException(`Unknown devis "${devisId}"`);
+      }
+      // Patch partiel : on ne touche qu'aux champs fournis (undefined = inchangé).
+      await em.query(
+        `UPDATE devis SET
+           responsable = COALESCE($2, responsable),
+           priorite = COALESCE($3, priorite),
+           date_debut = COALESCE($4, date_debut),
+           date_echeance = COALESCE($5, date_echeance),
+           updated_at = now()
+         WHERE id = $1`,
+        [
+          devisId,
+          p.responsable === undefined ? null : p.responsable,
+          p.priorite ?? null,
+          p.dateDebut === undefined ? null : p.dateDebut,
+          p.dateEcheance === undefined ? null : p.dateEcheance,
+        ],
       );
       return (await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]))[0];
     });
