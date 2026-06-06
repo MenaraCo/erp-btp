@@ -757,16 +757,23 @@ function RefTable({ rows, headers, onEdit, onDelete }: {
 
 function SaveButton({ onSave, isPending, saved }: { onSave: () => void; isPending: boolean; saved: boolean }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-      <button className="btn" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 140 }} onClick={onSave} disabled={isPending}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, height: 34 }}>
+      {/* Largeur fixe → le texte Enregistrement… / Enregistrer ne fait pas varier la taille */}
+      <button
+        className="btn"
+        style={{ width: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexShrink: 0 }}
+        onClick={onSave}
+        disabled={isPending}
+      >
         <span style={{ fontSize: 13 }}>💾</span>
-        {isPending ? 'Enregistrement…' : 'Enregistrer'}
+        <span>{isPending ? 'Enregistrement…' : 'Enregistrer'}</span>
       </button>
+      {/* Toujours dans le DOM (evite le reflow) — visible uniquement via opacity */}
       <span style={{
         color: '#2d7a47', fontSize: 12, fontWeight: 600,
+        whiteSpace: 'nowrap', pointerEvents: 'none',
         opacity: saved ? 1 : 0,
-        transform: saved ? 'translateY(0)' : 'translateY(4px)',
-        transition: 'opacity 0.25s ease, transform 0.25s ease',
+        transition: 'opacity 0.3s ease',
       }}>
         Paramètres sauvegardés ✓
       </span>
