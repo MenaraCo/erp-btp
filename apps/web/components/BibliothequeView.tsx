@@ -34,12 +34,12 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
   const resources = useQuery({
     queryKey: ['resources', libId],
     enabled: Boolean(token && libId),
-    queryFn: () => apiFetch<Page<Resource>>(`/libraries/${libId}/resources?pageSize=200`, { token }),
+    queryFn: () => apiFetch<Page<Resource>>(`/libraries/${libId}/resources?pageSize=2000`, { token }),
   });
   const ouvrages = useQuery({
     queryKey: ['ouvrages', libId],
     enabled: Boolean(token && libId && section !== 'ressources'),
-    queryFn: () => apiFetch<Page<Ouvrage>>(`/libraries/${libId}/ouvrages?pageSize=200`, { token }),
+    queryFn: () => apiFetch<Page<Ouvrage>>(`/libraries/${libId}/ouvrages?pageSize=2000`, { token }),
   });
 
   const [libForm, setLibForm] = useState({ code: '', name: '' });

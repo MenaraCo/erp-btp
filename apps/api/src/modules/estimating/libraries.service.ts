@@ -232,6 +232,7 @@ export class LibrariesService {
         sortable: ['code', 'label', 'unitCost', 'createdAt'],
         searchable: ['code', 'label'],
         defaultSort: 'code',
+        maxPageSize: 5000, // référentiel ressources : peut en contenir plusieurs milliers
       });
     });
   }
