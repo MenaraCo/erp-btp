@@ -18,8 +18,8 @@ const NAV: NavItem[] = [
   { href: '/estimating', label: 'Affaires', section: 'Études de prix' },
   { href: '/estimating/devis', label: 'Devis', section: 'Études de prix' },
   { href: '/estimating/bibliotheque', label: 'Bibliothèque', section: 'Études de prix' },
-  { href: '/estimating/bibliotheque#ouvrages', label: 'Ouvrages', section: 'Études de prix', level: 1 },
-  { href: '/estimating/bibliotheque#ressources', label: 'Ressources', section: 'Études de prix', level: 1 },
+  { href: '/estimating/bibliotheque/ouvrages', label: 'Ouvrages', section: 'Études de prix', level: 1 },
+  { href: '/estimating/bibliotheque/ressources', label: 'Ressources', section: 'Études de prix', level: 1 },
   // Référentiel
   { href: '/clients', label: 'Clients', section: 'Référentiel' },
   { href: '/suppliers', label: 'Fournisseurs', section: 'Référentiel' },
