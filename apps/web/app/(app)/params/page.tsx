@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -15,10 +15,17 @@ function useApi() {
 /* ─────────── hook feedback sauvegarde ─────────── */
 function useSavedFeedback(delayMs = 3000) {
   const [saved, setSaved] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Nettoyage si le composant démonte avant la fin du délai
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
   const flash = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
     setSaved(true);
-    setTimeout(() => setSaved(false), delayMs);
+    timerRef.current = setTimeout(() => setSaved(false), delayMs);
   }, [delayMs]);
+
   return { saved, flash };
 }
 
