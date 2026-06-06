@@ -21,6 +21,8 @@ import { deriveAffaireStatus } from './affaire-derived-status';
 import { DevisStatus } from './devis-workflow';
 import { VenteService } from './vente.service';
 import { flattenOuvrageToResources, RawOuvrage } from './ouvrage-flatten';
+import { computeApproLine } from './appro-calc';
+import Decimal from 'decimal.js';
 
 export interface InsertOuvrageInput {
   ouvrageId: string;
@@ -578,6 +580,81 @@ export class DevisService {
       }
       await em.query(`DELETE FROM devis_line WHERE id = $1`, [lineId]);
       return { deleted: lineId };
+    });
+  }
+
+  /**
+   * Calcul Appro : agrège les ressources du devis (issues de la bibliothèque) et convertit la
+   * quantité d'emploi en quantité d'achat via le coefficient de conversion de chaque ressource.
+   */
+  computeApproForVersion(versionId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows: Array<{
+        resource_id: string;
+        code: string | null;
+        label: string;
+        unite_emploi: string | null;
+        unite_achat: string | null;
+        coeff_conversion: string | null;
+        prix_public: string | null;
+        conditionnement: string | null;
+        ref_fournisseur: string | null;
+        fournisseur: string | null;
+        quantity: string | null;
+        perte: string | null;
+        pu: string | null;
+        ouvrage_qty: string | null;
+      }> = await em.query(
+        `SELECT r.id AS resource_id, r.code, r.label, r.unit AS unite_emploi,
+                r.unite_achat, r.coeff_conversion, r.prix_public, r.conditionnement,
+                r.ref_fournisseur, s.code AS fournisseur,
+                dl.quantity, dl.perte, dl.pu, p.quantity AS ouvrage_qty
+           FROM devis_line dl
+           JOIN resource r ON r.id = dl.source_resource_id
+           LEFT JOIN supplier s ON s.id = r.supplier_id
+           LEFT JOIN devis_line p ON p.id = dl.parent_line_id AND p.type = 'ouvrage'
+          WHERE dl.devis_version_id = $1 AND dl.type = 'ressource'
+            AND dl.source_resource_id IS NOT NULL`,
+        [versionId],
+      );
+
+      const agg = new Map<
+        string,
+        { meta: (typeof rows)[number]; qteEmploi: Decimal }
+      >();
+      for (const r of rows) {
+        const ouvrageQty = new Decimal(r.ouvrage_qty ?? 1);
+        const eff = ouvrageQty
+          .times(new Decimal(r.quantity ?? 0))
+          .times(new Decimal(1).plus(new Decimal(r.perte ?? 0).dividedBy(100)));
+        const cur = agg.get(r.resource_id) ?? { meta: r, qteEmploi: new Decimal(0) };
+        cur.qteEmploi = cur.qteEmploi.plus(eff);
+        agg.set(r.resource_id, cur);
+      }
+
+      return Array.from(agg.values()).map(({ meta, qteEmploi }) => {
+        const appro = computeApproLine({
+          qteEmploi: qteEmploi.toString(),
+          coeffConversion: meta.coeff_conversion ?? 1,
+          prixPublic: meta.prix_public,
+          puDebours: meta.pu ?? 0,
+        });
+        return {
+          code: meta.code,
+          designation: meta.label,
+          uniteEmploi: meta.unite_emploi,
+          qteEmploi: qteEmploi.toDecimalPlaces(3).toString(),
+          uniteAchat: meta.unite_achat,
+          coeffConversion: meta.coeff_conversion,
+          conditionnement: meta.conditionnement,
+          fournisseur: meta.fournisseur,
+          refFournisseur: meta.ref_fournisseur,
+          prixPublic: meta.prix_public,
+          qteAppro: appro.qteAppro,
+          montant: appro.montant,
+        };
+      });
     });
   }
 

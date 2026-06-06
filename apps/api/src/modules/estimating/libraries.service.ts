@@ -29,6 +29,13 @@ export interface ResourceInput {
   codeProduit?: string | null;
   /** Rattachement optionnel à un code analytique du plan (cahier §5.8). */
   codeAnalytiqueId?: string | null;
+  /** Champs d'achat (pour le Calcul Appro). */
+  prixPublic?: string | number | null;
+  uniteAchat?: string | null;
+  coeffConversion?: string | number | null;
+  supplierId?: string | null;
+  refFournisseur?: string | null;
+  conditionnement?: string | null;
 }
 
 @Injectable()
@@ -110,6 +117,12 @@ export class LibrariesService {
           output: input.output == null ? null : String(input.output),
           codeProduit: input.codeProduit ?? input.code,
           codeAnalytiqueId: input.codeAnalytiqueId ?? null,
+          prixPublic: input.prixPublic == null ? null : String(input.prixPublic),
+          uniteAchat: input.uniteAchat ?? null,
+          coeffConversion: input.coeffConversion == null ? '1' : String(input.coeffConversion),
+          supplierId: input.supplierId ?? null,
+          refFournisseur: input.refFournisseur ?? null,
+          conditionnement: input.conditionnement ?? null,
         }),
       );
     });

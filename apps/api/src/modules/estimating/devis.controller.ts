@@ -138,6 +138,13 @@ export class DevisController {
     return this.devis.listLines(versionId);
   }
 
+  @Get('versions/:versionId/appro')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  appro(@Param('versionId') versionId: string) {
+    return this.devis.computeApproForVersion(versionId);
+  }
+
   @Put('lines/:lineId/section')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')

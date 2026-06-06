@@ -62,7 +62,7 @@ export default function BibliothequePage() {
 
   // --- forms ---
   const [libForm, setLibForm] = useState({ code: '', name: '' });
-  const [resForm, setResForm] = useState({ code: '', label: '', unit: '', nature: 'material', unitCost: '' });
+  const [resForm, setResForm] = useState({ code: '', label: '', unit: '', nature: 'material', unitCost: '', uniteAchat: '', coeffConversion: '', prixPublic: '' });
   const [ouvForm, setOuvForm] = useState({ code: '', label: '', unit: '' });
 
   const createLib = useMutation({
@@ -78,12 +78,21 @@ export default function BibliothequePage() {
     mutationFn: () =>
       apiFetch(`/libraries/${libId}/resources`, {
         method: 'POST',
-        body: { ...resForm, unitCost: resForm.unitCost || '0' },
+        body: {
+          code: resForm.code,
+          label: resForm.label,
+          unit: resForm.unit,
+          nature: resForm.nature,
+          unitCost: resForm.unitCost || '0',
+          uniteAchat: resForm.uniteAchat || null,
+          coeffConversion: resForm.coeffConversion || null,
+          prixPublic: resForm.prixPublic || null,
+        },
         token,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['resources', libId] });
-      setResForm({ code: '', label: '', unit: '', nature: 'material', unitCost: '' });
+      setResForm({ code: '', label: '', unit: '', nature: 'material', unitCost: '', uniteAchat: '', coeffConversion: '', prixPublic: '' });
     },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
@@ -167,7 +176,10 @@ export default function BibliothequePage() {
                   {NATURES.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
                 </select>
               </Field>
-              <Field label="Déboursé U."><input style={{ width: 90 }} value={resForm.unitCost} onChange={(e) => setResForm({ ...resForm, unitCost: e.target.value })} /></Field>
+              <Field label="Déboursé U."><input style={{ width: 80 }} value={resForm.unitCost} onChange={(e) => setResForm({ ...resForm, unitCost: e.target.value })} /></Field>
+              <Field label="Unité achat"><input style={{ width: 80 }} placeholder="palette" value={resForm.uniteAchat} onChange={(e) => setResForm({ ...resForm, uniteAchat: e.target.value })} /></Field>
+              <Field label="Coeff conv."><input style={{ width: 70 }} placeholder="40" title="1 unité d'achat = X unités d'emploi" value={resForm.coeffConversion} onChange={(e) => setResForm({ ...resForm, coeffConversion: e.target.value })} /></Field>
+              <Field label="Prix public"><input style={{ width: 80 }} placeholder="par unité achat" value={resForm.prixPublic} onChange={(e) => setResForm({ ...resForm, prixPublic: e.target.value })} /></Field>
               <button className="btn" type="submit">+ Ressource</button>
             </form>
           </div>

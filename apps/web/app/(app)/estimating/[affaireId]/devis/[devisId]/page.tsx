@@ -68,6 +68,12 @@ interface SaleConfig {
   tvaRate: string | null;
   fraisAnnexes: { designation: string; type: 'pct' | 'fixe'; valeur: string }[];
 }
+interface ApproRow {
+  code: string | null; designation: string; uniteEmploi: string | null; qteEmploi: string;
+  uniteAchat: string | null; coeffConversion: string | null; conditionnement: string | null;
+  fournisseur: string | null; refFournisseur: string | null; prixPublic: string | null;
+  qteAppro: string; montant: string;
+}
 interface Library { id: string; code: string; name: string }
 interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
 interface Page<T> { rows: T[] }
@@ -308,6 +314,26 @@ export default function DevisEditorPage() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `debours_${d?.numero || devisId}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Calcul Appro (modal)
+  const [approOpen, setApproOpen] = useState(false);
+  const appro = useQuery({
+    queryKey: ['appro', versionId],
+    enabled: Boolean(token && versionId && approOpen),
+    queryFn: () => apiFetch<ApproRow[]>(`/versions/${versionId}/appro`, { token }),
+  });
+  function exportAppro() {
+    const rows: (string | number)[][] = [['Code', 'Désignation', 'Qté emploi', 'Unité achat', 'Coeff', 'Qté appro', 'Prix public', 'Montant HT', 'Fournisseur']];
+    for (const r of appro.data ?? []) rows.push([r.code ?? '', r.designation, r.qteEmploi, r.uniteAchat ?? '', r.coeffConversion ?? '', r.qteAppro, r.prixPublic ?? '', r.montant, r.fournisseur ?? '']);
+    const csv = rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `appro_${d?.numero || devisId}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -617,6 +643,9 @@ export default function DevisEditorPage() {
                   <button type="button" className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: 10 }} onClick={exportDebours}>
                     Export Débours
                   </button>
+                  <button type="button" className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} onClick={() => setApproOpen(true)}>
+                    Calcul Appro
+                  </button>
                 </>
               )}
 
@@ -647,6 +676,51 @@ export default function DevisEditorPage() {
             </aside>
           </div>
         </>
+      )}
+
+      {approOpen && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
+          onClick={() => setApproOpen(false)}
+        >
+          <div className="card" style={{ width: 'min(920px, 96vw)', maxHeight: '85vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0 }}>Calcul approvisionnement</h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn-secondary" onClick={exportAppro} disabled={!appro.data?.length}>Export CSV</button>
+                <button className="btn-ghost" onClick={() => setApproOpen(false)}>✕</button>
+              </div>
+            </div>
+            <p className="muted" style={{ marginTop: 2 }}>Quantités d’achat par ressource (quantité d’emploi ÷ coefficient de conversion).</p>
+            {appro.isLoading ? <p className="muted">Calcul…</p> : appro.data?.length ? (
+              <table className="grid" style={{ marginTop: 8 }}>
+                <thead><tr>
+                  <th>Code</th><th>Désignation</th>
+                  <th style={{ textAlign: 'right' }}>Qté emploi</th>
+                  <th>U. achat</th>
+                  <th style={{ textAlign: 'right' }}>Coeff</th>
+                  <th style={{ textAlign: 'right' }}>Qté appro</th>
+                  <th style={{ textAlign: 'right' }}>Montant HT</th>
+                  <th>Fournisseur</th>
+                </tr></thead>
+                <tbody>
+                  {appro.data.map((r, i) => (
+                    <tr key={i}>
+                      <td className="code-cell">{r.code ?? '—'}</td>
+                      <td>{r.designation}</td>
+                      <td style={{ textAlign: 'right' }}>{Number(r.qteEmploi).toLocaleString('fr-FR')} {r.uniteEmploi}</td>
+                      <td>{r.uniteAchat ?? '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{r.coeffConversion ? Number(r.coeffConversion) : '—'}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{Number(r.qteAppro).toLocaleString('fr-FR')}</td>
+                      <td style={{ textAlign: 'right' }}>{euro(r.montant)}</td>
+                      <td className="muted">{r.fournisseur ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="muted">Aucune ressource de bibliothèque dans ce devis (le calcul appro porte sur les ressources issues de la bibliothèque).</p>}
+          </div>
+        </div>
       )}
     </div>
   );
