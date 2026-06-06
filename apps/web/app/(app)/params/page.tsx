@@ -61,8 +61,16 @@ function Row({ children, style }: { children: React.ReactNode; style?: React.CSS
 
 interface Unit { id: string; abrev: string; label: string; sort_order: number }
 interface Lot { id: string; code: string; label: string }
-interface Famille { id: string; code: string; label: string }
-interface Code { id: string; code: string; label: string }
+interface Famille { id: string; code: string; label: string; lot_id: string; nature: string; lot_code?: string; lot_label?: string }
+interface Code { id: string; code: string; label: string; famille_id: string; nature: string; famille_code?: string; famille_label?: string }
+
+const NAT_OPTS = [
+  { v: 'material', l: 'Matériaux' },
+  { v: 'labor', l: "Main d'œuvre" },
+  { v: 'equipment', l: 'Matériel' },
+  { v: 'subcontract', l: 'Sous-traitance' },
+];
+const natLabel = (v: string) => NAT_OPTS.find((n) => n.v === v)?.l ?? v;
 interface Company { id: string; code: string; name: string; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
 interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
@@ -245,19 +253,23 @@ function TabFamilles({ token }: { token: string }) {
     queryFn: () => api<Famille[]>('/params/familles'),
     enabled: Boolean(token),
   });
-  const [newCode, setNewCode] = useState('');
-  const [newLabel, setNewLabel] = useState('');
-  const [editing, setEditing] = useState<{ id: string; code: string; label: string } | null>(null);
+  const { data: lots = [] } = useQuery<Lot[]>({
+    queryKey: ['params-lots'],
+    queryFn: () => api<Lot[]>('/params/lots'),
+    enabled: Boolean(token),
+  });
+  const [nf, setNf] = useState({ lotId: '', code: '', label: '', nature: 'material' });
+  const [editing, setEditing] = useState<{ id: string; lotId: string; code: string; label: string; nature: string } | null>(null);
   const { selectedIds, toggle, toggleAll, clear } = useSelection();
 
   const inv = () => qc.invalidateQueries({ queryKey: ['params-familles'] });
 
   const create = useMutation({
-    mutationFn: () => api('/params/familles', { method: 'POST', body: { code: newCode, label: newLabel } }),
-    onSuccess: () => { inv(); setNewCode(''); setNewLabel(''); },
+    mutationFn: () => api('/params/familles', { method: 'POST', body: { lotId: nf.lotId, code: nf.code, label: nf.label, nature: nf.nature } }),
+    onSuccess: () => { inv(); setNf({ lotId: '', code: '', label: '', nature: 'material' }); },
   });
   const update = useMutation({
-    mutationFn: (e: typeof editing) => api(`/params/familles/${e!.id}`, { method: 'PATCH', body: { code: e!.code, label: e!.label } }),
+    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/familles/${e.id}`, { method: 'PATCH', body: { lotId: e.lotId, code: e.code, label: e.label, nature: e.nature } }),
     onSuccess: () => { inv(); setEditing(null); },
   });
   const del = useMutation({
@@ -273,9 +285,20 @@ function TabFamilles({ token }: { token: string }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card title="Ajouter une famille">
         <Row>
-          <Field label="Code"><input className="input" style={{ width: 120 }} placeholder="Ex: P_COL" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
-          <Field label="Désignation"><input className="input" style={{ width: 340 }} placeholder="Ex: Colles" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
-          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()} disabled={!newCode || !newLabel}>+ Ajouter</button>
+          <Field label="Lot parent">
+            <select className="input" style={{ width: 200 }} value={nf.lotId} onChange={(e) => setNf({ ...nf, lotId: e.target.value })}>
+              <option value="">— choisir —</option>
+              {lots.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Nature">
+            <select className="input" style={{ width: 150 }} value={nf.nature} onChange={(e) => setNf({ ...nf, nature: e.target.value })}>
+              {NAT_OPTS.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+            </select>
+          </Field>
+          <Field label="Code"><input className="input" style={{ width: 120 }} placeholder="Ex: P_COL" value={nf.code} onChange={(e) => setNf({ ...nf, code: e.target.value })} /></Field>
+          <Field label="Désignation"><input className="input" style={{ width: 260 }} placeholder="Ex: Colles" value={nf.label} onChange={(e) => setNf({ ...nf, label: e.target.value })} /></Field>
+          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()} disabled={!nf.lotId || !nf.code || !nf.label}>+ Ajouter</button>
         </Row>
       </Card>
       <Card title={`Familles de ressources${familles.length > 0 ? ` (${familles.length})` : ''}`}>
@@ -284,18 +307,28 @@ function TabFamilles({ token }: { token: string }) {
             onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} famille(s) ?`)) bulkDelete.mutate(); }} />
         )}
         <RefTable
-          rows={familles.map((f) => [f.code, f.label])}
-          headers={['Code', 'Désignation']}
+          rows={familles.map((f) => [f.code, f.label, f.lot_code ? `${f.lot_code} — ${f.lot_label}` : '—', natLabel(f.nature)])}
+          headers={['Code', 'Désignation', 'Lot parent', 'Nature']}
           ids={familles.map((f) => f.id)}
           selectedIds={selectedIds}
           onToggle={toggle}
           onToggleAll={() => toggleAll(familles.map((f) => f.id))}
-          onEdit={(i) => setEditing({ id: familles[i].id, code: familles[i].code, label: familles[i].label })}
+          onEdit={(i) => setEditing({ id: familles[i].id, lotId: familles[i].lot_id, code: familles[i].code, label: familles[i].label, nature: familles[i].nature })}
           onDelete={(i) => { if (confirm('Supprimer cette famille ?')) del.mutate(familles[i].id); }}
         />
       </Card>
       {editing && (
         <Modal title="Modifier la famille" onClose={() => setEditing(null)}>
+          <Field label="Lot parent">
+            <select className="input" value={editing.lotId} onChange={(e) => setEditing({ ...editing, lotId: e.target.value })}>
+              {lots.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Nature">
+            <select className="input" value={editing.nature} onChange={(e) => setEditing({ ...editing, nature: e.target.value })}>
+              {NAT_OPTS.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+            </select>
+          </Field>
           <Field label="Code"><input className="input" value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value })} /></Field>
           <Field label="Désignation"><input className="input" style={{ width: 300 }} value={editing.label} onChange={(e) => setEditing({ ...editing, label: e.target.value })} /></Field>
           <Row style={{ marginTop: 12, justifyContent: 'flex-end' }}>
@@ -318,19 +351,29 @@ function TabCodes({ token }: { token: string }) {
     queryFn: () => api<Code[]>('/params/codes'),
     enabled: Boolean(token),
   });
-  const [newCode, setNewCode] = useState('');
-  const [newLabel, setNewLabel] = useState('');
-  const [editing, setEditing] = useState<{ id: string; code: string; label: string } | null>(null);
+  const { data: familles = [] } = useQuery<Famille[]>({
+    queryKey: ['params-familles'],
+    queryFn: () => api<Famille[]>('/params/familles'),
+    enabled: Boolean(token),
+  });
+  const [nf, setNf] = useState({ familleId: '', code: '', label: '', nature: 'material' });
+  const [editing, setEditing] = useState<{ id: string; familleId: string; code: string; label: string; nature: string } | null>(null);
   const { selectedIds, toggle, toggleAll, clear } = useSelection();
 
   const inv = () => qc.invalidateQueries({ queryKey: ['params-codes'] });
 
+  // Quand on choisit une famille, pré-remplir la nature avec celle de la famille
+  const onPickFamille = (familleId: string, setter: (n: string) => void) => {
+    const fa = familles.find((x) => x.id === familleId);
+    if (fa) setter(fa.nature);
+  };
+
   const create = useMutation({
-    mutationFn: () => api('/params/codes', { method: 'POST', body: { code: newCode, label: newLabel } }),
-    onSuccess: () => { inv(); setNewCode(''); setNewLabel(''); },
+    mutationFn: () => api('/params/codes', { method: 'POST', body: { familleId: nf.familleId, code: nf.code, label: nf.label, nature: nf.nature } }),
+    onSuccess: () => { inv(); setNf({ familleId: '', code: '', label: '', nature: 'material' }); },
   });
   const update = useMutation({
-    mutationFn: (e: typeof editing) => api(`/params/codes/${e!.id}`, { method: 'PATCH', body: { code: e!.code, label: e!.label } }),
+    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/codes/${e.id}`, { method: 'PATCH', body: { familleId: e.familleId, code: e.code, label: e.label, nature: e.nature } }),
     onSuccess: () => { inv(); setEditing(null); },
   });
   const del = useMutation({
@@ -346,9 +389,21 @@ function TabCodes({ token }: { token: string }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card title="Ajouter un code analytique">
         <Row>
-          <Field label="Code"><input className="input" style={{ width: 120 }} placeholder="Ex: 280" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
-          <Field label="Désignation"><input className="input" style={{ width: 340 }} placeholder="Ex: Colle carrelage" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
-          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()} disabled={!newCode || !newLabel}>+ Ajouter</button>
+          <Field label="Famille">
+            <select className="input" style={{ width: 200 }} value={nf.familleId}
+              onChange={(e) => { setNf({ ...nf, familleId: e.target.value }); onPickFamille(e.target.value, (n) => setNf((s) => ({ ...s, familleId: e.target.value, nature: n }))); }}>
+              <option value="">— choisir —</option>
+              {familles.map((fa) => <option key={fa.id} value={fa.id}>{fa.code} — {fa.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Nature">
+            <select className="input" style={{ width: 150 }} value={nf.nature} onChange={(e) => setNf({ ...nf, nature: e.target.value })}>
+              {NAT_OPTS.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+            </select>
+          </Field>
+          <Field label="Code"><input className="input" style={{ width: 110 }} placeholder="Ex: 280" value={nf.code} onChange={(e) => setNf({ ...nf, code: e.target.value })} /></Field>
+          <Field label="Désignation"><input className="input" style={{ width: 240 }} placeholder="Ex: Colle carrelage" value={nf.label} onChange={(e) => setNf({ ...nf, label: e.target.value })} /></Field>
+          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()} disabled={!nf.familleId || !nf.code || !nf.label}>+ Ajouter</button>
         </Row>
       </Card>
       <Card title={`Codes analytiques${codes.length > 0 ? ` (${codes.length})` : ''}`}>
@@ -357,18 +412,29 @@ function TabCodes({ token }: { token: string }) {
             onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} code(s) analytique(s) ?`)) bulkDelete.mutate(); }} />
         )}
         <RefTable
-          rows={codes.map((c) => [c.code, c.label])}
-          headers={['Code', 'Désignation']}
+          rows={codes.map((c) => [c.code, c.label, c.famille_code ? `${c.famille_code} — ${c.famille_label}` : '—', natLabel(c.nature)])}
+          headers={['Code', 'Désignation', 'Famille', 'Nature']}
           ids={codes.map((c) => c.id)}
           selectedIds={selectedIds}
           onToggle={toggle}
           onToggleAll={() => toggleAll(codes.map((c) => c.id))}
-          onEdit={(i) => setEditing({ id: codes[i].id, code: codes[i].code, label: codes[i].label })}
+          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id, code: codes[i].code, label: codes[i].label, nature: codes[i].nature })}
           onDelete={(i) => { if (confirm('Supprimer ce code analytique ?')) del.mutate(codes[i].id); }}
         />
       </Card>
       {editing && (
         <Modal title="Modifier le code analytique" onClose={() => setEditing(null)}>
+          <Field label="Famille">
+            <select className="input" value={editing.familleId}
+              onChange={(e) => { const id = e.target.value; const fa = familles.find((x) => x.id === id); setEditing({ ...editing, familleId: id, nature: fa ? fa.nature : editing.nature }); }}>
+              {familles.map((fa) => <option key={fa.id} value={fa.id}>{fa.code} — {fa.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Nature">
+            <select className="input" value={editing.nature} onChange={(e) => setEditing({ ...editing, nature: e.target.value })}>
+              {NAT_OPTS.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+            </select>
+          </Field>
           <Field label="Code"><input className="input" value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value })} /></Field>
           <Field label="Désignation"><input className="input" style={{ width: 300 }} value={editing.label} onChange={(e) => setEditing({ ...editing, label: e.target.value })} /></Field>
           <Row style={{ marginTop: 12, justifyContent: 'flex-end' }}>
