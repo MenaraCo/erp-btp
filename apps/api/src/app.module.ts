@@ -17,6 +17,7 @@ import { ComplianceModule } from './modules/compliance/compliance.module';
 import { SiteTrackingModule } from './modules/site-tracking/site-tracking.module';
 import { AnalyticalModule } from './modules/analytical/analytical.module';
 import { FinancialManagementModule } from './modules/financial-management/financial-management.module';
+import { ParamsModule } from './modules/params/params.module';
 import { SearchModule } from './core/common/search/search.module';
 import { HealthModule } from './health/health.module';
 
@@ -40,6 +41,7 @@ import { HealthModule } from './health/health.module';
     SiteTrackingModule,
     AnalyticalModule,
     FinancialManagementModule,
+    ParamsModule,
     SearchModule,
     HealthModule,
   ],

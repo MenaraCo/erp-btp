@@ -26,6 +26,8 @@ const NAV: NavItem[] = [
   // Exécution
   { href: '/chantiers', label: 'Chantiers', section: 'Exécution' },
   { href: '/invoicing', label: 'Facturation', section: 'Exécution' },
+  // Administration
+  { href: '/params', label: 'Paramètres', section: 'Administration' },
 ];
 
 function isActive(href: string, pathname: string): boolean {
