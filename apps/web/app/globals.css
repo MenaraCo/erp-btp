@@ -197,7 +197,6 @@ button.btn,
   white-space: nowrap;
   text-transform: uppercase;
   letter-spacing: 0.3px;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 button.btn:hover:not(:disabled),
@@ -227,7 +226,6 @@ button.btn-secondary,
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.3px;
-  transition: background 0.15s, border-color 0.15s;
 }
 
 button.btn-secondary:hover:not(:disabled),
@@ -245,7 +243,6 @@ button.btn-ghost,
   padding: 3px 7px;
   border-radius: var(--radius-sm);
   font-size: 11px;
-  transition: background 0.15s, color 0.15s;
 }
 
 button.btn-ghost:hover:not(:disabled),
