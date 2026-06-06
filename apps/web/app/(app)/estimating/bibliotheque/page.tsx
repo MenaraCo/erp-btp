@@ -135,7 +135,7 @@ export default function BibliothequePage() {
 
       {libId && (
         <>
-          <div className="card" style={{ marginTop: 16 }}>
+          <div id="ressources" className="card" style={{ marginTop: 16, scrollMarginTop: 16 }}>
             <h2>Ressources {resources.data ? `(${resources.data.total})` : ''}</h2>
             {resources.data && resources.data.rows.length > 0 && (
               <table className="grid">
@@ -172,7 +172,7 @@ export default function BibliothequePage() {
             </form>
           </div>
 
-          <div className="card" style={{ marginTop: 16 }}>
+          <div id="ouvrages" className="card" style={{ marginTop: 16, scrollMarginTop: 16 }}>
             <h2>Ouvrages composés {ouvrages.data ? `(${ouvrages.data.total})` : ''}</h2>
             <p className="muted" style={{ marginTop: 0 }}>Ajoutez des ressources à un ouvrage : son déboursé se met à jour.</p>
             {ouvrages.data && ouvrages.data.rows.length > 0 && (

@@ -7,17 +7,43 @@ interface NavItem {
   href: string;
   label: string;
   section: string;
+  /** indentation level (0 = top, 1 = sub-item) */
+  level?: number;
 }
 
 const NAV: NavItem[] = [
-  { href: '/', label: 'Tableau de bord', section: 'Général' },
+  // Module cœur : Études de prix
+  { href: '/', label: 'Tableau de bord', section: 'Études de prix' },
+  { href: '/estimating/planning', label: 'Planning des études', section: 'Études de prix' },
+  { href: '/estimating', label: 'Affaires', section: 'Études de prix' },
+  { href: '/estimating/devis', label: 'Devis', section: 'Études de prix' },
+  { href: '/estimating/bibliotheque', label: 'Bibliothèque', section: 'Études de prix' },
+  { href: '/estimating/bibliotheque#ouvrages', label: 'Ouvrages', section: 'Études de prix', level: 1 },
+  { href: '/estimating/bibliotheque#ressources', label: 'Ressources', section: 'Études de prix', level: 1 },
+  // Référentiel
   { href: '/clients', label: 'Clients', section: 'Référentiel' },
   { href: '/suppliers', label: 'Fournisseurs', section: 'Référentiel' },
-  { href: '/estimating', label: 'Devis', section: 'Modules' },
-  { href: '/estimating/bibliotheque', label: 'Bibliothèque', section: 'Modules' },
-  { href: '/chantiers', label: 'Chantiers', section: 'Modules' },
-  { href: '/invoicing', label: 'Facturation', section: 'Modules' },
+  // Exécution
+  { href: '/chantiers', label: 'Chantiers', section: 'Exécution' },
+  { href: '/invoicing', label: 'Facturation', section: 'Exécution' },
 ];
+
+function isActive(href: string, pathname: string): boolean {
+  const base = href.split('#')[0];
+  if (base === '/') return pathname === '/';
+  if (base === '/estimating') {
+    // Affaires : actif sur la liste, le détail affaire et l'éditeur de devis,
+    // mais pas sur les sous-routes dédiées (planning, liste devis, bibliothèque).
+    return (
+      pathname === '/estimating' ||
+      (pathname.startsWith('/estimating/') &&
+        !pathname.startsWith('/estimating/planning') &&
+        !pathname.startsWith('/estimating/devis') &&
+        !pathname.startsWith('/estimating/bibliotheque'))
+    );
+  }
+  return pathname.startsWith(base);
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -29,11 +55,15 @@ export function Sidebar() {
       {NAV.map((item) => {
         const showSection = item.section !== lastSection;
         lastSection = item.section;
-        const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+        const active = isActive(item.href, pathname);
         return (
           <div key={item.href}>
             {showSection && <div className="nav-section">{item.section}</div>}
-            <Link href={item.href} className={active ? 'active' : ''}>
+            <Link
+              href={item.href}
+              className={active ? 'active' : ''}
+              style={item.level ? { paddingLeft: 24, fontSize: 10.5, opacity: 0.85 } : undefined}
+            >
               {item.label}
             </Link>
           </div>

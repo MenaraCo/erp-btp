@@ -58,17 +58,17 @@ export default function EstimatingPage() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Devis</h1>
+        <h1>Affaires</h1>
         {!showForm && (
           <button className="btn" onClick={() => setShowForm(true)}>
-            + Nouveau devis
+            + Nouvelle affaire
           </button>
         )}
       </div>
 
       {showForm && (
         <div className="card" style={{ marginTop: 12 }}>
-          <h2>Nouveau devis</h2>
+          <h2>Nouvelle affaire</h2>
           {error && <div className="error">{error}</div>}
           <form
             onSubmit={(e) => {

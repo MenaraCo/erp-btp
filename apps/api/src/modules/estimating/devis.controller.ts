@@ -76,6 +76,13 @@ export class DevisController {
     return this.devis.createDevis(affaireId, body);
   }
 
+  @Get('devis')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  listDevis() {
+    return this.devis.listDevis();
+  }
+
   @Get('devis/:devisId')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.read')

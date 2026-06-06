@@ -226,6 +226,19 @@ export class DevisService {
     return { affaire: base.affaire, devis, totals };
   }
 
+  /** Lists all devis (across affaires) with their affaire, for the devis list screen. */
+  listDevis() {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, (em) =>
+      em.query(
+        `SELECT d.id, d.numero, d.designation, d.type, d.status, d.affaire_id,
+                a.code AS affaire_code, a.name AS affaire_name
+           FROM devis d JOIN affaire a ON a.id = d.affaire_id
+          ORDER BY d.created_at DESC`,
+      ),
+    );
+  }
+
   /** Returns a devis with its versions (read-side, for the devis editor). */
   getDevis(devisId: string) {
     const tenantId = this.context.requireTenantId();
