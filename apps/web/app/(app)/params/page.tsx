@@ -12,6 +12,16 @@ function useApi() {
     apiFetch<T>(path, { ...opts, token }), [token]);
 }
 
+/* ─────────── hook feedback sauvegarde ─────────── */
+function useSavedFeedback(delayMs = 3000) {
+  const [saved, setSaved] = useState(false);
+  const flash = useCallback(() => {
+    setSaved(true);
+    setTimeout(() => setSaved(false), delayMs);
+  }, [delayMs]);
+  return { saved, flash };
+}
+
 /* ─────────── helpers ─────────── */
 
 const NATURES: { v: string; l: string }[] = [
@@ -95,6 +105,7 @@ export default function ParamsPage() {
 function TabEntreprise({ token }: { token: string }) {
   const qc = useQueryClient();
   const api = useApi();
+  const { saved, flash } = useSavedFeedback();
   const { data: company } = useQuery<Company>({
     queryKey: ['params-company'],
     queryFn: () => api<Company>('/params/company'),
@@ -105,7 +116,7 @@ function TabEntreprise({ token }: { token: string }) {
 
   const save = useMutation({
     mutationFn: () => api(`/params/company/${company!.id}`, { method: 'PATCH', body: form }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['params-company'] }); setForm({}); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['params-company'] }); setForm({}); flash(); },
   });
 
   if (!company) return <p className="muted">Chargement…</p>;
@@ -113,6 +124,7 @@ function TabEntreprise({ token }: { token: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <Card title="Votre entreprise">
+
         <Row>
           <Field label="Nom de l'entreprise *"><input className="input" style={{ width: 280 }} value={f('name')} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Forme juridique"><input className="input" style={{ width: 120 }} value={f('legal_form')} onChange={(e) => setForm({ ...form, legal_form: e.target.value })} /></Field>
@@ -133,9 +145,7 @@ function TabEntreprise({ token }: { token: string }) {
         </Row>
         <Field label="Capital social"><input className="input" style={{ width: 140 }} value={f('capital')} onChange={(e) => setForm({ ...form, capital: e.target.value })} /></Field>
       </Card>
-      <button className="btn" style={{ width: 'fit-content' }} onClick={() => save.mutate()}>
-        {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
-      </button>
+      <SaveButton onSave={() => save.mutate()} isPending={save.isPending} saved={saved} />
     </div>
   );
 }
@@ -463,6 +473,7 @@ const DEFAULT_TABS = [
 function TabPreferences({ token }: { token: string }) {
   const qc = useQueryClient();
   const api = useApi();
+  const { saved, flash } = useSavedFeedback();
   const { data: prefs } = useQuery<Preferences>({
     queryKey: ['params-preferences'],
     queryFn: () => api<Preferences>('/params/preferences'),
@@ -528,6 +539,7 @@ function TabPreferences({ token }: { token: string }) {
       qc.invalidateQueries({ queryKey: ['params-preferences'] });
       qc.invalidateQueries({ queryKey: ['app-preferences'] }); // propagé au PrefsProvider
       setForm({});
+      flash();
     },
     onError: (err: unknown) => {
       alert('Erreur lors de l\'enregistrement : ' + (err instanceof Error ? err.message : String(err)));
@@ -698,9 +710,7 @@ function TabPreferences({ token }: { token: string }) {
         </div>
       </Card>
 
-      <button className="btn" style={{ width: 'fit-content' }} onClick={() => save.mutate()}>
-        {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
-      </button>
+      <SaveButton onSave={() => save.mutate()} isPending={save.isPending} saved={saved} />
     </div>
   );
 }
@@ -742,6 +752,25 @@ function RefTable({ rows, headers, onEdit, onDelete }: {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function SaveButton({ onSave, isPending, saved }: { onSave: () => void; isPending: boolean; saved: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <button className="btn" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 140 }} onClick={onSave} disabled={isPending}>
+        <span style={{ fontSize: 13 }}>💾</span>
+        {isPending ? 'Enregistrement…' : 'Enregistrer'}
+      </button>
+      <span style={{
+        color: '#2d7a47', fontSize: 12, fontWeight: 600,
+        opacity: saved ? 1 : 0,
+        transform: saved ? 'translateY(0)' : 'translateY(4px)',
+        transition: 'opacity 0.25s ease, transform 0.25s ease',
+      }}>
+        Paramètres sauvegardés ✓
+      </span>
+    </div>
   );
 }
 
