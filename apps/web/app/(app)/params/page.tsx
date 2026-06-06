@@ -167,14 +167,15 @@ function TabLots({ token }: { token: string }) {
     queryFn: () => api<Lot[]>('/params/lots'),
     enabled: Boolean(token),
   });
-  const [form, setForm] = useState({ nature: 'material', code: '', label: '' });
+  const [newCode, setNewCode] = useState('');
+  const [newLabel, setNewLabel] = useState('');
   const [editing, setEditing] = useState<{ id: string; code: string; label: string } | null>(null);
 
   const inv = () => { qc.invalidateQueries({ queryKey: ['params-lots'] }); qc.invalidateQueries({ queryKey: ['params-familles'] }); };
 
   const create = useMutation({
-    mutationFn: () => api('/params/lots', { method: 'POST', body: form }),
-    onSuccess: () => { inv(); setForm({ nature: 'material', code: '', label: '' }); },
+    mutationFn: () => api('/params/lots', { method: 'POST', body: { nature: 'material', code: newCode, label: newLabel } }),
+    onSuccess: () => { inv(); setNewCode(''); setNewLabel(''); },
   });
   const update = useMutation({
     mutationFn: (e: typeof editing) => api(`/params/lots/${e!.id}`, { method: 'PATCH', body: { code: e!.code, label: e!.label } }),
@@ -185,31 +186,32 @@ function TabLots({ token }: { token: string }) {
     onSuccess: inv,
   });
 
-  const grouped = NATURES.map((n) => ({ nature: n, items: lots.filter((l) => l.nature === n.v) }));
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {grouped.map(({ nature, items }) => items.length === 0 ? null : (
-        <Card key={nature.v} title={`Lots — ${nature.l}`}>
-          <RefTable
-            rows={items.map((l) => [l.code, l.label])}
-            headers={['Code', 'Désignation']}
-            onEdit={(i) => setEditing({ id: items[i].id, code: items[i].code, label: items[i].label })}
-            onDelete={(i) => { if (confirm('Supprimer ce lot ?')) del.mutate(items[i].id); }}
-          />
-        </Card>
-      ))}
-      <Card title="Ajouter un lot">
-        <Row>
-          <Field label="Nature">
-            <select className="input" style={{ width: 180 }} value={form.nature} onChange={(e) => setForm({ ...form, nature: e.target.value })}>
-              {NATURES.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
-            </select>
-          </Field>
-          <Field label="Code"><input className="input" style={{ width: 100 }} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></Field>
-          <Field label="Désignation"><input className="input" style={{ width: 280 }} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
-          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()}>+ Ajouter</button>
-        </Row>
+      <Card title={`Lots prédéfinis${lots.length > 0 ? ` (${lots.length})` : ''}`}>
+        <table className="grid">
+          <thead>
+            <tr><th>Code</th><th>Désignation</th><th style={{ width: 80 }}></th></tr>
+          </thead>
+          <tbody>
+            {lots.map((l, i) => (
+              <tr key={l.id}>
+                <td><strong>{l.code}</strong></td>
+                <td>{l.label}</td>
+                <td style={{ display: 'flex', gap: 4 }}>
+                  <button className="btn-ghost btn" onClick={() => setEditing({ id: l.id, code: l.code, label: l.label })}>✎</button>
+                  <button className="btn-danger btn" onClick={() => { if (confirm('Supprimer ce lot ?')) del.mutate(l.id); }}>✕</button>
+                </td>
+              </tr>
+            ))}
+            {/* Ligne d'ajout inline — même style que CHIFFRAGE */}
+            <tr>
+              <td><input className="input" style={{ width: 100 }} placeholder="Code" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></td>
+              <td><input className="input" style={{ width: '100%' }} placeholder="Désignation" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></td>
+              <td><button className="btn" onClick={() => create.mutate()} disabled={!newCode || !newLabel}>+ Ajouter</button></td>
+            </tr>
+          </tbody>
+        </table>
       </Card>
       {editing && (
         <Modal title="Modifier le lot" onClose={() => setEditing(null)}>
