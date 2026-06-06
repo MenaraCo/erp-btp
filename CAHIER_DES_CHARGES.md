@@ -154,7 +154,7 @@ C'est la partie la plus importante : le modèle métier *est* l'avantage concurr
 ### 5.1 Bibliothèques et ressources
 
 - **Bibliothèque d'étude de prix** : catalogue de référence pour le chiffrage (multi-bibliothèques par tenant). Peut être convertie depuis une affaire ou importée (listing, format type BatiPrix). **Distincte de la nomenclature de chantier** (voir 5.5) : aucun lien automatique entre les deux — la seule circulation de données est la copie effectuée au premier transfert (voir 5.4).
-- **Ressource** : article élémentaire. Champs : **`code_produit` (unique par ressource)**, `libellé`, `unité`, `prix unitaire (déboursé)`. Chaque ressource est rattachée à **exactement un code analytique** (voir 5.8) ; c'est par ce code analytique qu'elle hérite de sa famille, son lot et sa nature. Un même code analytique regroupe **plusieurs ressources** (ex. plusieurs colles de marques différentes sous le code analytique COLLE = 280). Une ressource MO porte un rendement/temps.
+- **Ressource** : article élémentaire. Champs obligatoires : **`code_produit` (unique par ressource)**, `libellé`, `type` (matériaux/main d'œuvre/matériel/sous-traitance), **`unité d'emploi`** (depuis le référentiel Unités, ex. KG, M2, H), `prix unitaire déboursé`. Champs achat : **PU public** (prix d'achat à l'unité d'achat, ex. 1 sac de 25 kg), **unité d'achat** (depuis le référentiel Unités), **coeff de conversion** (ex. 1 sac = 25 KG → déboursé = PU public ÷ 25), **distributeur** (FK vers fournisseurs), référence distributeur, conditionnement. Chaque ressource est rattachée à **exactement une famille** (→ lot → nature) et un **code analytique** (voir 5.8). Une ressource MO porte un rendement/temps. **Toutes les listes déroulantes de la fiche ressource proviennent des référentiels paramétrables** (Unités, Familles, Codes, Fournisseurs) — aucune valeur codée en dur.
 - **Élément composé / Ouvrage** : composition récursive de ressources et de sous-ouvrages, chacun avec une **quantité**. Son coût (déboursé sec) est **calculé automatiquement** par agrégation des composants. C'est l'entité reine — modélisez-la en arbre récursif avec recalcul ascendant.
 - **Élément en pourcentage** : ligne dont le montant est un % d'une assiette (frais, aléas).
 - **Étude type** : modèle de devis pré-rempli réutilisable.
@@ -223,6 +223,29 @@ Transfert d'un **devis gagné** (et non de l'affaire entière) vers l'aval, en *
 - **Licences / jetons** : affectation de droits modulaires par utilisateur ou par application.
 - **Rôles (RBAC)** : autorisations fines par module et par environnement (ex. opérateur de saisie MO, acheteur avec/sans création fournisseur, métreur avec/sans coefficients, administrateur des bibliothèques, planificateur…). Rôles cumulables. Droits sur bases, modules et centres de coûts.
 - **Prédispositions** : récupérer la configuration d'un utilisateur (grilles, mises en page, paramètres) et la diffuser aux autres.
+
+#### 5.7.1 Menu Paramètres société *(implémenté en Phase 1)*
+
+Menu **Administration → Paramètres** accessible à tout administrateur, sans gate de capacité (configuration transversale). 6 onglets :
+
+- **Entreprise** : infos légales (nom, forme juridique, adresse, code postal, ville, téléphone, email, SIRET, N° TVA intracommunautaire, RCS, capital social). Données utilisées dans les en-têtes PDF.
+- **Familles** : référentiel des familles de ressources (code, désignation, lot parent). CRUD complet + cascade vers codes analytiques.
+- **Codes analytiques** : référentiel des codes analytiques (code, désignation, famille parent). 4 niveaux : nature → lot → famille → code analytique → ressource. CRUD complet.
+- **Lots** : référentiel des lots du plan analytique (nature, code, désignation), regroupés par nature (MO / Matériaux / Matériel / Sous-traitance). CRUD complet.
+- **Unités** : référentiel des unités de mesure (abréviation, désignation), réordonnables. Proposées dans tous les sélecteurs de l'app (ressources, ouvrages, lignes de devis).
+- **Préférences** :
+  - **Taux TVA disponibles** : liste de taux paramétrables (chips), proposés dans le sélecteur TVA de chaque devis. TVA 0% = autoliquidation.
+  - **Taux par défaut FG / Bénéfice** : pré-remplis à la création d'un devis, modifiables par devis. Saisis en % (ex. 25, pas 0.25). Formule PV = Débours × (1 + FG%) × (1 + Bénéfice%).
+  - **Onglet devis par défaut** : onglet ouvert automatiquement à l'ouverture d'un devis existant (Étude de prix / Coefficients & frais / Devis client / Aperçu PDF).
+  - **Affichage des décimales** : choix 2 / 3 / 4 chiffres après la virgule dans les tableaux et montants. Les calculs se font toujours en 4 décimales (moteur). Les PDF s'arrêtent toujours à 2.
+  - **Numérotation des devis** : préfixe (ex. DEV) + séparateur (ex. -).
+  - **Deux couleurs paramétrables** avec aperçu live (CSS vars appliquées immédiatement) :
+    - `couleur_principale` (`--primary`) : sidebar, en-têtes de section, titres — navy `#1a3a5c` par défaut.
+    - `couleur_accent` (`--accent`) : boutons, codes analytiques, badges actifs — orange `#e8550a` par défaut.
+
+**Règles d'affichage des nombres** : ne jamais afficher de décimales inutiles (25 et non 25.00 ; 25.5 si ≠ 00). Ne jamais forcer une virgule dans un champ de saisie — l'opérateur la saisit s'il en a besoin.
+
+**Responsable de l'affaire** : saisi dans chaque affaire individuellement (pas une préférence globale), il apparaît sur les PDFs de cette affaire.
 
 ### 5.8 Contrôle de gestion chantier — MODULE DIFFÉRENCIANT (analytique prédictif)
 
@@ -336,7 +359,7 @@ Ne pas tout construire d'un coup. Ordre recommandé :
 
 **Phase 0 — Socle** : multi-tenant, auth/RBAC, **système d'entitlements (capacités + quotas) et cycle de vie de souscription avec essai 30 j** (section 3), modèle de données de base, CI/CD, data-grid réutilisable, recherche universelle. La garde d'autorisation par capacité doit exister avant tout module métier, pour que chaque fonctionnalité naisse déjà « gatée ». L'intégration du prestataire de facturation récurrente (checkout, portail, webhooks) peut être branchée en fin de phase 1.
 
-**Phase 1 — Études de prix (MVP du cœur)** : bibliothèques + ressources, ouvrages composés avec recalcul, corps de devis hiérarchique, métré simple, déboursé/sous-détails, feuille de vente + coefficients, workflow d'affaire, édition PDF du devis. *C'est le module qui vend le produit — soignez-le.* **En fin de phase** (premier produit vendable) : les **deux interfaces d'abonnement/licences** (espace client + back-office éditeur, section 3.7) et le branchement au prestataire de paiement.
+**Phase 1 — Études de prix (MVP du cœur)** : bibliothèques + ressources enrichies (fiche complète avec référentiels paramétrables, coeff conversion, distributeur), ouvrages composés avec recalcul, corps de devis hiérarchique, métré simple, déboursé/sous-détails, feuille de vente + coefficients, workflow d'affaire, édition PDF du devis. **Module Paramètres société** (§ 5.7.1). *C'est le module qui vend le produit — soignez-le.* **En fin de phase** (premier produit vendable) : les **deux interfaces d'abonnement/licences** (espace client + back-office éditeur, section 3.7) et le branchement au prestataire de paiement.
 
 **Phase 2 — Acceptation + Facturation** : transfert affaire gagnée → devis facturation, situations de travaux à l'avancement, avenants, DGD, génération de factures, Factur-X.
 
