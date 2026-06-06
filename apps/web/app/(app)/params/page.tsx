@@ -768,15 +768,11 @@ function SaveButton({ onSave, isPending, saved }: { onSave: () => void; isPendin
         <span style={{ fontSize: 13 }}>💾</span>
         <span>{isPending ? 'Enregistrement…' : 'Enregistrer'}</span>
       </button>
-      {/* Toujours dans le DOM (evite le reflow) — visible uniquement via opacity */}
-      <span style={{
-        color: '#2d7a47', fontSize: 12, fontWeight: 600,
-        whiteSpace: 'nowrap', pointerEvents: 'none',
-        opacity: saved ? 1 : 0,
-        transition: 'opacity 0.3s ease',
-      }}>
-        Paramètres sauvegardés ✓
-      </span>
+      {saved && (
+        <span style={{ color: '#2d7a47', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+          Paramètres sauvegardés ✓
+        </span>
+      )}
     </div>
   );
 }
