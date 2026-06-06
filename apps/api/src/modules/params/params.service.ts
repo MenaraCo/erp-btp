@@ -7,9 +7,9 @@ import { runInTenant } from '../../core/tenancy/tenant-transaction';
 /* ------------------------------------------------------------------ types */
 
 export interface UnitInput { abrev: string; label: string; sortOrder?: number }
-export interface LotInput { nature: string; code: string; label: string }
-export interface FamilleInput { lotId: string; code: string; label: string }
-export interface CodeInput { familleId: string; code: string; label: string }
+export interface LotInput { code: string; label: string }
+export interface FamilleInput { code: string; label: string }
+export interface CodeInput { code: string; label: string }
 
 export interface CompanyInfoInput {
   name?: string;
@@ -111,7 +111,7 @@ export class ParamsService {
   listLots() {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
-      em.query(`SELECT * FROM analytical_lot ORDER BY nature, code`),
+      em.query(`SELECT id, code, label FROM analytical_lot ORDER BY code`),
     );
   }
 
@@ -119,9 +119,9 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `INSERT INTO analytical_lot (tenant_id, nature, code, label)
-         VALUES ($1,$2,$3,$4) RETURNING *`,
-        [tenantId, input.nature, input.code, input.label],
+        `INSERT INTO analytical_lot (tenant_id, code, label)
+         VALUES ($1,$2,$3) RETURNING id, code, label`,
+        [tenantId, input.code, input.label],
       );
       return rows[0];
     });
@@ -133,13 +133,12 @@ export class ParamsService {
       await this.assertExists(em, 'analytical_lot', id);
       await em.query(
         `UPDATE analytical_lot SET
-           code   = COALESCE($2, code),
-           label  = COALESCE($3, label),
-           nature = COALESCE($4, nature)
+           code  = COALESCE($2, code),
+           label = COALESCE($3, label)
          WHERE id = $1`,
-        [id, input.code ?? null, input.label ?? null, input.nature ?? null],
+        [id, input.code ?? null, input.label ?? null],
       );
-      return (await em.query(`SELECT * FROM analytical_lot WHERE id = $1`, [id]))[0];
+      return (await em.query(`SELECT id, code, label FROM analytical_lot WHERE id = $1`, [id]))[0];
     });
   }
 
@@ -157,7 +156,8 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT f.*, l.nature, l.code AS lot_code, l.label AS lot_label
+        `SELECT f.id, f.code, f.label, f.lot_id,
+                l.code AS lot_code, l.label AS lot_label, l.nature
          FROM analytical_famille f
          JOIN analytical_lot l ON l.id = f.lot_id
          ORDER BY l.nature, l.code, f.code`,
@@ -169,9 +169,9 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `INSERT INTO analytical_famille (tenant_id, lot_id, code, label)
-         VALUES ($1,$2,$3,$4) RETURNING *`,
-        [tenantId, input.lotId, input.code, input.label],
+        `INSERT INTO analytical_famille (tenant_id, code, label)
+         VALUES ($1,$2,$3) RETURNING id, code, label`,
+        [tenantId, input.code, input.label],
       );
       return rows[0];
     });
@@ -183,13 +183,12 @@ export class ParamsService {
       await this.assertExists(em, 'analytical_famille', id);
       await em.query(
         `UPDATE analytical_famille SET
-           lot_id = COALESCE($2, lot_id),
-           code   = COALESCE($3, code),
-           label  = COALESCE($4, label)
+           code  = COALESCE($2, code),
+           label = COALESCE($3, label)
          WHERE id = $1`,
-        [id, input.lotId ?? null, input.code ?? null, input.label ?? null],
+        [id, input.code ?? null, input.label ?? null],
       );
-      return (await em.query(`SELECT * FROM analytical_famille WHERE id = $1`, [id]))[0];
+      return (await em.query(`SELECT id, code, label FROM analytical_famille WHERE id = $1`, [id]))[0];
     });
   }
 
@@ -207,8 +206,9 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT c.*, f.code AS famille_code, f.label AS famille_label,
-                l.nature, l.code AS lot_code
+        `SELECT c.id, c.code, c.label, c.famille_id,
+                f.code AS famille_code, f.label AS famille_label,
+                l.code AS lot_code, l.nature
          FROM analytical_code c
          JOIN analytical_famille f ON f.id = c.famille_id
          JOIN analytical_lot l ON l.id = f.lot_id
@@ -221,9 +221,9 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `INSERT INTO analytical_code (tenant_id, famille_id, code, label)
-         VALUES ($1,$2,$3,$4) RETURNING *`,
-        [tenantId, input.familleId, input.code, input.label],
+        `INSERT INTO analytical_code (tenant_id, code, label)
+         VALUES ($1,$2,$3) RETURNING id, code, label`,
+        [tenantId, input.code, input.label],
       );
       return rows[0];
     });
@@ -235,13 +235,12 @@ export class ParamsService {
       await this.assertExists(em, 'analytical_code', id);
       await em.query(
         `UPDATE analytical_code SET
-           famille_id = COALESCE($2, famille_id),
-           code       = COALESCE($3, code),
-           label      = COALESCE($4, label)
+           code  = COALESCE($2, code),
+           label = COALESCE($3, label)
          WHERE id = $1`,
-        [id, input.familleId ?? null, input.code ?? null, input.label ?? null],
+        [id, input.code ?? null, input.label ?? null],
       );
-      return (await em.query(`SELECT * FROM analytical_code WHERE id = $1`, [id]))[0];
+      return (await em.query(`SELECT id, code, label FROM analytical_code WHERE id = $1`, [id]))[0];
     });
   }
 

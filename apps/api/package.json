@@ -42,7 +42,6 @@
     "@types/supertest": "^6.0.2",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
-    "better-sqlite3": "^12.10.0",
     "embedded-postgres": "18.3.0-beta.17",
     "eslint": "^8.57.0",
     "jest": "^29.7.0",

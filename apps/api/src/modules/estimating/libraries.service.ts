@@ -128,6 +128,64 @@ export class LibrariesService {
     });
   }
 
+  /** Full update of a resource (fiche ressource complète). Recomputes dependent ouvrages. */
+  async updateResource(
+    libraryId: string,
+    resourceId: string,
+    input: Partial<ResourceInput>,
+  ): Promise<ResourceEntity> {
+    const tenantId = this.context.requireTenantId();
+    const updated = await runInTenant(this.dataSource, tenantId, async (em) => {
+      const existing = await em.query(
+        `SELECT id FROM resource WHERE id = $1 AND library_id = $2`,
+        [resourceId, libraryId],
+      );
+      if (existing.length === 0) {
+        throw new NotFoundException(`Unknown resource "${resourceId}"`);
+      }
+      if (input.codeAnalytiqueId != null) {
+        await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
+      }
+      await em.query(
+        `UPDATE resource SET
+           code               = COALESCE($2, code),
+           label              = COALESCE($3, label),
+           unit               = COALESCE($4, unit),
+           nature             = COALESCE($5, nature),
+           unit_cost          = COALESCE($6, unit_cost),
+           code_produit       = COALESCE($7, code_produit),
+           code_analytique_id = $8,
+           prix_public        = $9,
+           unite_achat        = $10,
+           coeff_conversion   = COALESCE($11, coeff_conversion),
+           supplier_id        = $12,
+           ref_fournisseur    = $13,
+           conditionnement    = $14,
+           updated_at         = now()
+         WHERE id = $1`,
+        [
+          resourceId,
+          input.code ?? null,
+          input.label ?? null,
+          input.unit ?? null,
+          input.nature ?? null,
+          input.unitCost == null ? null : String(input.unitCost),
+          input.codeProduit ?? null,
+          input.codeAnalytiqueId ?? null,
+          input.prixPublic == null ? null : String(input.prixPublic),
+          input.uniteAchat ?? null,
+          input.coeffConversion == null ? null : String(input.coeffConversion),
+          input.supplierId ?? null,
+          input.refFournisseur ?? null,
+          input.conditionnement ?? null,
+        ],
+      );
+      return (await em.query(`SELECT * FROM resource WHERE id = $1`, [resourceId]))[0];
+    });
+    await this.ouvrages.recomputeTenant();
+    return updated;
+  }
+
   /** Classifies a resource onto a code analytique of the analytical plan (cahier §5.8). */
   async classifyResource(
     libraryId: string,

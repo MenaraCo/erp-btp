@@ -5,9 +5,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { ResourceModal, FullResource } from './ResourceModal';
 
 interface Library { id: string; code: string; name: string }
-interface Resource { id: string; code: string; label: string; unit: string; nature: string; unitCost: string; uniteAchat?: string | null; coeffConversion?: string | null }
+type Resource = FullResource;
 interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
 interface Page<T> { rows: T[]; total: number }
 
@@ -42,25 +43,13 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
   });
 
   const [libForm, setLibForm] = useState({ code: '', name: '' });
-  const [resForm, setResForm] = useState({ code: '', label: '', unit: '', nature: 'material', unitCost: '', uniteAchat: '', coeffConversion: '', prixPublic: '' });
   const [ouvForm, setOuvForm] = useState({ code: '', label: '', unit: '' });
+  // Modale ressource : null = fermée, 'new' = création, sinon ressource à éditer
+  const [resModal, setResModal] = useState<'new' | Resource | null>(null);
 
   const createLib = useMutation({
     mutationFn: () => apiFetch<Library>('/libraries', { method: 'POST', body: libForm, token }),
     onSuccess: (lib) => { qc.invalidateQueries({ queryKey: ['libraries'] }); setLibForm({ code: '', name: '' }); setLibId(lib.id); },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
-  const createRes = useMutation({
-    mutationFn: () => apiFetch(`/libraries/${libId}/resources`, {
-      method: 'POST',
-      body: {
-        code: resForm.code, label: resForm.label, unit: resForm.unit, nature: resForm.nature,
-        unitCost: resForm.unitCost || '0', uniteAchat: resForm.uniteAchat || null,
-        coeffConversion: resForm.coeffConversion || null, prixPublic: resForm.prixPublic || null,
-      },
-      token,
-    }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['resources', libId] }); setResForm({ code: '', label: '', unit: '', nature: 'material', unitCost: '', uniteAchat: '', coeffConversion: '', prixPublic: '' }); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
   const createOuv = useMutation({
@@ -103,19 +92,22 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <h2 style={{ margin: 0 }}>Ressources ({filteredRes.length})</h2>
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              <button className={natFilter === '' ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => setNatFilter('')}>Tous</button>
-              {NATURES.map((n) => (
-                <button key={n.v} className={natFilter === n.v ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => setNatFilter(n.v)}>{n.l}</button>
-              ))}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                <button className={natFilter === '' ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => setNatFilter('')}>Tous</button>
+                {NATURES.map((n) => (
+                  <button key={n.v} className={natFilter === n.v ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => setNatFilter(n.v)}>{n.l}</button>
+                ))}
+              </div>
+              <button className="btn" onClick={() => setResModal('new')}>+ Nouvelle ressource</button>
             </div>
           </div>
-          {filteredRes.length > 0 && (
+          {filteredRes.length > 0 ? (
             <table className="grid" style={{ marginTop: 10 }}>
               <thead><tr><th>Code</th><th>Libellé</th><th>Unité</th><th>Nature</th><th style={{ textAlign: 'right' }}>Déboursé U.</th><th>Unité achat</th><th style={{ textAlign: 'right' }}>Coeff</th></tr></thead>
               <tbody>
                 {filteredRes.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setResModal(r)} title="Modifier la ressource">
                     <td className="code-cell">{r.code}</td><td>{r.label}</td><td>{r.unit}</td>
                     <td className="muted">{NATURES.find((n) => n.v === r.nature)?.l ?? r.nature}</td>
                     <td style={{ textAlign: 'right' }}>{euro(r.unitCost)}</td>
@@ -125,24 +117,18 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
                 ))}
               </tbody>
             </table>
+          ) : (
+            <p className="muted" style={{ marginTop: 12 }}>Aucune ressource. Cliquez sur « + Nouvelle ressource ».</p>
           )}
-          <form style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}
-            onSubmit={(e) => { e.preventDefault(); setErr(null); if (resForm.code && resForm.label && resForm.unit) createRes.mutate(); }}>
-            <Field label="Code"><input value={resForm.code} onChange={(e) => setResForm({ ...resForm, code: e.target.value })} /></Field>
-            <Field label="Libellé"><input value={resForm.label} onChange={(e) => setResForm({ ...resForm, label: e.target.value })} /></Field>
-            <Field label="Unité"><input style={{ width: 64 }} value={resForm.unit} onChange={(e) => setResForm({ ...resForm, unit: e.target.value })} /></Field>
-            <Field label="Nature">
-              <select value={resForm.nature} onChange={(e) => setResForm({ ...resForm, nature: e.target.value })}>
-                {NATURES.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
-              </select>
-            </Field>
-            <Field label="Déboursé U."><input style={{ width: 76 }} value={resForm.unitCost} onChange={(e) => setResForm({ ...resForm, unitCost: e.target.value })} /></Field>
-            <Field label="Unité achat"><input style={{ width: 76 }} placeholder="palette" value={resForm.uniteAchat} onChange={(e) => setResForm({ ...resForm, uniteAchat: e.target.value })} /></Field>
-            <Field label="Coeff conv."><input style={{ width: 64 }} placeholder="40" value={resForm.coeffConversion} onChange={(e) => setResForm({ ...resForm, coeffConversion: e.target.value })} /></Field>
-            <Field label="Prix public"><input style={{ width: 76 }} value={resForm.prixPublic} onChange={(e) => setResForm({ ...resForm, prixPublic: e.target.value })} /></Field>
-            <button className="btn" type="submit">+ Ressource</button>
-          </form>
         </div>
+      )}
+
+      {libId && resModal && (
+        <ResourceModal
+          libId={libId}
+          resource={resModal === 'new' ? null : resModal}
+          onClose={() => setResModal(null)}
+        />
       )}
 
       {libId && section !== 'ressources' && (

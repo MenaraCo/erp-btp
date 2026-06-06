@@ -22,6 +22,8 @@ export interface LotInput {
 }
 export interface FamilleInput {
   lotId: string;
+  /** Propre à la famille (Matériaux, MO…). Si absent, hérite de la nature du lot parent. */
+  nature?: AnalyticalNature;
   code: string;
   label: string;
 }
@@ -40,6 +42,7 @@ interface LotRow {
 interface FamilleRow {
   id: string;
   lot_id: string;
+  nature: AnalyticalNature;
   code: string;
   label: string;
 }
@@ -77,10 +80,11 @@ export class AnalyticalPlanService {
           [tenantId, lot.nature, lot.code, lot.label],
         );
         for (const fam of lot.familles) {
+          const famNature = (fam as any).nature ?? lot.nature;
           const [famRow] = await em.query(
-            `INSERT INTO analytical_famille (tenant_id, lot_id, code, label)
-               VALUES ($1, $2, $3, $4) RETURNING id`,
-            [tenantId, lotRow.id, fam.code, fam.label],
+            `INSERT INTO analytical_famille (tenant_id, lot_id, nature, code, label)
+               VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+            [tenantId, lotRow.id, famNature, fam.code, fam.label],
           );
           for (const code of fam.codes) {
             await em.query(
@@ -101,7 +105,7 @@ export class AnalyticalPlanService {
         `SELECT id, nature, code, label FROM analytical_lot ORDER BY nature, code`,
       );
       const familles: FamilleRow[] = await em.query(
-        `SELECT id, lot_id, code, label FROM analytical_famille ORDER BY code`,
+        `SELECT id, lot_id, nature, code, label FROM analytical_famille ORDER BY code`,
       );
       const codes: CodeRow[] = await em.query(
         `SELECT id, famille_id, code, label FROM analytical_code ORDER BY code`,
@@ -125,6 +129,7 @@ export class AnalyticalPlanService {
             label: l.label,
             familles: (famByLot.get(l.id) ?? []).map((f) => ({
               id: f.id,
+              nature: f.nature,
               code: f.code,
               label: f.label,
               codes: (codeByFamille.get(f.id) ?? []).map((c) => ({
@@ -163,15 +168,19 @@ export class AnalyticalPlanService {
       throw new BadRequestException('code and label are required');
     }
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const lot = await em.query(`SELECT id FROM analytical_lot WHERE id = $1`, [input.lotId]);
+      const lot = await em.query(`SELECT id, nature FROM analytical_lot WHERE id = $1`, [input.lotId]);
       if (lot.length === 0) {
         throw new NotFoundException(`Unknown lot "${input.lotId}"`);
       }
+      const nature = input.nature ?? lot[0].nature;
+      if (!ANALYTICAL_NATURES.includes(nature)) {
+        throw new BadRequestException(`Unknown nature "${nature}"`);
+      }
       await this.assertCodeFree(em, input.code);
       const [row] = await em.query(
-        `INSERT INTO analytical_famille (tenant_id, lot_id, code, label)
-           VALUES ($1, $2, $3, $4) RETURNING id, lot_id, code, label`,
-        [tenantId, input.lotId, input.code, input.label],
+        `INSERT INTO analytical_famille (tenant_id, lot_id, nature, code, label)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id, lot_id, nature, code, label`,
+        [tenantId, input.lotId, nature, input.code, input.label],
       );
       return row;
     });

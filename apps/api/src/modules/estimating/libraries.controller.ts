@@ -76,6 +76,20 @@ export class LibrariesController {
     return this.libraries.updateResourceCost(libraryId, resourceId, body.unitCost);
   }
 
+  @Put(':libraryId/resources/:resourceId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  updateResource(
+    @Param('libraryId') libraryId: string,
+    @Param('resourceId') resourceId: string,
+    @Body() body: Partial<ResourceInput>,
+  ) {
+    if (body?.nature && !NATURES.includes(body.nature)) {
+      throw new BadRequestException(`nature must be one of ${NATURES.join(', ')}`);
+    }
+    return this.libraries.updateResource(libraryId, resourceId, body);
+  }
+
   @Put(':libraryId/resources/:resourceId/code-analytique')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')

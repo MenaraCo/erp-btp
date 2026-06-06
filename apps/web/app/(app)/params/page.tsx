@@ -29,15 +29,20 @@ function useSavedFeedback(delayMs = 3000) {
   return { saved, flash };
 }
 
-/* ─────────── helpers ─────────── */
+/* ─────────── hook sélection groupée ─────────── */
+function useSelection() {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggle = (id: string) => setSelectedIds((prev) => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  const toggleAll = (ids: string[]) => setSelectedIds(
+    selectedIds.size === ids.length ? new Set() : new Set(ids),
+  );
+  const clear = () => setSelectedIds(new Set());
+  return { selectedIds, toggle, toggleAll, clear };
+}
 
-const NATURES: { v: string; l: string }[] = [
-  { v: 'labor', l: 'Main d\'œuvre' },
-  { v: 'material', l: 'Matériaux' },
-  { v: 'equipment', l: 'Matériel' },
-  { v: 'subcontract', l: 'Sous-traitance' },
-];
-const naturLabel = (v: string) => NATURES.find((n) => n.v === v)?.l ?? v;
+/* ─────────── helpers ─────────── */
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -55,9 +60,9 @@ function Row({ children, style }: { children: React.ReactNode; style?: React.CSS
 /* ─────────── types ─────────── */
 
 interface Unit { id: string; abrev: string; label: string; sort_order: number }
-interface Lot { id: string; nature: string; code: string; label: string }
-interface Famille { id: string; lot_id: string; code: string; label: string; nature: string; lot_code: string; lot_label: string }
-interface Code { id: string; famille_id: string; code: string; label: string; famille_code: string; famille_label: string; nature: string; lot_code: string }
+interface Lot { id: string; code: string; label: string }
+interface Famille { id: string; code: string; label: string }
+interface Code { id: string; code: string; label: string }
 interface Company { id: string; code: string; name: string; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
 interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
@@ -170,11 +175,12 @@ function TabLots({ token }: { token: string }) {
   const [newCode, setNewCode] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [editing, setEditing] = useState<{ id: string; code: string; label: string } | null>(null);
+  const { selectedIds, toggle, toggleAll, clear } = useSelection();
 
   const inv = () => { qc.invalidateQueries({ queryKey: ['params-lots'] }); qc.invalidateQueries({ queryKey: ['params-familles'] }); };
 
   const create = useMutation({
-    mutationFn: () => api('/params/lots', { method: 'POST', body: { nature: 'material', code: newCode, label: newLabel } }),
+    mutationFn: () => api('/params/lots', { method: 'POST', body: { code: newCode, label: newLabel } }),
     onSuccess: () => { inv(); setNewCode(''); setNewLabel(''); },
   });
   const update = useMutation({
@@ -184,6 +190,10 @@ function TabLots({ token }: { token: string }) {
   const del = useMutation({
     mutationFn: (id: string) => api(`/params/lots/${id}`, { method: 'DELETE' }),
     onSuccess: inv,
+  });
+  const bulkDelete = useMutation({
+    mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/lots/${id}`, { method: 'DELETE' }))),
+    onSuccess: () => { inv(); clear(); },
   });
 
   return (
@@ -196,23 +206,20 @@ function TabLots({ token }: { token: string }) {
         </Row>
       </Card>
       <Card title={`Lots prédéfinis${lots.length > 0 ? ` (${lots.length})` : ''}`}>
-        <table className="grid">
-          <thead>
-            <tr><th>Code</th><th>Désignation</th><th style={{ width: 80 }}></th></tr>
-          </thead>
-          <tbody>
-            {lots.map((l) => (
-              <tr key={l.id}>
-                <td><strong>{l.code}</strong></td>
-                <td>{l.label}</td>
-                <td style={{ display: 'flex', gap: 4 }}>
-                  <button className="btn-ghost btn" onClick={() => setEditing({ id: l.id, code: l.code, label: l.label })}>✎</button>
-                  <button className="btn-danger btn" onClick={() => { if (confirm('Supprimer ce lot ?')) del.mutate(l.id); }}>✕</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {selectedIds.size > 0 && (
+          <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending}
+            onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} lot(s) ?`)) bulkDelete.mutate(); }} />
+        )}
+        <RefTable
+          rows={lots.map((l) => [l.code, l.label])}
+          headers={['Code', 'Désignation']}
+          ids={lots.map((l) => l.id)}
+          selectedIds={selectedIds}
+          onToggle={toggle}
+          onToggleAll={() => toggleAll(lots.map((l) => l.id))}
+          onEdit={(i) => setEditing({ id: lots[i].id, code: lots[i].code, label: lots[i].label })}
+          onDelete={(i) => { if (confirm('Supprimer ce lot ?')) del.mutate(lots[i].id); }}
+        />
       </Card>
       {editing && (
         <Modal title="Modifier le lot" onClose={() => setEditing(null)}>
@@ -238,59 +245,57 @@ function TabFamilles({ token }: { token: string }) {
     queryFn: () => api<Famille[]>('/params/familles'),
     enabled: Boolean(token),
   });
-  const { data: lots = [] } = useQuery<Lot[]>({
-    queryKey: ['params-lots'],
-    queryFn: () => api<Lot[]>('/params/lots'),
-    enabled: Boolean(token),
-  });
-  const [form, setForm] = useState({ lotId: '', code: '', label: '' });
-  const [editing, setEditing] = useState<{ id: string; lotId: string; code: string; label: string } | null>(null);
+  const [newCode, setNewCode] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+  const [editing, setEditing] = useState<{ id: string; code: string; label: string } | null>(null);
+  const { selectedIds, toggle, toggleAll, clear } = useSelection();
 
-  const inv = () => { qc.invalidateQueries({ queryKey: ['params-familles'] }); qc.invalidateQueries({ queryKey: ['params-codes'] }); };
+  const inv = () => qc.invalidateQueries({ queryKey: ['params-familles'] });
 
   const create = useMutation({
-    mutationFn: () => api('/params/familles', { method: 'POST', body: form }),
-    onSuccess: () => { inv(); setForm({ lotId: '', code: '', label: '' }); },
+    mutationFn: () => api('/params/familles', { method: 'POST', body: { code: newCode, label: newLabel } }),
+    onSuccess: () => { inv(); setNewCode(''); setNewLabel(''); },
   });
   const update = useMutation({
-    mutationFn: (e: typeof editing) => api(`/params/familles/${e!.id}`, { method: 'PATCH', body: { lotId: e!.lotId, code: e!.code, label: e!.label } }),
+    mutationFn: (e: typeof editing) => api(`/params/familles/${e!.id}`, { method: 'PATCH', body: { code: e!.code, label: e!.label } }),
     onSuccess: () => { inv(); setEditing(null); },
   });
   const del = useMutation({
     mutationFn: (id: string) => api(`/params/familles/${id}`, { method: 'DELETE' }),
     onSuccess: inv,
   });
+  const bulkDelete = useMutation({
+    mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/familles/${id}`, { method: 'DELETE' }))),
+    onSuccess: () => { inv(); clear(); },
+  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card title="Ajouter une famille">
         <Row>
-          <Field label="Lot parent">
-            <select className="input" style={{ width: 260 }} value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
-              <option value="">— choisir —</option>
-              {lots.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Code"><input className="input" style={{ width: 100 }} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></Field>
-          <Field label="Désignation"><input className="input" style={{ width: 240 }} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
-          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()}>+ Ajouter</button>
+          <Field label="Code"><input className="input" style={{ width: 120 }} placeholder="Ex: P_COL" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
+          <Field label="Désignation"><input className="input" style={{ width: 340 }} placeholder="Ex: Colles" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
+          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()} disabled={!newCode || !newLabel}>+ Ajouter</button>
         </Row>
       </Card>
       <Card title={`Familles de ressources${familles.length > 0 ? ` (${familles.length})` : ''}`}>
+        {selectedIds.size > 0 && (
+          <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending}
+            onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} famille(s) ?`)) bulkDelete.mutate(); }} />
+        )}
         <RefTable
-          rows={familles.map((f) => [f.code, f.label, `${f.lot_code} — ${f.lot_label}`, naturLabel(f.nature)])}
-          headers={['Code', 'Désignation', 'Lot parent', 'Nature']}
-          onEdit={(i) => setEditing({ id: familles[i].id, lotId: familles[i].lot_id, code: familles[i].code, label: familles[i].label })}
+          rows={familles.map((f) => [f.code, f.label])}
+          headers={['Code', 'Désignation']}
+          ids={familles.map((f) => f.id)}
+          selectedIds={selectedIds}
+          onToggle={toggle}
+          onToggleAll={() => toggleAll(familles.map((f) => f.id))}
+          onEdit={(i) => setEditing({ id: familles[i].id, code: familles[i].code, label: familles[i].label })}
           onDelete={(i) => { if (confirm('Supprimer cette famille ?')) del.mutate(familles[i].id); }}
         />
       </Card>
       {editing && (
         <Modal title="Modifier la famille" onClose={() => setEditing(null)}>
-          <Field label="Lot parent">
-            <select className="input" value={editing.lotId} onChange={(e) => setEditing({ ...editing, lotId: e.target.value })}>
-              {lots.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
-            </select>
-          </Field>
           <Field label="Code"><input className="input" value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value })} /></Field>
           <Field label="Désignation"><input className="input" style={{ width: 300 }} value={editing.label} onChange={(e) => setEditing({ ...editing, label: e.target.value })} /></Field>
           <Row style={{ marginTop: 12, justifyContent: 'flex-end' }}>
@@ -313,57 +318,57 @@ function TabCodes({ token }: { token: string }) {
     queryFn: () => api<Code[]>('/params/codes'),
     enabled: Boolean(token),
   });
-  const { data: familles = [] } = useQuery<Famille[]>({
-    queryKey: ['params-familles'],
-    queryFn: () => api<Famille[]>('/params/familles'),
-    enabled: Boolean(token),
-  });
-  const [form, setForm] = useState({ familleId: '', code: '', label: '' });
-  const [editing, setEditing] = useState<{ id: string; familleId: string; code: string; label: string } | null>(null);
+  const [newCode, setNewCode] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+  const [editing, setEditing] = useState<{ id: string; code: string; label: string } | null>(null);
+  const { selectedIds, toggle, toggleAll, clear } = useSelection();
+
+  const inv = () => qc.invalidateQueries({ queryKey: ['params-codes'] });
 
   const create = useMutation({
-    mutationFn: () => api('/params/codes', { method: 'POST', body: form }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['params-codes'] }); setForm({ familleId: '', code: '', label: '' }); },
+    mutationFn: () => api('/params/codes', { method: 'POST', body: { code: newCode, label: newLabel } }),
+    onSuccess: () => { inv(); setNewCode(''); setNewLabel(''); },
   });
   const update = useMutation({
-    mutationFn: (e: typeof editing) => api(`/params/codes/${e!.id}`, { method: 'PATCH', body: { familleId: e!.familleId, code: e!.code, label: e!.label } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['params-codes'] }); setEditing(null); },
+    mutationFn: (e: typeof editing) => api(`/params/codes/${e!.id}`, { method: 'PATCH', body: { code: e!.code, label: e!.label } }),
+    onSuccess: () => { inv(); setEditing(null); },
   });
   const del = useMutation({
     mutationFn: (id: string) => api(`/params/codes/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['params-codes'] }),
+    onSuccess: inv,
+  });
+  const bulkDelete = useMutation({
+    mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/codes/${id}`, { method: 'DELETE' }))),
+    onSuccess: () => { inv(); clear(); },
   });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card title="Ajouter un code analytique">
         <Row>
-          <Field label="Famille">
-            <select className="input" style={{ width: 260 }} value={form.familleId} onChange={(e) => setForm({ ...form, familleId: e.target.value })}>
-              <option value="">— choisir —</option>
-              {familles.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Code"><input className="input" style={{ width: 100 }} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></Field>
-          <Field label="Désignation"><input className="input" style={{ width: 220 }} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
-          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()}>+ Ajouter</button>
+          <Field label="Code"><input className="input" style={{ width: 120 }} placeholder="Ex: 280" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
+          <Field label="Désignation"><input className="input" style={{ width: 340 }} placeholder="Ex: Colle carrelage" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
+          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()} disabled={!newCode || !newLabel}>+ Ajouter</button>
         </Row>
       </Card>
       <Card title={`Codes analytiques${codes.length > 0 ? ` (${codes.length})` : ''}`}>
+        {selectedIds.size > 0 && (
+          <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending}
+            onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} code(s) analytique(s) ?`)) bulkDelete.mutate(); }} />
+        )}
         <RefTable
-          rows={codes.map((c) => [c.code, c.label, `${c.famille_code} — ${c.famille_label}`, naturLabel(c.nature)])}
-          headers={['Code', 'Désignation', 'Famille', 'Nature']}
-          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id, code: codes[i].code, label: codes[i].label })}
+          rows={codes.map((c) => [c.code, c.label])}
+          headers={['Code', 'Désignation']}
+          ids={codes.map((c) => c.id)}
+          selectedIds={selectedIds}
+          onToggle={toggle}
+          onToggleAll={() => toggleAll(codes.map((c) => c.id))}
+          onEdit={(i) => setEditing({ id: codes[i].id, code: codes[i].code, label: codes[i].label })}
           onDelete={(i) => { if (confirm('Supprimer ce code analytique ?')) del.mutate(codes[i].id); }}
         />
       </Card>
       {editing && (
         <Modal title="Modifier le code analytique" onClose={() => setEditing(null)}>
-          <Field label="Famille">
-            <select className="input" value={editing.familleId} onChange={(e) => setEditing({ ...editing, familleId: e.target.value })}>
-              {familles.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.label}</option>)}
-            </select>
-          </Field>
           <Field label="Code"><input className="input" value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value })} /></Field>
           <Field label="Désignation"><input className="input" style={{ width: 300 }} value={editing.label} onChange={(e) => setEditing({ ...editing, label: e.target.value })} /></Field>
           <Row style={{ marginTop: 12, justifyContent: 'flex-end' }}>
@@ -727,6 +732,36 @@ function TabPreferences({ token }: { token: string }) {
 
 /* ─────────── Shared components ─────────── */
 
+/* ─────────── Barre d'actions groupées ─────────── */
+function BulkBar({ count, onDelete, isPending, actions }: {
+  count: number;
+  onDelete: () => void;
+  isPending: boolean;
+  actions?: { label: string; onClick: () => void }[];
+}) {
+  const btnStyle: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.18)', border: 'none', color: '#fff',
+    padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+  };
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
+      background: 'var(--primary)', color: '#fff', borderRadius: 6, fontSize: 12,
+    }}>
+      <span style={{ fontWeight: 700 }}>{count} sélectionné{count > 1 ? 's' : ''}</span>
+      <div style={{ flex: 1 }} />
+      {actions?.map((a) => (
+        <button key={a.label} style={btnStyle} onClick={a.onClick} disabled={isPending}>{a.label}</button>
+      ))}
+      <button
+        style={{ background: '#e53e3e', border: 'none', color: '#fff', padding: '4px 12px', borderRadius: 4, cursor: isPending ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600, opacity: isPending ? 0.7 : 1 }}
+        onClick={onDelete} disabled={isPending}>
+        {isPending ? '…' : `Supprimer (${count})`}
+      </button>
+    </div>
+  );
+}
+
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '16px 20px', background: '#fff' }}>
@@ -740,26 +775,46 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-function RefTable({ rows, headers, onEdit, onDelete }: {
+function RefTable({ rows, headers, onEdit, onDelete, ids, selectedIds, onToggle, onToggleAll }: {
   rows: string[][];
   headers: string[];
   onEdit: (i: number) => void;
   onDelete: (i: number) => void;
+  ids?: string[];
+  selectedIds?: Set<string>;
+  onToggle?: (id: string) => void;
+  onToggleAll?: () => void;
 }) {
+  const selectable = Boolean(ids && selectedIds && onToggle && onToggleAll);
+  const allSelected = selectable && ids!.length > 0 && ids!.every((id) => selectedIds!.has(id));
+  const someSelected = selectable && selectedIds!.size > 0 && !allSelected;
+  const cbRef = (el: HTMLInputElement | null) => { if (el) el.indeterminate = someSelected; };
+
   if (rows.length === 0) return <p className="muted" style={{ margin: 0 }}>Aucun élément.</p>;
   return (
     <table className="grid">
-      <thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}<th style={{ width: 72 }}></th></tr></thead>
+      <thead>
+        <tr>
+          {selectable && <th style={{ width: 36 }}><input type="checkbox" ref={cbRef} checked={allSelected} onChange={onToggleAll} /></th>}
+          {headers.map((h) => <th key={h}>{h}</th>)}
+          <th style={{ width: 72 }}></th>
+        </tr>
+      </thead>
       <tbody>
-        {rows.map((row, i) => (
-          <tr key={i}>
-            {row.map((cell, j) => <td key={j}>{cell}</td>)}
-            <td style={{ display: 'flex', gap: 4 }}>
-              <button className="btn-ghost btn" onClick={() => onEdit(i)}>✎</button>
-              <button className="btn-danger btn" onClick={() => onDelete(i)}>✕</button>
-            </td>
-          </tr>
-        ))}
+        {rows.map((row, i) => {
+          const id = ids?.[i];
+          const isSelected = id ? selectedIds?.has(id) : false;
+          return (
+            <tr key={i} style={{ background: isSelected ? '#f0f4ff' : undefined }}>
+              {selectable && id && <td><input type="checkbox" checked={isSelected} onChange={() => onToggle!(id)} /></td>}
+              {row.map((cell, j) => <td key={j}>{cell}</td>)}
+              <td style={{ display: 'flex', gap: 4 }}>
+                <button className="btn-ghost btn" onClick={() => onEdit(i)}>✎</button>
+                <button className="btn-danger btn" onClick={() => onDelete(i)}>✕</button>
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
