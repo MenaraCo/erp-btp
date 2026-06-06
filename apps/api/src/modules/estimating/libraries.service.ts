@@ -227,12 +227,17 @@ export class LibrariesService {
         .getRepository(ResourceEntity)
         .createQueryBuilder('p')
         .where('p.library_id = :libraryId', { libraryId });
+      // Filtre optionnel par nature (côté serveur, compatible pagination)
+      const nature = (query as DataGridQuery & { nature?: string }).nature;
+      if (nature) {
+        qb.andWhere('p.nature = :nature', { nature });
+      }
       return paginate(qb, query, {
         alias: 'p',
         sortable: ['code', 'label', 'unitCost', 'createdAt'],
         searchable: ['code', 'label'],
         defaultSort: 'code',
-        maxPageSize: 5000, // référentiel ressources : peut en contenir plusieurs milliers
+        maxPageSize: 5000,
       });
     });
   }

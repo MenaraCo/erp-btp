@@ -19,22 +19,37 @@ const NATURES = [
   { v: 'subcontract', l: 'Sous-traitance' },
 ];
 
+const PAGE_SIZE = 50;
+
 export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'ressources' | 'ouvrages' }) {
   const { token } = useAuth();
   const qc = useQueryClient();
   const [libId, setLibId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [natFilter, setNatFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
   const libs = useQuery({
     queryKey: ['libraries'],
     enabled: Boolean(token),
     queryFn: () => apiFetch<Page<Library>>('/libraries?pageSize=100', { token }),
   });
+  // Liste paginée (recherche + filtre nature côté serveur → scale à des milliers d'articles)
   const resources = useQuery({
-    queryKey: ['resources', libId],
+    queryKey: ['resources', libId, page, search, natFilter],
     enabled: Boolean(token && libId),
-    queryFn: () => apiFetch<Page<Resource>>(`/libraries/${libId}/resources?pageSize=2000`, { token }),
+    queryFn: () => apiFetch<Page<Resource>>(
+      `/libraries/${libId}/resources?page=${page}&pageSize=${PAGE_SIZE}`
+      + `&search=${encodeURIComponent(search)}${natFilter ? `&nature=${natFilter}` : ''}`,
+      { token },
+    ),
+  });
+  // Jeu complet pour le compositeur d'ouvrages (sélecteur de ressources)
+  const resourcesPicker = useQuery({
+    queryKey: ['resources-picker', libId],
+    enabled: Boolean(token && libId && section !== 'ressources'),
+    queryFn: () => apiFetch<Page<Resource>>(`/libraries/${libId}/resources?pageSize=5000`, { token }),
   });
   const ouvrages = useQuery({
     queryKey: ['ouvrages', libId],
@@ -60,7 +75,12 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
 
   const title = section === 'ressources' ? 'Bibliothèque — Ressources'
     : section === 'ouvrages' ? 'Bibliothèque — Ouvrages' : 'Bibliothèque d’étude de prix';
-  const filteredRes = (resources.data?.rows ?? []).filter((r) => !natFilter || r.nature === natFilter);
+  const resRows = resources.data?.rows ?? [];
+  const resTotal = resources.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(resTotal / PAGE_SIZE));
+  // Reset page quand on change le filtre/recherche
+  const applyFilter = (n: string) => { setNatFilter(n); setPage(1); };
+  const applySearch = (s: string) => { setSearch(s); setPage(1); };
 
   return (
     <div>
@@ -91,34 +111,50 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
       {libId && section !== 'ouvrages' && (
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <h2 style={{ margin: 0 }}>Ressources ({filteredRes.length})</h2>
+            <h2 style={{ margin: 0 }}>Ressources ({resTotal})</h2>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input className="input" placeholder="Rechercher code / libellé…" style={{ width: 220 }}
+                value={search} onChange={(e) => applySearch(e.target.value)} />
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                <button className={natFilter === '' ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => setNatFilter('')}>Tous</button>
+                <button className={natFilter === '' ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => applyFilter('')}>Tous</button>
                 {NATURES.map((n) => (
-                  <button key={n.v} className={natFilter === n.v ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => setNatFilter(n.v)}>{n.l}</button>
+                  <button key={n.v} className={natFilter === n.v ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => applyFilter(n.v)}>{n.l}</button>
                 ))}
               </div>
               <button className="btn" onClick={() => setResModal('new')}>+ Nouvelle ressource</button>
             </div>
           </div>
-          {filteredRes.length > 0 ? (
-            <table className="grid" style={{ marginTop: 10 }}>
-              <thead><tr><th>Code</th><th>Libellé</th><th>Unité</th><th>Nature</th><th style={{ textAlign: 'right' }}>Déboursé U.</th><th>Unité achat</th><th style={{ textAlign: 'right' }}>Coeff</th></tr></thead>
-              <tbody>
-                {filteredRes.map((r) => (
-                  <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setResModal(r)} title="Modifier la ressource">
-                    <td className="code-cell">{r.code}</td><td>{r.label}</td><td>{r.unit}</td>
-                    <td className="muted">{NATURES.find((n) => n.v === r.nature)?.l ?? r.nature}</td>
-                    <td style={{ textAlign: 'right' }}>{euro(r.unitCost)}</td>
-                    <td className="muted">{r.uniteAchat ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }} className="muted">{r.coeffConversion ? Number(r.coeffConversion) : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {resRows.length > 0 ? (
+            <>
+              <table className="grid" style={{ marginTop: 10 }}>
+                <thead><tr><th>Code</th><th>Libellé</th><th>Unité</th><th>Nature</th><th style={{ textAlign: 'right' }}>Déboursé U.</th><th>Unité achat</th><th style={{ textAlign: 'right' }}>Coeff</th></tr></thead>
+                <tbody>
+                  {resRows.map((r) => (
+                    <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setResModal(r)} title="Modifier la ressource">
+                      <td className="code-cell">{r.code}</td><td>{r.label}</td><td>{r.unit}</td>
+                      <td className="muted">{NATURES.find((n) => n.v === r.nature)?.l ?? r.nature}</td>
+                      <td style={{ textAlign: 'right' }}>{euro(r.unitCost)}</td>
+                      <td className="muted">{r.uniteAchat ?? '—'}</td>
+                      <td style={{ textAlign: 'right' }} className="muted">{r.coeffConversion ? Number(r.coeffConversion) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginTop: 10 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, resTotal)} sur {resTotal}
+                  </span>
+                  <button className="btn-secondary btn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Précédent</button>
+                  <span className="muted" style={{ fontSize: 11 }}>Page {page} / {totalPages}</span>
+                  <button className="btn-secondary btn" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Suivant ›</button>
+                </div>
+              )}
+            </>
           ) : (
-            <p className="muted" style={{ marginTop: 12 }}>Aucune ressource. Cliquez sur « + Nouvelle ressource ».</p>
+            <p className="muted" style={{ marginTop: 12 }}>
+              {search || natFilter ? 'Aucune ressource ne correspond au filtre.' : 'Aucune ressource. Cliquez sur « + Nouvelle ressource ».'}
+            </p>
           )}
         </div>
       )}
@@ -140,7 +176,7 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
               <thead><tr><th>Code</th><th>Libellé</th><th>Unité</th><th style={{ textAlign: 'right' }}>Déboursé</th><th>Composer</th></tr></thead>
               <tbody>
                 {ouvrages.data.rows.map((o) => (
-                  <OuvrageRow key={o.id} ouvrage={o} resources={resources.data?.rows ?? []} libId={libId} />
+                  <OuvrageRow key={o.id} ouvrage={o} resources={resourcesPicker.data?.rows ?? []} libId={libId} />
                 ))}
               </tbody>
             </table>
