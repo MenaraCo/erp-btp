@@ -17,6 +17,7 @@ export interface Preferences {
   devis_prefix: string;
   devis_separator: string;
   couleur_principale: string;
+  couleur_accent: string;
   taux_tva: number[];
   default_tab: 'etude' | 'coefficients' | 'client' | 'pdf';
   nb_decimales: 2 | 3 | 4;
@@ -29,6 +30,7 @@ export const DEFAULT_PREFS: Preferences = {
   devis_prefix: 'DEV',
   devis_separator: '-',
   couleur_principale: '#1a3a5c',
+  couleur_accent: '#e8550a',
   taux_tva: [0, 5.5, 10, 20],
   default_tab: 'etude',
   nb_decimales: 2,
@@ -56,12 +58,15 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
     };
   }, [prefs]);
 
-  // Applique la couleur principale en CSS variable dynamiquement
+  // Applique les couleurs en CSS variables dynamiquement
   useEffect(() => {
     if (resolved.couleur_principale) {
       document.documentElement.style.setProperty('--primary', resolved.couleur_principale);
     }
-  }, [resolved.couleur_principale]);
+    if (resolved.couleur_accent) {
+      document.documentElement.style.setProperty('--accent', resolved.couleur_accent);
+    }
+  }, [resolved.couleur_principale, resolved.couleur_accent]);
 
   return <PrefsContext.Provider value={resolved}>{children}</PrefsContext.Provider>;
 }

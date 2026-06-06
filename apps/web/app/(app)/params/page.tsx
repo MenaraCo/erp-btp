@@ -42,7 +42,7 @@ interface Lot { id: string; nature: string; code: string; label: string }
 interface Famille { id: string; lot_id: string; code: string; label: string; nature: string; lot_code: string; lot_label: string }
 interface Code { id: string; famille_id: string; code: string; label: string; famille_code: string; famille_label: string; nature: string; lot_code: string }
 interface Company { id: string; code: string; name: string; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
-interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; couleur_principale: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
+interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
 /* ─────────── tabs ─────────── */
 
@@ -518,6 +518,7 @@ function TabPreferences({ token }: { token: string }) {
         devisPrefix: f('devis_prefix') || null,
         devisSeparator: f('devis_separator') || null,
         couleurPrincipale: f('couleur_principale') || null,
+        couleurAccent: f('couleur_accent') || null,
         tauxTva: currentTva,
         defaultTab: currentTab,
         nbDecimales: currentNbDec,
@@ -661,19 +662,39 @@ function TabPreferences({ token }: { token: string }) {
         </Row>
       </Card>
 
-      {/* ── Couleur ── */}
-      <Card title="Couleur principale (app et PDF)">
-        <Field label="Couleur principale">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input type="color" style={{ width: 44, height: 32, border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: 2 }}
-              value={f('couleur_principale') || '#1a3a5c'}
-              onChange={(e) => setForm({ ...form, couleur_principale: e.target.value })} />
-            <input className="input" style={{ width: 100, fontFamily: 'monospace' }}
-              value={f('couleur_principale')}
-              onChange={(e) => setForm({ ...form, couleur_principale: e.target.value })} />
-          </div>
-          <span className="muted" style={{ fontSize: 10 }}>Utilisée dans les en-têtes du PDF et les sections de l'app.</span>
-        </Field>
+      {/* ── Couleurs ── */}
+      <Card title="Couleurs de l'application (app et PDF)">
+        <p className="muted" style={{ margin: '0 0 14px', fontSize: 11 }}>
+          Les changements sont prévisualisés immédiatement dans l'interface. Cliquez Enregistrer pour les conserver.
+        </p>
+        <Row>
+          <ColorPicker
+            label="Couleur principale"
+            hint="Sidebar, en-têtes de section, titres — navy par défaut"
+            value={f('couleur_principale') || '#1a3a5c'}
+            onChange={(v) => {
+              setForm({ ...form, couleur_principale: v });
+              document.documentElement.style.setProperty('--primary', v);
+            }}
+          />
+          <ColorPicker
+            label="Couleur d'accent"
+            hint="Boutons, codes analytiques, badges actifs — orange par défaut"
+            value={f('couleur_accent') || '#e8550a'}
+            onChange={(v) => {
+              setForm({ ...form, couleur_accent: v });
+              document.documentElement.style.setProperty('--accent', v);
+            }}
+          />
+        </Row>
+        {/* Aperçu live */}
+        <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-alt)', fontSize: 11 }}>
+          <strong style={{ color: 'var(--primary)' }}>Aperçu couleur principale</strong>
+          {' · '}
+          <strong style={{ color: 'var(--accent)' }}>Aperçu couleur d&apos;accent</strong>
+          {' · '}
+          <button className="btn" style={{ padding: '2px 10px', fontSize: 10 }}>Bouton principal</button>
+        </div>
       </Card>
 
       <button className="btn" style={{ width: 'fit-content' }} onClick={() => save.mutate()}>
@@ -720,6 +741,30 @@ function RefTable({ rows, headers, onEdit, onDelete }: {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function ColorPicker({ label, hint, value, onChange }: {
+  label: string; hint: string; value: string; onChange: (v: string) => void;
+}) {
+  return (
+    <Field label={label}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          type="color"
+          style={{ width: 44, height: 36, border: '2px solid var(--border)', borderRadius: 6, cursor: 'pointer', padding: 2, flexShrink: 0 }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <input
+          className="input"
+          style={{ width: 100, fontFamily: 'monospace', letterSpacing: '0.04em' }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
+      <span className="muted" style={{ fontSize: 10 }}>{hint}</span>
+    </Field>
   );
 }
 

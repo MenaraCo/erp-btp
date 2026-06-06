@@ -31,6 +31,7 @@ export interface PreferencesInput {
   devisPrefix?: string;
   devisSeparator?: string;
   couleurPrincipale?: string;
+  couleurAccent?: string;
   tauxTva?: number[];
   defaultTab?: string;
   nbDecimales?: number;
@@ -346,9 +347,10 @@ export class ParamsService {
            devis_prefix       = COALESCE($4, devis_prefix),
            devis_separator    = COALESCE($5, devis_separator),
            couleur_principale = COALESCE($6, couleur_principale),
-           taux_tva           = COALESCE($7::jsonb, taux_tva),
-           default_tab        = COALESCE($8, default_tab),
-           nb_decimales       = COALESCE($9::smallint, nb_decimales),
+           couleur_accent     = COALESCE($7, couleur_accent),
+           taux_tva           = COALESCE($8::jsonb, taux_tva),
+           default_tab        = COALESCE($9, default_tab),
+           nb_decimales       = COALESCE($10::smallint, nb_decimales),
            updated_at         = now()
          WHERE company_id = $1`,
         [
@@ -358,6 +360,7 @@ export class ParamsService {
           input.devisPrefix ?? null,
           input.devisSeparator ?? null,
           input.couleurPrincipale ?? null,
+          input.couleurAccent ?? null,
           input.tauxTva != null ? JSON.stringify(input.tauxTva) : null,
           input.defaultTab ?? null,
           input.nbDecimales ?? null,
