@@ -188,13 +188,20 @@ function TabLots({ token }: { token: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card title="Ajouter un lot">
+        <Row>
+          <Field label="Code"><input className="input" style={{ width: 100 }} placeholder="EX: GO" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
+          <Field label="Désignation"><input className="input" style={{ width: 340 }} placeholder="Ex: Gros œuvre" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
+          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()} disabled={!newCode || !newLabel}>+ Ajouter</button>
+        </Row>
+      </Card>
       <Card title={`Lots prédéfinis${lots.length > 0 ? ` (${lots.length})` : ''}`}>
         <table className="grid">
           <thead>
             <tr><th>Code</th><th>Désignation</th><th style={{ width: 80 }}></th></tr>
           </thead>
           <tbody>
-            {lots.map((l, i) => (
+            {lots.map((l) => (
               <tr key={l.id}>
                 <td><strong>{l.code}</strong></td>
                 <td>{l.label}</td>
@@ -204,12 +211,6 @@ function TabLots({ token }: { token: string }) {
                 </td>
               </tr>
             ))}
-            {/* Ligne d'ajout inline — même style que CHIFFRAGE */}
-            <tr>
-              <td><input className="input" style={{ width: 100 }} placeholder="Code" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></td>
-              <td><input className="input" style={{ width: '100%' }} placeholder="Désignation" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></td>
-              <td><button className="btn" onClick={() => create.mutate()} disabled={!newCode || !newLabel}>+ Ajouter</button></td>
-            </tr>
           </tbody>
         </table>
       </Card>
@@ -262,6 +263,19 @@ function TabFamilles({ token }: { token: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card title="Ajouter une famille">
+        <Row>
+          <Field label="Lot parent">
+            <select className="input" style={{ width: 260 }} value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
+              <option value="">— choisir —</option>
+              {lots.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Code"><input className="input" style={{ width: 100 }} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></Field>
+          <Field label="Désignation"><input className="input" style={{ width: 240 }} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
+          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()}>+ Ajouter</button>
+        </Row>
+      </Card>
       <Card title={`Familles de ressources${familles.length > 0 ? ` (${familles.length})` : ''}`}>
         <RefTable
           rows={familles.map((f) => [f.code, f.label, `${f.lot_code} — ${f.lot_label}`, naturLabel(f.nature)])}
@@ -269,19 +283,6 @@ function TabFamilles({ token }: { token: string }) {
           onEdit={(i) => setEditing({ id: familles[i].id, lotId: familles[i].lot_id, code: familles[i].code, label: familles[i].label })}
           onDelete={(i) => { if (confirm('Supprimer cette famille ?')) del.mutate(familles[i].id); }}
         />
-      </Card>
-      <Card title="Ajouter une famille">
-        <Row>
-          <Field label="Lot parent">
-            <select className="input" style={{ width: 260 }} value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
-              <option value="">— choisir —</option>
-              {lots.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label} ({naturLabel(l.nature)})</option>)}
-            </select>
-          </Field>
-          <Field label="Code"><input className="input" style={{ width: 100 }} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></Field>
-          <Field label="Désignation"><input className="input" style={{ width: 240 }} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
-          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()}>+ Ajouter</button>
-        </Row>
       </Card>
       {editing && (
         <Modal title="Modifier la famille" onClose={() => setEditing(null)}>
@@ -335,14 +336,6 @@ function TabCodes({ token }: { token: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Card title={`Codes analytiques${codes.length > 0 ? ` (${codes.length})` : ''}`}>
-        <RefTable
-          rows={codes.map((c) => [c.code, c.label, `${c.famille_code} — ${c.famille_label}`, naturLabel(c.nature)])}
-          headers={['Code', 'Désignation', 'Famille', 'Nature']}
-          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id, code: codes[i].code, label: codes[i].label })}
-          onDelete={(i) => { if (confirm('Supprimer ce code analytique ?')) del.mutate(codes[i].id); }}
-        />
-      </Card>
       <Card title="Ajouter un code analytique">
         <Row>
           <Field label="Famille">
@@ -355,6 +348,14 @@ function TabCodes({ token }: { token: string }) {
           <Field label="Désignation"><input className="input" style={{ width: 220 }} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
           <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()}>+ Ajouter</button>
         </Row>
+      </Card>
+      <Card title={`Codes analytiques${codes.length > 0 ? ` (${codes.length})` : ''}`}>
+        <RefTable
+          rows={codes.map((c) => [c.code, c.label, `${c.famille_code} — ${c.famille_label}`, naturLabel(c.nature)])}
+          headers={['Code', 'Désignation', 'Famille', 'Nature']}
+          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id, code: codes[i].code, label: codes[i].label })}
+          onDelete={(i) => { if (confirm('Supprimer ce code analytique ?')) del.mutate(codes[i].id); }}
+        />
       </Card>
       {editing && (
         <Modal title="Modifier le code analytique" onClose={() => setEditing(null)}>
