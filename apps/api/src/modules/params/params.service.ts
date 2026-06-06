@@ -26,14 +26,14 @@ export interface CompanyInfoInput {
 }
 
 export interface PreferencesInput {
-  respNom?: string;
-  respTelephone?: string;
-  respEmail?: string;
   tauxFgDefault?: number;
   tauxBenDefault?: number;
   devisPrefix?: string;
   devisSeparator?: string;
   couleurPrincipale?: string;
+  tauxTva?: number[];
+  defaultTab?: string;
+  nbDecimales?: number;
 }
 
 /* ---------------------------------------------------------------- service */
@@ -328,29 +328,32 @@ export class ParamsService {
       const company = await em.query(`SELECT id FROM company LIMIT 1`);
       if (company.length === 0) throw new NotFoundException('No company found');
       const companyId = company[0].id;
-      /* ensure row exists */
       await em.query(
         `INSERT INTO company_preferences (tenant_id, company_id) VALUES ($1,$2) ON CONFLICT (company_id) DO NOTHING`,
         [tenantId, companyId],
       );
       await em.query(
         `UPDATE company_preferences SET
-           resp_nom           = COALESCE($2, resp_nom),
-           resp_telephone     = COALESCE($3, resp_telephone),
-           resp_email         = COALESCE($4, resp_email),
-           taux_fg_default    = COALESCE($5, taux_fg_default),
-           taux_ben_default   = COALESCE($6, taux_ben_default),
-           devis_prefix       = COALESCE($7, devis_prefix),
-           devis_separator    = COALESCE($8, devis_separator),
-           couleur_principale = COALESCE($9, couleur_principale),
+           taux_fg_default    = COALESCE($2, taux_fg_default),
+           taux_ben_default   = COALESCE($3, taux_ben_default),
+           devis_prefix       = COALESCE($4, devis_prefix),
+           devis_separator    = COALESCE($5, devis_separator),
+           couleur_principale = COALESCE($6, couleur_principale),
+           taux_tva           = COALESCE($7, taux_tva),
+           default_tab        = COALESCE($8, default_tab),
+           nb_decimales       = COALESCE($9, nb_decimales),
            updated_at         = now()
          WHERE company_id = $1`,
         [
           companyId,
-          input.respNom ?? null, input.respTelephone ?? null, input.respEmail ?? null,
-          input.tauxFgDefault ?? null, input.tauxBenDefault ?? null,
-          input.devisPrefix ?? null, input.devisSeparator ?? null,
+          input.tauxFgDefault ?? null,
+          input.tauxBenDefault ?? null,
+          input.devisPrefix ?? null,
+          input.devisSeparator ?? null,
           input.couleurPrincipale ?? null,
+          input.tauxTva != null ? JSON.stringify(input.tauxTva) : null,
+          input.defaultTab ?? null,
+          input.nbDecimales ?? null,
         ],
       );
       return this.getPreferences();

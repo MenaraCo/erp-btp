@@ -42,7 +42,7 @@ interface Lot { id: string; nature: string; code: string; label: string }
 interface Famille { id: string; lot_id: string; code: string; label: string; nature: string; lot_code: string; lot_label: string }
 interface Code { id: string; famille_id: string; code: string; label: string; famille_code: string; famille_label: string; nature: string; lot_code: string }
 interface Company { id: string; code: string; name: string; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
-interface Preferences { id: string; resp_nom?: string; resp_telephone?: string; resp_email?: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; couleur_principale: string }
+interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; couleur_principale: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
 /* ─────────── tabs ─────────── */
 
@@ -444,6 +444,22 @@ function TabUnites({ token }: { token: string }) {
 
 /* ─────────── Préférences ─────────── */
 
+/* Helper : affiche un nombre sans décimales inutiles (25 au lieu de 25.00, 25.5 ok) */
+function fmtNum(val: string | number | undefined): string {
+  if (val === undefined || val === null || val === '') return '';
+  const n = Number(val);
+  if (isNaN(n)) return String(val);
+  // Supprime les zéros décimaux inutiles
+  return n % 1 === 0 ? String(n) : String(n);
+}
+
+const DEFAULT_TABS = [
+  { v: 'etude', l: 'Étude de prix (Débours)' },
+  { v: 'coefficients', l: 'Coefficients & Frais annexes' },
+  { v: 'client', l: 'Devis client (Prix de vente)' },
+  { v: 'pdf', l: 'Aperçu PDF' },
+];
+
 function TabPreferences({ token }: { token: string }) {
   const qc = useQueryClient();
   const api = useApi();
@@ -452,54 +468,117 @@ function TabPreferences({ token }: { token: string }) {
     queryFn: () => api<Preferences>('/params/preferences'),
     enabled: Boolean(token),
   });
-  const [form, setForm] = useState<Partial<Preferences>>({});
-  const f = (k: keyof Preferences) => (form[k] as string | undefined) ?? (prefs as any)?.[k] ?? '';
 
-  const save = useMutation({
-    mutationFn: () => api('/params/preferences', {
-      method: 'PATCH',
-      body: {
-        respNom: f('resp_nom') || null,
-        respTelephone: f('resp_telephone') || null,
-        respEmail: f('resp_email') || null,
-        tauxFgDefault: f('taux_fg_default') ? Number(f('taux_fg_default')) : undefined,
-        tauxBenDefault: f('taux_ben_default') ? Number(f('taux_ben_default')) : undefined,
-        devisPrefix: f('devis_prefix') || null,
-        devisSeparator: f('devis_separator') || null,
-        couleurPrincipale: f('couleur_principale') || null,
-      },
-    }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['params-preferences'] }); setForm({}); },
-  });
+  // Champs texte simples (FG, bénéfice, prefix, séparateur, couleur)
+  const [form, setForm] = useState<Record<string, string>>({});
+  // TVA : tableau local
+  const [tvaTaux, setTvaTaux] = useState<number[] | null>(null);
+  const [tvaInput, setTvaInput] = useState('');
+  // Onglet par défaut
+  const [defaultTab, setDefaultTab] = useState<string | null>(null);
+  // Nb décimales
+  const [nbDec, setNbDec] = useState<number | null>(null);
+
+  // Initialise les états locaux depuis prefs quand chargé
+  const [initialized, setInitialized] = useState(false);
+  if (prefs && !initialized) {
+    setTvaTaux(prefs.taux_tva ?? [0, 5.5, 10, 20]);
+    setDefaultTab(prefs.default_tab ?? 'etude');
+    setNbDec(prefs.nb_decimales ?? 2);
+    setInitialized(true);
+  }
+
+  const currentTva = tvaTaux ?? prefs?.taux_tva ?? [0, 5.5, 10, 20];
+  const currentTab = defaultTab ?? prefs?.default_tab ?? 'etude';
+  const currentNbDec = nbDec ?? prefs?.nb_decimales ?? 2;
+
+  // Valeur d'un champ texte : form local ou prefs DB (sans .00 inutiles)
+  const f = (k: string) => form[k] ?? fmtNum((prefs as any)?.[k]);
 
   const fg = Number(f('taux_fg_default')) || 0;
   const ben = Number(f('taux_ben_default')) || 0;
   const coeff = ((1 + fg / 100) * (1 + ben / 100)).toFixed(3);
 
+  const addTva = () => {
+    const v = parseFloat(tvaInput.replace(',', '.'));
+    if (!isNaN(v) && !currentTva.includes(v)) {
+      setTvaTaux([...currentTva, v].sort((a, b) => a - b));
+      setTvaInput('');
+    }
+  };
+
+  const removeTva = (t: number) => setTvaTaux(currentTva.filter((x) => x !== t));
+
+  const save = useMutation({
+    mutationFn: () => api('/params/preferences', {
+      method: 'PATCH',
+      body: {
+        tauxFgDefault: f('taux_fg_default') !== '' ? Number(f('taux_fg_default')) : undefined,
+        tauxBenDefault: f('taux_ben_default') !== '' ? Number(f('taux_ben_default')) : undefined,
+        devisPrefix: f('devis_prefix') || null,
+        devisSeparator: f('devis_separator') || null,
+        couleurPrincipale: f('couleur_principale') || null,
+        tauxTva: currentTva,
+        defaultTab: currentTab,
+        nbDecimales: currentNbDec,
+      },
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['params-preferences'] });
+      setForm({});
+      setInitialized(false);
+    },
+  });
+
   if (!prefs) return <p className="muted">Chargement…</p>;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card title="Responsable de l'affaire (apparaît sur les devis PDF)">
+
+      {/* ── Taux de TVA ── */}
+      <Card title="Taux de TVA disponibles">
+        <p className="muted" style={{ margin: '0 0 10px', fontSize: 11 }}>
+          Ces taux seront proposés dans les sélecteurs TVA de chaque ligne de devis. TVA 0% = autoliquidation.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {currentTva.map((t) => (
+            <span key={t} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+              background: t === 0 ? '#fff8e1' : 'var(--bg-alt)',
+              border: `1px solid ${t === 0 ? '#f0c040' : 'var(--border)'}`,
+              color: t === 0 ? '#8a6000' : 'var(--text)',
+            }}>
+              {t === 0 ? `Autoliquidée (0%)` : `${fmtNum(t)}%`}
+              <button onClick={() => removeTva(t)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+            </span>
+          ))}
+        </div>
         <Row>
-          <Field label="Nom"><input className="input" style={{ width: 200 }} placeholder="Prénom NOM" value={f('resp_nom')} onChange={(e) => setForm({ ...form, resp_nom: e.target.value })} /></Field>
-          <Field label="Téléphone"><input className="input" style={{ width: 140 }} value={f('resp_telephone')} onChange={(e) => setForm({ ...form, resp_telephone: e.target.value })} /></Field>
-          <Field label="Email"><input className="input" style={{ width: 220 }} value={f('resp_email')} onChange={(e) => setForm({ ...form, resp_email: e.target.value })} /></Field>
+          <input className="input" style={{ width: 100 }} placeholder="Ex: 0 ou 8" value={tvaInput}
+            onChange={(e) => setTvaInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addTva()} />
+          <button className="btn-secondary btn" onClick={addTva}>+ Ajouter</button>
         </Row>
       </Card>
 
+      {/* ── Taux par défaut FG / Bénéfice ── */}
       <Card title="Taux par défaut">
         <Row>
           <Field label="% Frais généraux">
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input className="input" style={{ width: 80, background: '#fffbf0' }} type="number" step="0.5" value={f('taux_fg_default')} onChange={(e) => setForm({ ...form, taux_fg_default: e.target.value as any })} />
+              <input className="input" style={{ width: 80, background: '#fffbf0' }}
+                value={f('taux_fg_default')}
+                onChange={(e) => setForm({ ...form, taux_fg_default: e.target.value })} />
               <span className="muted">%</span>
             </div>
             <span className="muted" style={{ fontSize: 10 }}>Ex : 25 = 25% de frais généraux</span>
           </Field>
           <Field label="% Bénéfice">
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input className="input" style={{ width: 80, background: '#f0fff4' }} type="number" step="0.5" value={f('taux_ben_default')} onChange={(e) => setForm({ ...form, taux_ben_default: e.target.value as any })} />
+              <input className="input" style={{ width: 80, background: '#f0fff4' }}
+                value={f('taux_ben_default')}
+                onChange={(e) => setForm({ ...form, taux_ben_default: e.target.value })} />
               <span className="muted">%</span>
             </div>
             <span className="muted" style={{ fontSize: 10 }}>Ex : 10 = 10% de marge</span>
@@ -513,33 +592,86 @@ function TabPreferences({ token }: { token: string }) {
         </div>
       </Card>
 
+      {/* ── Onglet par défaut ── */}
+      <Card title="Devis — onglet ouvert par défaut">
+        <p className="muted" style={{ margin: '0 0 10px', fontSize: 11 }}>
+          Onglet affiché automatiquement à l'ouverture d'un devis existant.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+          {DEFAULT_TABS.map((tab) => (
+            <label key={tab.v} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+              cursor: 'pointer', fontSize: 12,
+              background: currentTab === tab.v ? 'var(--bg-alt)' : '#fff',
+              borderBottom: '1px solid var(--border)',
+            }}>
+              <input type="radio" name="default_tab" value={tab.v}
+                checked={currentTab === tab.v}
+                onChange={() => setDefaultTab(tab.v)}
+                style={{ accentColor: 'var(--primary)' }} />
+              {tab.l}
+            </label>
+          ))}
+        </div>
+      </Card>
+
+      {/* ── Affichage des décimales ── */}
+      <Card title="Affichage des décimales">
+        <p className="muted" style={{ margin: '0 0 10px', fontSize: 11 }}>
+          Nombre de chiffres après la virgule affichés dans les tableaux et montants.
+          Les calculs se font toujours avec 4 décimales. Les PDF s'arrêtent toujours à 2.
+        </p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {[2, 3, 4].map((n) => (
+            <label key={n} style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+              border: `2px solid ${currentNbDec === n ? 'var(--primary)' : 'var(--border)'}`,
+              borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              background: currentNbDec === n ? 'var(--primary)' : '#fff',
+              color: currentNbDec === n ? '#fff' : 'var(--text)',
+            }}>
+              <input type="radio" name="nb_dec" value={n}
+                checked={currentNbDec === n}
+                onChange={() => setNbDec(n)}
+                style={{ display: 'none' }} />
+              {n} décimales
+            </label>
+          ))}
+        </div>
+        <span className="muted" style={{ fontSize: 10, marginTop: 4 }}>
+          Ex. avec 2 : 1 234,56 €  ·  avec 3 : 1 234,567 €  ·  avec 4 : 1 234,5678 €
+        </span>
+      </Card>
+
+      {/* ── Numérotation ── */}
       <Card title="Numérotation des devis">
         <Row>
           <Field label="Préfixe">
-            <input className="input" style={{ width: 100 }} value={f('devis_prefix')} onChange={(e) => setForm({ ...form, devis_prefix: e.target.value })} />
+            <input className="input" style={{ width: 100 }} value={f('devis_prefix')}
+              onChange={(e) => setForm({ ...form, devis_prefix: e.target.value })} />
             <span className="muted" style={{ fontSize: 10 }}>Exemple : DEV-2026-0001</span>
           </Field>
           <Field label="Séparateur">
-            <input className="input" style={{ width: 60 }} value={f('devis_separator')} onChange={(e) => setForm({ ...form, devis_separator: e.target.value })} />
+            <input className="input" style={{ width: 60 }} value={f('devis_separator')}
+              onChange={(e) => setForm({ ...form, devis_separator: e.target.value })} />
             <span className="muted" style={{ fontSize: 10 }}>Entre le préfixe et l'année</span>
           </Field>
         </Row>
       </Card>
 
+      {/* ── Couleur ── */}
       <Card title="Couleur principale (app et PDF)">
-        <Row>
-          <Field label="Couleur principale">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="color" style={{ width: 44, height: 32, border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: 2 }}
-                value={f('couleur_principale') || '#1a3a5c'}
-                onChange={(e) => setForm({ ...form, couleur_principale: e.target.value })} />
-              <input className="input" style={{ width: 100, fontFamily: 'monospace' }}
-                value={f('couleur_principale')}
-                onChange={(e) => setForm({ ...form, couleur_principale: e.target.value })} />
-            </div>
-            <span className="muted" style={{ fontSize: 10 }}>Utilisée dans les en-têtes du PDF et les sections de l'app.</span>
-          </Field>
-        </Row>
+        <Field label="Couleur principale">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="color" style={{ width: 44, height: 32, border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: 2 }}
+              value={f('couleur_principale') || '#1a3a5c'}
+              onChange={(e) => setForm({ ...form, couleur_principale: e.target.value })} />
+            <input className="input" style={{ width: 100, fontFamily: 'monospace' }}
+              value={f('couleur_principale')}
+              onChange={(e) => setForm({ ...form, couleur_principale: e.target.value })} />
+          </div>
+          <span className="muted" style={{ fontSize: 10 }}>Utilisée dans les en-têtes du PDF et les sections de l'app.</span>
+        </Field>
       </Card>
 
       <button className="btn" style={{ width: 'fit-content' }} onClick={() => save.mutate()}>
