@@ -318,7 +318,14 @@ export class ParamsService {
          WHERE p.company_id = $1`,
         [companyId],
       );
-      return rows[0] ?? null;
+      if (!rows[0]) return null;
+      const row = rows[0];
+      // taux_tva est jsonb — le driver pg le parse déjà, mais on s'assure que c'est bien un tableau
+      if (typeof row.taux_tva === 'string') {
+        try { row.taux_tva = JSON.parse(row.taux_tva); } catch { row.taux_tva = [0, 5.5, 10, 20]; }
+      }
+      if (!Array.isArray(row.taux_tva)) row.taux_tva = [0, 5.5, 10, 20];
+      return row;
     });
   }
 

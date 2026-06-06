@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -479,14 +479,14 @@ function TabPreferences({ token }: { token: string }) {
   // Nb décimales
   const [nbDec, setNbDec] = useState<number | null>(null);
 
-  // Initialise les états locaux depuis prefs quand chargé
-  const [initialized, setInitialized] = useState(false);
-  if (prefs && !initialized) {
-    setTvaTaux(prefs.taux_tva ?? [0, 5.5, 10, 20]);
-    setDefaultTab(prefs.default_tab ?? 'etude');
-    setNbDec(prefs.nb_decimales ?? 2);
-    setInitialized(true);
-  }
+  // Initialise les états locaux depuis prefs quand chargé (useEffect pour éviter setState en render)
+  useEffect(() => {
+    if (prefs) {
+      setTvaTaux(prefs.taux_tva ?? [0, 5.5, 10, 20]);
+      setDefaultTab(prefs.default_tab ?? 'etude');
+      setNbDec(prefs.nb_decimales ?? 2);
+    }
+  }, [prefs]);
 
   const currentTva = tvaTaux ?? prefs?.taux_tva ?? [0, 5.5, 10, 20];
   const currentTab = defaultTab ?? prefs?.default_tab ?? 'etude';
@@ -526,7 +526,6 @@ function TabPreferences({ token }: { token: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['params-preferences'] });
       setForm({});
-      setInitialized(false);
     },
   });
 
