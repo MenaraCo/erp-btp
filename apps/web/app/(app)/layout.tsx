@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import { PrefsProvider } from '@/lib/preferences';
 import { Sidebar } from '@/components/Sidebar';
 import { Topbar } from '@/components/Topbar';
 
@@ -21,10 +22,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar />
-      <Topbar />
-      <main className="main">{children}</main>
-    </div>
+    <PrefsProvider>
+      <div className="app-shell">
+        <Sidebar />
+        <Topbar />
+        <main className="main">{children}</main>
+      </div>
+    </PrefsProvider>
   );
 }

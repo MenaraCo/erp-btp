@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
+import { usePreferences, fmtEuro } from '@/lib/preferences';
 import { Montage, MontageLine } from './Montage';
 
 interface Version { id: string; version_no: number; label: string }
@@ -99,6 +100,7 @@ function orderTree(lines: DevisLine[]): { line: DevisLine; depth: number }[] {
 
 export default function DevisEditorPage() {
   const { token } = useAuth();
+  const prefs = usePreferences();
   const qc = useQueryClient();
   const router = useRouter();
   const params = useParams();
@@ -211,7 +213,9 @@ export default function DevisEditorPage() {
     subcontract: { fg: '5', ben: '5' },
   });
   const [remise, setRemise] = useState<{ type: 'pct' | 'fixe'; valeur: string }>({ type: 'pct', valeur: '0' });
-  const [tva, setTva] = useState('20'); // saisi en % (20 = 20 %)
+  // TVA : valeur par défaut = dernier taux non-zéro des préférences (souvent 20%), ou 20 si vide
+  const defaultTva = String(prefs.taux_tva.filter(t => t > 0).slice(-1)[0] ?? 20);
+  const [tva, setTva] = useState(defaultTva); // saisi en % (20 = 20 %)
   const setSale = useMutation({
     mutationFn: () =>
       apiFetch(`/versions/${versionId}/sale-sheet`, {
@@ -339,12 +343,14 @@ export default function DevisEditorPage() {
   }
 
   // Préremplit le formulaire avec la config stockée (une fois par version chargée).
+  // Si le devis n'est pas encore configuré → pré-remplir avec les préférences société.
   const cfgInit = useRef<string | null>(null);
   useEffect(() => {
     const cfg = saleConfig.data;
     if (!cfg || !versionId || cfgInit.current === versionId) return;
     cfgInit.current = versionId;
     if (cfg.configured && cfg.byNature) {
+      // Devis déjà configuré : charger les valeurs stockées
       const b = cfg.byNature;
       setCoef({
         labor: { fg: b.labor.tauxFg, ben: b.labor.tauxBenefice },
@@ -354,11 +360,21 @@ export default function DevisEditorPage() {
       });
       if (cfg.remise) setRemise({ type: cfg.remise.type, valeur: String(Number(cfg.remise.valeur)) });
       if (cfg.tvaRate) setTva(String(Number(cfg.tvaRate) * 100)); // fraction → %
+    } else {
+      // Nouveau devis non configuré → pré-remplir avec les préférences société
+      const fg = String(Number(prefs.taux_fg_default) || 25);
+      const ben = String(Number(prefs.taux_ben_default) || 15);
+      setCoef({
+        labor: { fg, ben },
+        material: { fg, ben },
+        equipment: { fg, ben },
+        subcontract: { fg, ben },
+      });
     }
     setFrais((cfg.fraisAnnexes ?? []).map((f) => ({
       designation: f.designation, type: f.type, valeur: String(Number(f.valeur)),
     })));
-  }, [saleConfig.data, versionId]);
+  }, [saleConfig.data, versionId, prefs.taux_fg_default, prefs.taux_ben_default]);
 
   async function downloadPdf() {
     if (!versionId) return;
@@ -367,8 +383,13 @@ export default function DevisEditorPage() {
     catch { setPdfError('PDF indisponible.'); }
   }
 
+  // Alias formatage avec nb_decimales des préférences
+  const e = (v: string | number | null | undefined) => fmtEuro(v, prefs.nb_decimales);
+
   const d = detail.data?.devis;
-  const [tab, setTab] = useState<'etude' | 'coeffs' | 'client'>('etude');
+  // Onglet par défaut depuis les préférences (coefficients → coeffs pour compatibilité interne)
+  const defaultTab = (prefs.default_tab === 'coefficients' ? 'coeffs' : prefs.default_tab === 'pdf' ? 'client' : prefs.default_tab) as 'etude' | 'coeffs' | 'client';
+  const [tab, setTab] = useState<'etude' | 'coeffs' | 'client'>(defaultTab);
 
   return (
     <div>
@@ -486,7 +507,15 @@ export default function DevisEditorPage() {
                   </select>
                 </Field>
                 <Field label="Valeur remise"><input style={{ width: 80 }} value={remise.valeur} onChange={(e) => setRemise({ ...remise, valeur: e.target.value })} /></Field>
-                <Field label="TVA %"><input style={{ width: 80 }} value={tva} onChange={(e) => setTva(e.target.value)} /></Field>
+                <Field label="TVA">
+                  <select className="input" style={{ width: 120 }} value={tva} onChange={(e) => setTva(e.target.value)}>
+                    {prefs.taux_tva.map((t) => (
+                      <option key={t} value={String(t)}>
+                        {t === 0 ? 'Autoliquidée (0%)' : `${t}%`}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <button className="btn" type="submit" disabled={setSale.isPending}>Appliquer</button>
               </div>
             </form>
@@ -524,7 +553,7 @@ export default function DevisEditorPage() {
                   </tbody>
                 </table>
                 <button className="btn" type="submit" disabled={setFraisAnnexes.isPending}>Enregistrer les frais</button>
-                {sale.data && <span className="muted" style={{ marginLeft: 12 }}>Total frais appliqué : {euro(sale.data.fraisAnnexes)}</span>}
+                {sale.data && <span className="muted" style={{ marginLeft: 12 }}>Total frais appliqué : {e(sale.data.fraisAnnexes)}</span>}
               </form>
             )}
           </div>
@@ -571,9 +600,9 @@ export default function DevisEditorPage() {
                         <td style={{ paddingLeft: 8 + depth * 16 }}>{line.designation}</td>
                         <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
                         <td style={{ textAlign: 'right', color: item?.forced ? 'var(--accent)' : undefined, fontWeight: item?.forced ? 600 : undefined }}>
-                          {puVente != null ? euro(puVente) : '—'}
+                          {puVente != null ? e(puVente) : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? euro(item.pv) : '—'}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? e(item.pv) : '—'}</td>
                         <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
                           {item && (item.forced ? (
                             <button className="btn-ghost" type="button" disabled={setLinePv.isPending}
@@ -603,7 +632,7 @@ export default function DevisEditorPage() {
               {tab === 'client' ? (
                 <>
                   <div className="form-section-title">Récapitulatif client</div>
-                  <div className="synthese-row"><span className="lbl">PV brut HT</span><span className="val">{euro(sale.data?.pvDevis)}</span></div>
+                  <div className="synthese-row"><span className="lbl">PV brut HT</span><span className="val">{e(sale.data?.pvDevis)}</span></div>
                   <div className="synthese-row">
                     <span className="lbl">Remise</span>
                     <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
@@ -617,11 +646,11 @@ export default function DevisEditorPage() {
                         onClick={() => { setErr(null); setSale.mutate(); }} disabled={setSale.isPending}>OK</button>
                     </span>
                   </div>
-                  <div className="synthese-row"><span className="lbl">Total HT</span><span className="val">{euro(sale.data?.totalPvHt)}</span></div>
-                  <div className="synthese-row"><span className="lbl">TVA</span><span className="val">{euro(sale.data?.tva)}</span></div>
+                  <div className="synthese-row"><span className="lbl">Total HT</span><span className="val">{e(sale.data?.totalPvHt)}</span></div>
+                  <div className="synthese-row"><span className="lbl">TVA</span><span className="val">{e(sale.data?.tva)}</span></div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--primary)', color: '#fff', margin: '10px -16px 0', padding: '10px 16px' }}>
                     <span style={{ fontWeight: 600, fontSize: 12 }}>Total TTC</span>
-                    <span style={{ fontWeight: 700, fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{euro(sale.data?.totalTtc)}</span>
+                    <span style={{ fontWeight: 700, fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.totalTtc)}</span>
                   </div>
                 </>
               ) : (
@@ -633,12 +662,12 @@ export default function DevisEditorPage() {
                         <span style={{ fontFamily: 'monospace', color: 'var(--muted)', marginRight: 6 }}>{i + 1}</span>
                         {line.designation}
                       </span>
-                      <span className="val" style={{ color: 'var(--accent)' }}>{euro(total)}</span>
+                      <span className="val" style={{ color: 'var(--accent)' }}>{e(total)}</span>
                     </div>
                   ))}
                   <div className="synthese-row" style={{ borderTop: '2px solid var(--border)', borderBottom: 'none', marginTop: 4, fontWeight: 700 }}>
                     <span>Total débours HT</span>
-                    <span className="val" style={{ color: 'var(--accent)', fontSize: 14 }}>{euro(sale.data?.totalDebourse)}</span>
+                    <span className="val" style={{ color: 'var(--accent)', fontSize: 14 }}>{e(sale.data?.totalDebourse)}</span>
                   </div>
                   <button type="button" className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: 10 }} onClick={exportDebours}>
                     Export Débours
@@ -650,17 +679,17 @@ export default function DevisEditorPage() {
               )}
 
               <div className="form-section-title" style={{ marginTop: 18 }}>Synthèse financière</div>
-              <div className="synthese-row"><span className="lbl">Déboursé total</span><span className="val">{euro(sale.data?.totalDebourse)}</span></div>
-              <div className="synthese-row"><span className="lbl">Frais annexes</span><span className="val">{euro(sale.data?.fraisAnnexes)}</span></div>
-              <div className="synthese-row"><span className="lbl">Prix de revient</span><span className="val">{euro(sale.data?.totalRevient)}</span></div>
-              <div className="synthese-row"><span className="lbl">PV net</span><span className="val">{euro(sale.data?.totalPvHt)}</span></div>
+              <div className="synthese-row"><span className="lbl">Déboursé total</span><span className="val">{e(sale.data?.totalDebourse)}</span></div>
+              <div className="synthese-row"><span className="lbl">Frais annexes</span><span className="val">{e(sale.data?.fraisAnnexes)}</span></div>
+              <div className="synthese-row"><span className="lbl">Prix de revient</span><span className="val">{e(sale.data?.totalRevient)}</span></div>
+              <div className="synthese-row"><span className="lbl">PV net</span><span className="val">{e(sale.data?.totalPvHt)}</span></div>
               <div className="synthese-row">
                 <span className="lbl">Marge brute</span>
-                <span className="val" style={{ color: 'var(--success)' }}>{euro(sale.data?.margeBrute)}{marginPct(sale.data?.margeBrute, sale.data?.totalPvHt)}</span>
+                <span className="val" style={{ color: 'var(--success)' }}>{e(sale.data?.margeBrute)}{marginPct(sale.data?.margeBrute, sale.data?.totalPvHt)}</span>
               </div>
               <div className="synthese-row">
                 <span className="lbl">Marge nette</span>
-                <span className="val" style={{ color: 'var(--success)' }}>{euro(sale.data?.margeNette)}{marginPct(sale.data?.margeNette, sale.data?.totalPvHt)}</span>
+                <span className="val" style={{ color: 'var(--success)' }}>{e(sale.data?.margeNette)}{marginPct(sale.data?.margeNette, sale.data?.totalPvHt)}</span>
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <div style={{ flex: 1, background: 'var(--surface)', borderRadius: 'var(--radius-sm)', padding: 8, textAlign: 'center' }}>
@@ -712,7 +741,7 @@ export default function DevisEditorPage() {
                       <td>{r.uniteAchat ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.coeffConversion ? Number(r.coeffConversion) : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{Number(r.qteAppro).toLocaleString('fr-FR')}</td>
-                      <td style={{ textAlign: 'right' }}>{euro(r.montant)}</td>
+                      <td style={{ textAlign: 'right' }}>{e(r.montant)}</td>
                       <td className="muted">{r.fournisseur ?? '—'}</td>
                     </tr>
                   ))}
