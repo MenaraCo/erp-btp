@@ -213,9 +213,16 @@ export default function DevisEditorPage() {
     subcontract: { fg: '5', ben: '5' },
   });
   const [remise, setRemise] = useState<{ type: 'pct' | 'fixe'; valeur: string }>({ type: 'pct', valeur: '0' });
-  // TVA : valeur par défaut = dernier taux non-zéro des préférences (souvent 20%), ou 20 si vide
-  const defaultTva = String(prefs.taux_tva.filter(t => t > 0).slice(-1)[0] ?? 20);
-  const [tva, setTva] = useState(defaultTva); // saisi en % (20 = 20 %)
+  // TVA : initialisée à '20' puis mise à jour par useEffect quand les prefs chargent
+  const [tva, setTva] = useState('20');
+  const tvaPrefsApplied = useRef(false);
+  useEffect(() => {
+    if (tvaPrefsApplied.current || !prefs.id || prefs.taux_tva.length === 0) return;
+    tvaPrefsApplied.current = true;
+    // Dernier taux non-zéro (souvent 20%), sinon 20
+    const def = prefs.taux_tva.filter(t => t > 0).slice(-1)[0] ?? 20;
+    setTva(String(def));
+  }, [prefs.id, prefs.taux_tva]);
   const setSale = useMutation({
     mutationFn: () =>
       apiFetch(`/versions/${versionId}/sale-sheet`, {
@@ -387,9 +394,22 @@ export default function DevisEditorPage() {
   const e = (v: string | number | null | undefined) => fmtEuro(v, prefs.nb_decimales);
 
   const d = detail.data?.devis;
-  // Onglet par défaut depuis les préférences (coefficients → coeffs pour compatibilité interne)
-  const defaultTab = (prefs.default_tab === 'coefficients' ? 'coeffs' : prefs.default_tab === 'pdf' ? 'client' : prefs.default_tab) as 'etude' | 'coeffs' | 'client';
-  const [tab, setTab] = useState<'etude' | 'coeffs' | 'client'>(defaultTab);
+
+  // Onglet par défaut depuis les préférences.
+  // useState seul ne suffit pas (les prefs chargent après le mount) → useEffect avec ref.
+  const [tab, setTab] = useState<'etude' | 'coeffs' | 'client'>('etude');
+  const tabPrefsApplied = useRef(false);
+  useEffect(() => {
+    // S'applique une seule fois, dès que les prefs réelles sont chargées (prefs.id présent)
+    // Ne s'applique pas si l'utilisateur a déjà changé d'onglet manuellement.
+    if (tabPrefsApplied.current || !prefs.id) return;
+    tabPrefsApplied.current = true;
+    const mapped: 'etude' | 'coeffs' | 'client' =
+      prefs.default_tab === 'coefficients' ? 'coeffs'
+      : prefs.default_tab === 'client' ? 'client'
+      : 'etude'; // pdf et autres → étude par défaut
+    setTab(mapped);
+  }, [prefs.id, prefs.default_tab]);
 
   return (
     <div>

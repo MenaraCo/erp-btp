@@ -526,6 +526,7 @@ function TabPreferences({ token }: { token: string }) {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['params-preferences'] });
+      qc.invalidateQueries({ queryKey: ['app-preferences'] }); // propagé au PrefsProvider
       setForm({});
     },
     onError: (err: unknown) => {
