@@ -235,6 +235,32 @@ export class DevisService {
     return { affaire: base.affaire, devis, totals };
   }
 
+  /** Aggregated études stats for the dashboard (synthèse de toutes les études). */
+  getEstimatingStats() {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const affaires: Array<{ status: string; n: string }> = await em.query(
+        `SELECT status, COUNT(*)::int AS n FROM affaire GROUP BY status`,
+      );
+      const devis: Array<{ status: string; n: string }> = await em.query(
+        `SELECT status, COUNT(*)::int AS n FROM devis GROUP BY status`,
+      );
+      const toMap = (rows: Array<{ status: string; n: string }>) =>
+        Object.fromEntries(rows.map((r) => [r.status, Number(r.n)]));
+      const affaireMap = toMap(affaires);
+      const devisMap = toMap(devis);
+      const totalAffaires = Object.values(affaireMap).reduce((s, v) => s + v, 0);
+      const totalDevis = Object.values(devisMap).reduce((s, v) => s + v, 0);
+      const won = devisMap['won'] ?? 0;
+      const lost = devisMap['lost'] ?? 0;
+      const tauxReussite = won + lost > 0 ? Math.round((won / (won + lost)) * 100) : null;
+      return {
+        affaires: { total: totalAffaires, byStatus: affaireMap },
+        devis: { total: totalDevis, byStatus: devisMap, won, lost, tauxReussite },
+      };
+    });
+  }
+
   /** Lists all devis (across affaires) with their affaire, for the devis list screen. */
   listDevis() {
     const tenantId = this.context.requireTenantId();
