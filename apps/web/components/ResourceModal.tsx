@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
+import { usePreferences, fmtNum, cleanNum } from '@/lib/preferences';
 
 /* ─────────── types ─────────── */
 export interface FullResource {
@@ -48,6 +49,8 @@ export function ResourceModal({ libId, resource, onClose }: {
   onClose: () => void;
 }) {
   const { token } = useAuth();
+  const prefs = usePreferences();
+  const nbDec = prefs.nb_decimales;
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
   const isEdit = Boolean(resource);
@@ -72,10 +75,10 @@ export function ResourceModal({ libId, resource, onClose }: {
     if (resource) {
       setF({
         code: resource.code ?? '', label: resource.label ?? '', unit: resource.unit ?? '',
-        nature: resource.nature ?? 'material', unitCost: resource.unitCost ?? '',
+        nature: resource.nature ?? 'material', unitCost: cleanNum(resource.unitCost),
         codeProduit: resource.codeProduit ?? '', codeAnalytiqueId: resource.codeAnalytiqueId ?? '',
-        prixPublic: resource.prixPublic ?? '', uniteAchat: resource.uniteAchat ?? '',
-        coeffConversion: resource.coeffConversion ?? '1', supplierId: resource.supplierId ?? '',
+        prixPublic: cleanNum(resource.prixPublic), uniteAchat: resource.uniteAchat ?? '',
+        coeffConversion: cleanNum(resource.coeffConversion) || '1', supplierId: resource.supplierId ?? '',
         refFournisseur: resource.refFournisseur ?? '', conditionnement: resource.conditionnement ?? '',
       });
     } else {
@@ -194,7 +197,7 @@ export function ResourceModal({ libId, resource, onClose }: {
         </Grid>
         {debCalcule != null && (
           <div style={infoBox}>
-            PU Débours = PU Public ÷ {f.coeffConversion} = <strong>{debCalcule} €/{f.unit || 'U'}</strong>
+            PU Débours = PU Public ÷ {fmtNum(f.coeffConversion, nbDec)} = <strong>{fmtNum(debCalcule, nbDec)} €/{f.unit || 'U'}</strong>
           </div>
         )}
         <Field label="Code analytique">
@@ -233,7 +236,7 @@ export function ResourceModal({ libId, resource, onClose }: {
             <input className="input" style={{ width: 100 }} value={f.coeffConversion} onChange={(e) => setCoeff(e.target.value)} />
             {f.uniteAchat && f.unit && Number(f.coeffConversion) > 0 && (
               <span style={{ ...infoBox, margin: 0, flex: 1 }}>
-                1 {f.uniteAchat} = {f.coeffConversion} {f.unit} · 1 {f.unit} = {+(1 / Number(f.coeffConversion)).toFixed(5)} {f.uniteAchat}
+                1 {f.uniteAchat} = {fmtNum(f.coeffConversion, nbDec)} {f.unit} · 1 {f.unit} = {fmtNum(1 / Number(f.coeffConversion), nbDec)} {f.uniteAchat}
               </span>
             )}
           </div>

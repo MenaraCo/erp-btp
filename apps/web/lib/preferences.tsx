@@ -75,24 +75,36 @@ export function usePreferences(): Preferences {
   return useContext(PrefsContext);
 }
 
-/** Formate un montant selon le nb de décimales des préférences */
+/**
+ * Formate un montant selon le nb de décimales des préférences.
+ * Règle : nbDec = MAX de décimales, et on n'affiche pas les zéros inutiles
+ * (120,00 → 120 € ; 38,50 → 38,5 € ; 4,6667 → 4,67 € à nbDec=2).
+ */
 export function fmtEuro(amount: number | string | null | undefined, nbDec: number = 2): string {
   const n = Number(amount);
   if (isNaN(n) || amount === null || amount === undefined) return '—';
   return n.toLocaleString('fr-FR', {
     style: 'currency',
     currency: 'EUR',
-    minimumFractionDigits: nbDec,
+    minimumFractionDigits: 0,
     maximumFractionDigits: nbDec,
   });
 }
 
-/** Formate un nombre (sans symbole €) selon le nb de décimales */
+/** Formate un nombre (sans symbole €) — max nbDec décimales, zéros inutiles supprimés. */
 export function fmtNum(n: number | string | null | undefined, nbDec: number = 2): string {
   const v = Number(n);
   if (isNaN(v) || n === null || n === undefined) return '—';
   return v.toLocaleString('fr-FR', {
-    minimumFractionDigits: nbDec,
+    minimumFractionDigits: 0,
     maximumFractionDigits: nbDec,
   });
+}
+
+/** Nettoie une valeur numérique pour l'afficher dans un input : retire les zéros inutiles
+ * (15.000000 → "15", 4.6700 → "4.67"), garde la précision réelle. */
+export function cleanNum(v: string | number | null | undefined): string {
+  if (v === null || v === undefined || v === '') return '';
+  const n = Number(v);
+  return isNaN(n) ? String(v) : String(n);
 }

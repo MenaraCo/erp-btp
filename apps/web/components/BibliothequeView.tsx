@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
-import { euro } from '@/lib/format';
+import { usePreferences, fmtEuro } from '@/lib/preferences';
 import { ResourceModal, FullResource } from './ResourceModal';
 
 interface Library { id: string; code: string; name: string }
@@ -23,6 +23,7 @@ const PAGE_SIZE = 50;
 
 export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'ressources' | 'ouvrages' }) {
   const { token } = useAuth();
+  const { nb_decimales: nbDec } = usePreferences();
   const qc = useQueryClient();
   const [libId, setLibId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -133,7 +134,7 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
                     <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setResModal(r)} title="Modifier la ressource">
                       <td className="code-cell">{r.code}</td><td>{r.label}</td><td>{r.unit}</td>
                       <td className="muted">{NATURES.find((n) => n.v === r.nature)?.l ?? r.nature}</td>
-                      <td style={{ textAlign: 'right' }}>{euro(r.unitCost)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtEuro(r.unitCost, nbDec)}</td>
                       <td className="muted">{r.uniteAchat ?? '—'}</td>
                       <td style={{ textAlign: 'right' }} className="muted">{r.coeffConversion ? Number(r.coeffConversion) : '—'}</td>
                     </tr>
@@ -200,6 +201,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function OuvrageRow({ ouvrage, resources, libId }: { ouvrage: Ouvrage; resources: Resource[]; libId: string }) {
   const { token } = useAuth();
+  const { nb_decimales: nbDec } = usePreferences();
   const qc = useQueryClient();
   const [resId, setResId] = useState('');
   const [qty, setQty] = useState('');
@@ -214,12 +216,12 @@ function OuvrageRow({ ouvrage, resources, libId }: { ouvrage: Ouvrage; resources
       <td className="code-cell">{ouvrage.code}</td>
       <td>{ouvrage.label}</td>
       <td>{ouvrage.unit}</td>
-      <td style={{ textAlign: 'right' }}>{euro(ouvrage.debourse)}</td>
+      <td style={{ textAlign: 'right' }}>{fmtEuro(ouvrage.debourse, nbDec)}</td>
       <td>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <select value={resId} onChange={(e) => setResId(e.target.value)}>
             <option value="">— ressource —</option>
-            {resources.map((r) => <option key={r.id} value={r.id}>{r.code} ({euro(r.unitCost)})</option>)}
+            {resources.map((r) => <option key={r.id} value={r.id}>{r.code} ({fmtEuro(r.unitCost, nbDec)})</option>)}
           </select>
           <input style={{ width: 60 }} placeholder="qté" value={qty} onChange={(e) => setQty(e.target.value)} />
           <button className="link" disabled={!resId || !qty || addComp.isPending} onClick={() => addComp.mutate()}>+ ajouter</button>
