@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
-import { usePreferences, fmtEuro } from '@/lib/preferences';
+import { usePreferences, fmtEuro, fmtNum } from '@/lib/preferences';
 import { Montage, MontageLine } from './Montage';
 
 interface Version { id: string; version_no: number; label: string }
@@ -259,7 +259,6 @@ export default function DevisEditorPage() {
   });
 
   // --- PV forcé par ligne ---
-  const [pvEdit, setPvEdit] = useState<Record<string, string>>({});
   const setLinePv = useMutation({
     mutationFn: ({ lineId, puVente, force }: { lineId: string; puVente: string | null; force: boolean }) =>
       apiFetch(`/versions/${versionId}/lines/${lineId}/pv`, {
@@ -301,6 +300,22 @@ export default function DevisEditorPage() {
       .filter((l) => !l.parent_line_id)
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((r) => ({ line: r, total: totals.get(r.id) ?? 0 }));
+  }, [lines.data, sale.data]);
+
+  // PV (prix de vente) agrégé par titre racine — pour les sous-totaux de l'aperçu devis.
+  const titrePvByRoot = useMemo(() => {
+    const byId = new Map((lines.data ?? []).map((l) => [l.id, l]));
+    const rootOf = (id: string) => {
+      let cur = byId.get(id);
+      while (cur && cur.parent_line_id) cur = byId.get(cur.parent_line_id);
+      return cur;
+    };
+    const totals = new Map<string, number>();
+    for (const it of sale.data?.items ?? []) {
+      const root = rootOf(it.id);
+      if (root) totals.set(root.id, (totals.get(root.id) ?? 0) + Number(it.pv));
+    }
+    return totals;
   }, [lines.data, sale.data]);
 
   // Export du déboursé par ressource (CSV — s'ouvre dans Excel).
@@ -399,24 +414,25 @@ export default function DevisEditorPage() {
 
   // Onglet par défaut depuis les préférences.
   // useState seul ne suffit pas (les prefs chargent après le mount) → useEffect avec ref.
-  const [tab, setTab] = useState<'etude' | 'coeffs' | 'client'>('etude');
+  const [tab, setTab] = useState<'etude' | 'coeffs' | 'client' | 'apercu'>('etude');
   const tabPrefsApplied = useRef(false);
   useEffect(() => {
     // S'applique une seule fois, dès que les prefs réelles sont chargées (prefs.id présent)
     // Ne s'applique pas si l'utilisateur a déjà changé d'onglet manuellement.
     if (tabPrefsApplied.current || !prefs.id) return;
     tabPrefsApplied.current = true;
-    const mapped: 'etude' | 'coeffs' | 'client' =
+    const mapped: 'etude' | 'coeffs' | 'client' | 'apercu' =
       prefs.default_tab === 'coefficients' ? 'coeffs'
       : prefs.default_tab === 'client' ? 'client'
-      : 'etude'; // pdf et autres → étude par défaut
+      : prefs.default_tab === 'pdf' ? 'apercu'
+      : 'etude'; // autres → étude par défaut
     setTab(mapped);
   }, [prefs.id, prefs.default_tab]);
 
   return (
     <div>
       <p className="muted" style={{ marginTop: 0 }}>
-        <Link href={`/estimating/${affaireId}`} className="link">← Affaire</Link>
+        <Link href="/estimating/devis" className="link">← Devis</Link>
       </p>
       {detail.isError && <p className="muted">Devis introuvable ou accès non autorisé.</p>}
       {err && <div className="error">{err}</div>}
@@ -448,7 +464,7 @@ export default function DevisEditorPage() {
           </div>
 
           <div style={{ display: 'flex', gap: 4, marginTop: 12, borderBottom: '1px solid var(--border)' }}>
-            {([['etude', 'Étude de prix'], ['coeffs', 'Coefficients & frais'], ['client', 'Devis client']] as const).map(([key, label]) => (
+            {([['etude', 'Étude de prix'], ['coeffs', 'Coefficients & frais'], ['client', 'Devis client'], ['apercu', 'Aperçu devis']] as const).map(([key, label]) => (
               <button key={key} type="button" onClick={() => setTab(key)} className="editor-tab"
                 style={{
                   borderBottom: tab === key ? '2px solid var(--primary)' : '2px solid transparent',
@@ -476,7 +492,7 @@ export default function DevisEditorPage() {
               </form>
             </div>
             <p className="muted" style={{ marginTop: 4 }}>
-              Construisez le devis sur place : chaque titre propose « + Sous-titre / + Ouvrage / + Ligne / + Texte ». Les ouvrages copient leur sous-détail (éditable). « V » = variante, « O » = option (hors total).
+              Construisez le devis sur place : chaque titre propose « + Ligne / Bibliothèque / Texte libre / + Sous-niveau X ». Les ouvrages copient leur sous-détail (éditable). « V » = variante, « O » = option (hors total).
             </p>
             <div style={{ marginTop: 8 }}>
               <Montage
@@ -596,7 +612,6 @@ export default function DevisEditorPage() {
                   <th style={{ textAlign: 'right' }}>Qté</th>
                   <th style={{ textAlign: 'right' }}>PV HT / U</th>
                   <th style={{ textAlign: 'right' }}>Total HT</th>
-                  <th />
                 </tr></thead>
                 <tbody>
                   {clientLines.map(({ line, depth }) => {
@@ -604,7 +619,7 @@ export default function DevisEditorPage() {
                     if (line.type === 'titre' || line.type === 'sous_titre') {
                       return (
                         <tr key={line.id} style={{ background: 'var(--surface)' }}>
-                          <td colSpan={5} style={{ paddingLeft: 8 + depth * 16, fontWeight: 600 }}>
+                          <td colSpan={4} style={{ paddingLeft: 8 + depth * 16, fontWeight: 600 }}>
                             <span style={{ fontFamily: 'monospace', color: 'var(--accent)', marginRight: 8, fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
                             {line.code ? <strong>{line.code} </strong> : null}{line.designation}
                           </td>
@@ -613,7 +628,7 @@ export default function DevisEditorPage() {
                     }
                     if (line.type === 'texte') {
                       return (
-                        <tr key={line.id}><td colSpan={5} style={{ paddingLeft: 8 + depth * 16, fontStyle: 'italic', color: 'var(--muted)' }}>{line.designation}</td></tr>
+                        <tr key={line.id}><td colSpan={4} style={{ paddingLeft: 8 + depth * 16, fontStyle: 'italic', color: 'var(--muted)' }}>{line.designation}</td></tr>
                       );
                     }
                     const qty = Number(line.quantity) || 0;
@@ -625,29 +640,98 @@ export default function DevisEditorPage() {
                           {line.designation}
                         </td>
                         <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
-                        <td style={{ textAlign: 'right', color: item?.forced ? 'var(--accent)' : undefined, fontWeight: item?.forced ? 600 : undefined }}>
-                          {puVente != null ? e(puVente) : '—'}
+                        <td style={{ textAlign: 'right' }}>
+                          {item ? (
+                            <PvCell
+                              computed={puVente}
+                              forced={!!item.forced}
+                              pending={setLinePv.isPending}
+                              decimals={prefs.nb_decimales}
+                              onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
+                              onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })}
+                            />
+                          ) : '—'}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? e(item.pv) : '—'}</td>
-                        <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
-                          {item && (item.forced ? (
-                            <button className="btn-ghost" type="button" disabled={setLinePv.isPending}
-                              onClick={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })}>Libérer</button>
-                          ) : (
-                            <span style={{ display: 'inline-flex', gap: 4 }}>
-                              <input style={{ width: 60, textAlign: 'right' }} placeholder="PU"
-                                value={pvEdit[line.id] ?? ''}
-                                onChange={(e) => setPvEdit({ ...pvEdit, [line.id]: e.target.value })} />
-                              <button className="btn-ghost" type="button" disabled={setLinePv.isPending || !pvEdit[line.id]}
-                                onClick={() => setLinePv.mutate({ lineId: line.id, puVente: pvEdit[line.id], force: true })}>Forcer</button>
-                            </span>
-                          ))}
-                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+            ) : <p className="muted">Devis vide — construisez-le dans l’onglet Étude de prix.</p>}
+          </div>
+          )}
+
+          {tab === 'apercu' && (
+          <div className="card" style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h2 style={{ margin: 0 }}>Aperçu du devis</h2>
+              <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
+            </div>
+            <p className="muted" style={{ marginTop: 0 }}>Rendu du document tel qu’il sera remis au client (indépendant de l’export PDF).</p>
+            {pdfError && <p className="muted">{pdfError}</p>}
+            {clientLines.length > 0 ? (
+              <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '28px 32px', maxWidth: 820, margin: '0 auto' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid var(--primary)', paddingBottom: 12, marginBottom: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--primary)' }}>DEVIS</div>
+                    {d?.numero && <div style={{ fontFamily: 'monospace', color: 'var(--accent)', fontWeight: 600 }}>N° {d.numero}</div>}
+                  </div>
+                  <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>
+                    {latest ? <div>Version {latest.version_no}</div> : null}
+                  </div>
+                </div>
+                <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 16 }}>{d?.designation}</div>
+                <table className="grid" style={{ width: '100%' }}>
+                  <thead><tr>
+                    <th style={{ width: 70 }}>N°</th>
+                    <th>Désignation</th>
+                    <th style={{ textAlign: 'right' }}>Qté</th>
+                    <th style={{ textAlign: 'right' }}>PU HT</th>
+                    <th style={{ textAlign: 'right' }}>Total HT</th>
+                  </tr></thead>
+                  <tbody>
+                    {clientLines.map(({ line, depth }) => {
+                      const item = itemById.get(line.id);
+                      if (line.type === 'titre' || line.type === 'sous_titre') {
+                        const sub = line.type === 'titre' ? titrePvByRoot.get(line.id) : undefined;
+                        return (
+                          <tr key={line.id} style={{ background: 'var(--surface)' }}>
+                            <td style={{ fontFamily: 'monospace', color: 'var(--accent)', fontWeight: 600 }}>{line.numero ?? ''}</td>
+                            <td colSpan={3} style={{ paddingLeft: depth * 16, fontWeight: 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', color: line.type === 'titre' ? 'var(--primary)' : undefined }}>
+                              {line.code ? <strong>{line.code} </strong> : null}{line.designation}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{sub != null ? e(sub) : ''}</td>
+                          </tr>
+                        );
+                      }
+                      if (line.type === 'texte') {
+                        return <tr key={line.id}><td /><td colSpan={4} style={{ paddingLeft: depth * 16, fontStyle: 'italic', color: 'var(--muted)' }}>{line.designation}</td></tr>;
+                      }
+                      const qty = Number(line.quantity) || 0;
+                      const puVente = item && qty ? Number(item.pv) / qty : null;
+                      return (
+                        <tr key={line.id}>
+                          <td style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: 11 }}>{line.numero ?? ''}</td>
+                          <td style={{ paddingLeft: depth * 16 }}>{line.designation}</td>
+                          <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
+                          <td style={{ textAlign: 'right' }}>{puVente != null ? e(puVente) : '—'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? e(item.pv) : '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+                  <div style={{ width: 300 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">PV brut HT</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.pvDevis)}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">Remise</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e((Number(sale.data?.pvDevis) || 0) - (Number(sale.data?.totalPvHt) || 0))}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid var(--border)', fontWeight: 600 }}><span>Total HT</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.totalPvHt)}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">TVA</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.tva)}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', marginTop: 4, background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-sm)', fontWeight: 700 }}><span>Total TTC</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.totalTtc)}</span></div>
+                  </div>
+                </div>
+              </div>
             ) : <p className="muted">Devis vide — construisez-le dans l’onglet Étude de prix.</p>}
           </div>
           )}
@@ -783,6 +867,54 @@ export default function DevisEditorPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="field" style={{ marginBottom: 0 }}><label>{label}</label>{children}</div>;
+}
+
+/**
+ * Prix de vente unitaire éditable en place (onglet Devis client).
+ * Saisir une valeur force le prix (champ surligné orange + cadenas pour libérer) ;
+ * le cadenas rétablit le prix calculé. Pas de champ « Forcer » séparé.
+ */
+function PvCell({ computed, forced, pending, decimals, onForce, onRelease }: {
+  computed: number | null;
+  forced: boolean;
+  pending: boolean;
+  decimals: number;
+  onForce: (v: string) => void;
+  onRelease: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [draft, setDraft] = useState('');
+  const shown = focused ? draft : (computed != null ? fmtNum(computed, decimals) : '');
+  const commit = () => {
+    setFocused(false);
+    const cleaned = draft.replace(',', '.').replace(/[^0-9.]/g, '');
+    if (cleaned === '') return; // vide → aucun changement
+    const n = Number(cleaned);
+    if (!Number.isFinite(n)) return;
+    // Ne pas forcer si la valeur saisie égale le calcul (évite un forçage inutile).
+    if (!forced && computed != null && Math.abs(n - computed) < 1e-6) return;
+    onForce(cleaned);
+  };
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+      <input
+        style={{
+          width: 84, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+          ...(forced ? { borderColor: 'var(--accent)', background: '#fff7ed', color: 'var(--accent)', fontWeight: 600 } : {}),
+        }}
+        value={shown}
+        disabled={pending}
+        onFocus={() => { setFocused(true); setDraft(computed != null ? String(Number(computed.toFixed(decimals))) : ''); }}
+        onChange={(ev) => setDraft(ev.target.value)}
+        onBlur={commit}
+        onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); (ev.target as HTMLInputElement).blur(); } }}
+      />
+      {forced && (
+        <button type="button" className="btn-ghost" title="Libérer le prix forcé (revenir au prix calculé)"
+          disabled={pending} onClick={onRelease} style={{ padding: '2px 6px', color: 'var(--accent)', lineHeight: 1 }}>🔒</button>
+      )}
+    </span>
+  );
 }
 
 /** « (X %) » de marge par rapport au PV net, ou '' */

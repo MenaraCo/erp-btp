@@ -240,19 +240,30 @@ function SectionActions({
   parentId: string; childCount: number; depth: number; token: string | null; versionId: string;
 } & Pick<Muts, 'addLine' | 'insertOuvrage'>) {
   const [picker, setPicker] = useState(false);
+  // Niveau du sous-titre qui sera ajouté : un titre (depth 0) = niveau 1 → son enfant = niveau 2.
+  const childLevel = depth + 2;
   return (
-    <div style={{ display: 'flex', gap: 4, padding: '4px 8px', marginLeft: (depth + 1) * 16, flexWrap: 'wrap' }}>
-      <button className="btn-ghost" style={actBtn}
-        onClick={() => addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount })}>+ Sous-titre</button>
-      <button className="btn-ghost" style={actBtn} onClick={() => setPicker((v) => !v)}>+ Ouvrage</button>
-      <button className="btn-ghost" style={actBtn}
+    <div style={{ display: 'flex', gap: 6, padding: '6px 8px', marginLeft: (depth + 1) * 16, flexWrap: 'wrap' }}>
+      <button style={pillBtn()}
         onClick={() => addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: 'Ligne', quantity: '1', pu: '0', sortOrder: childCount })}>+ Ligne</button>
-      <button className="btn-ghost" style={actBtn}
-        onClick={() => addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount })}>+ Texte</button>
+      <button style={pillBtn()} onClick={() => setPicker((v) => !v)}>⊟ Bibliothèque</button>
+      <button style={pillBtn('#d97706', '#fffbeb', '#fcd34d')}
+        onClick={() => addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount })}>▤ Texte libre</button>
+      <button style={pillBtn('var(--primary)', '#eef2f7', '#cbd5e1')}
+        onClick={() => addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount })}>+ Sous-niveau {childLevel}</button>
       {picker && <OuvragePicker token={token} parentId={parentId}
         onPick={(ouvrageId, quantity) => { insertOuvrage.mutate({ ouvrageId, parentLineId: parentId, quantity }); setPicker(false); }} />}
     </div>
   );
+}
+
+/** Bouton « pilule » des actions d'ajout (couleur/fond/bordure paramétrables). */
+function pillBtn(color = 'var(--muted)', bg = '#fff', border = 'var(--border)'): React.CSSProperties {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 12px',
+    fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px',
+    color, background: bg, border: `1px solid ${border}`, borderRadius: 16, cursor: 'pointer', whiteSpace: 'nowrap',
+  };
 }
 
 function OuvragePicker({ token, parentId, onPick }: { token: string | null; parentId: string; onPick: (ouvrageId: string, quantity: string) => void }) {
@@ -283,8 +294,6 @@ function OuvragePicker({ token, parentId, onPick }: { token: string | null; pare
     </div>
   );
 }
-
-const actBtn: React.CSSProperties = { fontSize: 12, padding: '2px 8px', color: '#475569' };
 function togBtn(active: boolean, color: string): React.CSSProperties {
   return {
     fontSize: 12, fontWeight: 700, width: 22, height: 22, borderRadius: 4, cursor: 'pointer',
