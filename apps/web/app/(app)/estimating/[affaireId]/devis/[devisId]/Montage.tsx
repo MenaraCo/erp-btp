@@ -115,6 +115,7 @@ export function Montage({
     onSuccess: onChanged,
   });
 
+  const [infoLine, setInfoLine] = useState<MontageLine | null>(null);
   const roots = childrenOf(null);
   return (
     <div>
@@ -125,6 +126,7 @@ export function Montage({
           addLine={addLine} insertOuvrage={insertOuvrage} updateLine={updateLine}
           deleteLine={deleteLine} setSection={setSection}
           vente={vente} valueOf={valueOf} saleById={saleById} setLinePv={setLinePv} decimals={decimals}
+          onShowInfo={setInfoLine}
         />
       ))}
       {!readOnly && (
@@ -132,6 +134,15 @@ export function Montage({
           onClick={() => addLine.mutate({ type: 'titre', designation: 'Nouveau titre', sortOrder: roots.length })}>
           + Titre
         </button>
+      )}
+      {infoLine && (
+        <LineInfoModal
+          line={infoLine}
+          components={infoLine.type === 'ouvrage' ? childrenOf(infoLine.id) : []}
+          deboursById={deboursById}
+          decimals={decimals}
+          onClose={() => setInfoLine(null)}
+        />
       )}
     </div>
   );
@@ -145,19 +156,21 @@ type Muts = {
   setSection: ReturnType<typeof useMutation<unknown, Error, { id: string; sectionType: 'option' | 'variante' | null }>>;
 };
 
-/** Props du mode vente (prix de vente + forçage en place). */
+/** Props du mode vente (prix de vente + forçage en place) + actions transverses. */
 type VenteCtx = {
   vente: boolean;
   valueOf: (l: MontageLine) => number;
   saleById?: Map<string, SaleLineInfo>;
   setLinePv: ReturnType<typeof useMutation<unknown, Error, { lineId: string; puVente: string | null; force: boolean }>>;
   decimals: number;
+  /** Ouvre la fenêtre d'informations d'une ligne (ouvrage/ressource). */
+  onShowInfo: (l: MontageLine) => void;
 };
 
 function Node({
   line, depth, childrenOf, subtree, sectionOf, token, versionId, readOnly,
   addLine, insertOuvrage, updateLine, deleteLine, setSection,
-  vente, valueOf, saleById, setLinePv, decimals,
+  vente, valueOf, saleById, setLinePv, decimals, onShowInfo,
 }: {
   line: MontageLine; depth: number;
   childrenOf: (pid: string | null) => MontageLine[];
@@ -169,7 +182,7 @@ function Node({
   const sect = line.section_type;
   const pad = depth * 16;
   // Contexte vente propagé tel quel aux enfants.
-  const vctx: VenteCtx = { vente, valueOf, saleById, setLinePv, decimals };
+  const vctx: VenteCtx = { vente, valueOf, saleById, setLinePv, decimals, onShowInfo };
   // Montant affiché : déboursé ou prix de vente selon le mode — toujours selon la règle
   // des décimales (préférences société).
   const fmtV = (n: number) => fmtEuro(n, decimals);
@@ -182,18 +195,18 @@ function Node({
         background: sect ? SECTION_BG[sect] : undefined, borderRadius: 6,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: ls.bg, color: ls.color, borderRadius: 5 }}>
-          {/* Numéro hiérarchique (calculé serveur) */}
-          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: ls.num, minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>
+          {/* Numéro hiérarchique (calculé serveur) + champ de forçage juste à côté */}
+          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: ls.num, minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {line.numero ?? ''}
           </span>
+          {!readOnly && (
+            <input title="N° personnalisé (remplace le numéro automatique)" placeholder={line.numero ?? 'N°'} defaultValue={line.num_custom ?? ''}
+              onBlur={(e) => (e.target.value || '') !== (line.num_custom ?? '') && updateLine.mutate({ id: line.id, patch: { numCustom: e.target.value } })}
+              style={{ width: 48, fontSize: 11, fontFamily: 'monospace', textAlign: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 4, color: ls.color, padding: '2px 4px' }} />
+          )}
           <input className="title-input" defaultValue={line.designation} disabled={readOnly}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })}
             style={{ fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', flex: 1, border: '1px solid transparent', background: 'transparent', color: ls.color }} />
-          {!readOnly && (
-            <input title="N° personnalisé (remplace le numéro auto)" placeholder="N°" defaultValue={line.num_custom ?? ''}
-              onBlur={(e) => (e.target.value || '') !== (line.num_custom ?? '') && updateLine.mutate({ id: line.id, patch: { numCustom: e.target.value } })}
-              style={{ width: 56, fontSize: 11, fontFamily: 'monospace', textAlign: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, color: ls.color, padding: '2px 4px' }} />
-          )}
           <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: ls.color }}>{fmtV(valueOf(line))}</span>
           {!readOnly && (
             <>
@@ -228,10 +241,11 @@ function Node({
     return (
       <div style={{ marginLeft: pad }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
-          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
-          {line.code ? <strong style={{ whiteSpace: 'nowrap' }}>{line.code}</strong> : null}
+          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
+          {!readOnly && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
           <input defaultValue={line.designation} disabled={readOnly} title="Désignation (devis uniquement)" style={{ flex: 1, fontWeight: 500 }}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })} />
+          <button type="button" className="btn-ghost" title="Voir les informations de l'ouvrage" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
           {!vente && (
             <span style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }} title="PU déboursé unitaire">
               PU&nbsp;<span style={{ fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 600 }}>{puDebours != null ? fmtV(puDebours) : '—'}</span>
@@ -259,6 +273,7 @@ function Node({
               onBlur={(e) => e.target.value !== (c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0' } })} />
             <input defaultValue={c.pu ?? ''} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
               onBlur={(e) => e.target.value !== (c.pu ?? '') && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0' } })} />
+            <button type="button" className="btn-ghost" title="Voir les informations de la ressource" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
             {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
           </div>
         ))}
@@ -272,8 +287,11 @@ function Node({
     const puVente = vente && info && qtyN ? Number(info.pv) / qtyN : null;
     return (
       <div style={{ marginLeft: pad, display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', fontSize: 13 }}>
+        <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
+        {!readOnly && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
         <input defaultValue={line.designation} disabled={readOnly} style={{ flex: 1 }}
           onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })} />
+        <button type="button" className="btn-ghost" title="Voir les informations de la ressource" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
         <input defaultValue={line.quantity ?? ''} disabled={readOnly} title="Quantité" style={{ width: 56, textAlign: 'right' }}
           onBlur={(e) => e.target.value !== (line.quantity ?? '') && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
         {vente ? (
@@ -358,6 +376,99 @@ function menuItem(): React.CSSProperties {
 }
 function menuIco(color: string): React.CSSProperties {
   return { display: 'inline-flex', width: 16, justifyContent: 'center', color, fontWeight: 700 };
+}
+
+/** Bouton « ⓘ » d'accès aux informations d'une ligne. */
+const infoBtn: React.CSSProperties = {
+  color: 'var(--primary)', fontSize: 14, padding: '0 4px', lineHeight: 1, flexShrink: 0,
+};
+
+/**
+ * Champ de numéro personnalisé (forçage) pour lignes ouvrage/ressource — affiché juste à côté
+ * du numéro automatique. Le numéro saisi prime sur l'automatique (convention CHIFFRAGE).
+ */
+function NumBox({ line, onChange }: { line: MontageLine; onChange: (v: string) => void }) {
+  return (
+    <input
+      title="N° personnalisé (remplace le numéro automatique)"
+      placeholder={line.numero ?? 'N°'}
+      defaultValue={line.num_custom ?? ''}
+      onBlur={(e) => (e.target.value || '') !== (line.num_custom ?? '') && onChange(e.target.value)}
+      style={{
+        width: 48, fontSize: 11, fontFamily: 'monospace', textAlign: 'center',
+        background: '#fff', border: '1px solid var(--border)', borderRadius: 4,
+        color: 'var(--primary)', padding: '2px 4px', flexShrink: 0,
+      }}
+    />
+  );
+}
+
+/**
+ * Fenêtre d'informations (lecture seule) d'une ligne ouvrage/ressource du devis.
+ * Affiche les données TELLES QU'UTILISÉES DANS LE DEVIS (copies) — n'expose ni ne modifie
+ * la bibliothèque société.
+ */
+function LineInfoModal({ line, components, deboursById, decimals, onClose }: {
+  line: MontageLine;
+  components: MontageLine[];
+  deboursById: Map<string, string>;
+  decimals: number;
+  onClose: () => void;
+}) {
+  const isOuvrage = line.type === 'ouvrage';
+  const debours = Number(deboursById.get(line.id) ?? 0);
+  const row = (label: string, val: React.ReactNode) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+      <span className="muted">{label}</span>
+      <span style={{ fontWeight: 500, textAlign: 'right' }}>{val}</span>
+    </div>
+  );
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 'min(640px, 96vw)', maxHeight: '85vh', overflow: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ margin: 0 }}>{isOuvrage ? 'Ouvrage' : 'Ressource'} — informations</h2>
+          <button className="btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <p className="muted" style={{ marginTop: 2 }}>
+          Informations telles qu’utilisées dans ce devis — sans incidence sur la bibliothèque société.
+        </p>
+        <div style={{ marginTop: 8 }}>
+          {line.numero ? row('Numéro', <span style={{ fontFamily: 'monospace' }}>{line.numero}</span>) : null}
+          {line.code ? row('Code', <span style={{ fontFamily: 'monospace' }}>{line.code}</span>) : null}
+          {row('Désignation', line.designation)}
+          {line.unit ? row('Unité', line.unit) : null}
+          {row('Quantité', line.quantity ?? '—')}
+          {!isOuvrage ? row('PU déboursé', fmtEuro(line.pu, decimals)) : null}
+          {!isOuvrage && line.perte ? row('Perte', `${line.perte} %`) : null}
+          {row('Déboursé total', fmtEuro(debours, decimals))}
+        </div>
+        {isOuvrage && components.length > 0 && (
+          <>
+            <div className="form-section-title" style={{ marginTop: 16 }}>Sous-détail ({components.length})</div>
+            <table className="grid" style={{ marginTop: 6 }}>
+              <thead><tr>
+                <th>Désignation</th>
+                <th style={{ textAlign: 'right' }}>Qté</th>
+                <th style={{ textAlign: 'right' }}>Perte</th>
+                <th style={{ textAlign: 'right' }}>PU déboursé</th>
+              </tr></thead>
+              <tbody>
+                {components.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.designation}</td>
+                    <td style={{ textAlign: 'right' }}>{c.quantity ?? '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{c.perte ? `${c.perte} %` : '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtEuro(c.pu, decimals)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /**
