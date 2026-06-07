@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
-import { usePreferences, fmtEuro } from '@/lib/preferences';
+import { usePreferences, fmtEuro, cleanNum } from '@/lib/preferences';
 import { downloadXlsx } from '@/lib/xlsx';
 import { Montage, MontageLine } from './Montage';
 
@@ -647,7 +647,7 @@ export default function DevisEditorPage() {
                         <tr key={line.id}>
                           <td style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: 11 }}>{line.numero ?? ''}</td>
                           <td style={{ paddingLeft: depth * 16 }}>{line.designation}</td>
-                          <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
+                          <td style={{ textAlign: 'right' }}>{line.quantity != null ? cleanNum(line.quantity) : '—'} {line.unit ?? ''}</td>
                           <td style={{ textAlign: 'right' }}>{puVente != null ? e(puVente) : '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? e(item.pv) : '—'}</td>
                         </tr>

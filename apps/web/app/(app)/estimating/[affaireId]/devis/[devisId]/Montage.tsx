@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
-import { fmtEuro, fmtNum } from '@/lib/preferences';
+import { fmtEuro, fmtNum, cleanNum } from '@/lib/preferences';
 
 /** Élément valorisé côté vente (prix de vente + drapeau « forcé »). */
 export interface SaleLineInfo { pv: string; forced: boolean }
@@ -225,7 +225,7 @@ function Node({
             {...vctx} />
         ))}
         {!readOnly && (
-          <SectionActions parentId={line.id} childCount={kids.length} depth={depth}
+          <SectionActions parentId={line.id} childCount={kids.length} depth={depth} vente={vente}
             token={token} versionId={versionId} addLine={addLine} insertOuvrage={insertOuvrage} />
         )}
       </div>
@@ -252,8 +252,8 @@ function Node({
             </span>
           )}
           <label style={{ fontSize: 12, color: '#6b7280' }}>Qté</label>
-          <input defaultValue={line.quantity ?? ''} disabled={readOnly} style={{ width: 64, textAlign: 'right' }}
-            onBlur={(e) => e.target.value !== (line.quantity ?? '') && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
+          <input defaultValue={cleanNum(line.quantity)} disabled={readOnly} style={{ width: 64, textAlign: 'right' }}
+            onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
           {vente && (
             <PvCell computed={puVente} forced={!!info?.forced} pending={setLinePv.isPending} decimals={decimals}
               onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
@@ -267,12 +267,12 @@ function Node({
           <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 2px 24px', fontSize: 13, color: '#475569' }}>
             <input defaultValue={c.designation} disabled={readOnly} title="Désignation (devis uniquement)" style={{ flex: 1 }}
               onBlur={(e) => e.target.value !== c.designation && updateLine.mutate({ id: c.id, patch: { designation: e.target.value } })} />
-            <input defaultValue={c.quantity ?? ''} disabled={readOnly} title="Ratio/quantité" style={{ width: 56, textAlign: 'right' }}
-              onBlur={(e) => e.target.value !== (c.quantity ?? '') && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
-            <input defaultValue={c.perte ?? '0'} disabled={readOnly} title="Perte %" style={{ width: 44, textAlign: 'right' }}
-              onBlur={(e) => e.target.value !== (c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0' } })} />
-            <input defaultValue={c.pu ?? ''} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
-              onBlur={(e) => e.target.value !== (c.pu ?? '') && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0' } })} />
+            <input defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio/quantité" style={{ width: 56, textAlign: 'right' }}
+              onBlur={(e) => e.target.value !== cleanNum(c.quantity) && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
+            <input defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: 44, textAlign: 'right' }}
+              onBlur={(e) => e.target.value !== cleanNum(c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0' } })} />
+            <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
+              onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0' } })} />
             <button type="button" className="btn-ghost" title="Voir les informations de la ressource" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
             {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
           </div>
@@ -292,15 +292,15 @@ function Node({
         <input defaultValue={line.designation} disabled={readOnly} style={{ flex: 1 }}
           onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })} />
         <button type="button" className="btn-ghost" title="Voir les informations de la ressource" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
-        <input defaultValue={line.quantity ?? ''} disabled={readOnly} title="Quantité" style={{ width: 56, textAlign: 'right' }}
-          onBlur={(e) => e.target.value !== (line.quantity ?? '') && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
+        <input defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: 56, textAlign: 'right' }}
+          onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
         {vente ? (
           <PvCell computed={puVente} forced={!!info?.forced} pending={setLinePv.isPending} decimals={decimals}
             onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
             onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
         ) : (
-          <input defaultValue={line.pu ?? ''} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
-            onBlur={(e) => e.target.value !== (line.pu ?? '') && updateLine.mutate({ id: line.id, patch: { pu: e.target.value || '0' } })} />
+          <input defaultValue={cleanNum(line.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
+            onBlur={(e) => e.target.value !== cleanNum(line.pu) && updateLine.mutate({ id: line.id, patch: { pu: e.target.value || '0' } })} />
         )}
         <span style={{ width: 80, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
         {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(line.id)}>✕</button>}
@@ -319,9 +319,9 @@ function Node({
 }
 
 function SectionActions({
-  parentId, childCount, depth, token, versionId, addLine, insertOuvrage,
+  parentId, childCount, depth, token, versionId, vente, addLine, insertOuvrage,
 }: {
-  parentId: string; childCount: number; depth: number; token: string | null; versionId: string;
+  parentId: string; childCount: number; depth: number; token: string | null; versionId: string; vente: boolean;
 } & Pick<Muts, 'addLine' | 'insertOuvrage'>) {
   const [menu, setMenu] = useState(false);
   const [picker, setPicker] = useState(false);
@@ -349,7 +349,7 @@ function SectionActions({
               <span style={menuIco('var(--muted)')}>+</span> Ligne
             </button>
             <button style={menuItem()} onClick={() => { setPicker(true); close(); }}>
-              <span style={menuIco('var(--primary)')}>⊟</span> Ressources
+              <span style={menuIco('var(--primary)')}>⊟</span> {vente ? 'Ouvrage' : 'Ressources'}
             </button>
             <button style={menuItem()} onClick={() => { addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount }); close(); }}>
               <span style={menuIco('#d97706')}>▤</span> Texte libre
@@ -438,7 +438,7 @@ function LineInfoModal({ line, components, deboursById, decimals, onClose }: {
           {line.code ? row('Code', <span style={{ fontFamily: 'monospace' }}>{line.code}</span>) : null}
           {row('Désignation', line.designation)}
           {line.unit ? row('Unité', line.unit) : null}
-          {row('Quantité', line.quantity ?? '—')}
+          {row('Quantité', line.quantity != null ? cleanNum(line.quantity) : '—')}
           {!isOuvrage ? row('PU déboursé', fmtEuro(line.pu, decimals)) : null}
           {!isOuvrage && line.perte ? row('Perte', `${line.perte} %`) : null}
           {row('Déboursé total', fmtEuro(debours, decimals))}
@@ -457,7 +457,7 @@ function LineInfoModal({ line, components, deboursById, decimals, onClose }: {
                 {components.map((c) => (
                   <tr key={c.id}>
                     <td>{c.designation}</td>
-                    <td style={{ textAlign: 'right' }}>{c.quantity ?? '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{c.quantity != null ? cleanNum(c.quantity) : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{c.perte ? `${c.perte} %` : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{fmtEuro(c.pu, decimals)}</td>
                   </tr>
