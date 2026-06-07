@@ -18,6 +18,7 @@ import {
   UnknownVariableError,
 } from './metre-eval';
 import { deriveAffaireStatus } from './affaire-derived-status';
+import { computeLineNumbers, NumberingLine } from './devis-numbering';
 import { DevisStatus } from './devis-workflow';
 import { VenteService } from './vente.service';
 import { flattenOuvrageToResources, RawOuvrage } from './ouvrage-flatten';
@@ -39,6 +40,7 @@ export interface DevisLinePatch {
   pu?: string | number | null;
   perte?: string | number | null;
   nature?: string | null;
+  numCustom?: string | null;
 }
 
 export interface AffairePatch {
@@ -622,6 +624,7 @@ export class DevisService {
            pu = COALESCE($5, pu),
            perte = COALESCE($6, perte),
            nature = COALESCE($7, nature),
+           num_custom = CASE WHEN $8 = '__KEEP__' THEN num_custom ELSE NULLIF($8, '') END,
            updated_at = now()
          WHERE id = $1`,
         [
@@ -632,6 +635,8 @@ export class DevisService {
           patch.pu != null ? String(patch.pu) : null,
           patch.perte != null ? String(patch.perte) : null,
           patch.nature ?? null,
+          // sentinelle : undefined → inchangé ; valeur ou '' → écrit (NULLIF vide → NULL)
+          patch.numCustom === undefined ? '__KEEP__' : (patch.numCustom ?? ''),
         ],
       );
       return (await em.query(`SELECT * FROM devis_line WHERE id = $1`, [lineId]))[0];
@@ -726,15 +731,18 @@ export class DevisService {
     });
   }
 
-  listLines(versionId: string) {
+  async listLines(versionId: string) {
     const tenantId = this.context.requireTenantId();
-    return runInTenant(this.dataSource, tenantId, (em) =>
-      em.query(
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
         `SELECT * FROM devis_line WHERE devis_version_id = $1
           ORDER BY sort_order ASC, created_at ASC`,
         [versionId],
-      ),
-    );
+      );
+      // Numérotation hiérarchique (source de vérité unique : débours, client, PDF)
+      const numbers = computeLineNumbers(rows as NumberingLine[]);
+      return rows.map((r: Record<string, unknown>) => ({ ...r, numero: numbers.get(r.id as string) ?? null }));
+    });
   }
 
   /** Upserts a métré variable and recomputes formula-based quantities of the version. */

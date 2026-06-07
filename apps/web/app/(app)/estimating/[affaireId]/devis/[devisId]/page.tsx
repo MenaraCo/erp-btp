@@ -30,6 +30,8 @@ interface DevisLine {
   section_type: 'option' | 'variante' | null;
   source_ouvrage_id: string | null;
   sort_order: number;
+  numero?: string | null;
+  num_custom?: string | null;
 }
 interface SaleItem {
   id: string;
@@ -603,6 +605,7 @@ export default function DevisEditorPage() {
                       return (
                         <tr key={line.id} style={{ background: 'var(--surface)' }}>
                           <td colSpan={5} style={{ paddingLeft: 8 + depth * 16, fontWeight: 600 }}>
+                            <span style={{ fontFamily: 'monospace', color: 'var(--accent)', marginRight: 8, fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
                             {line.code ? <strong>{line.code} </strong> : null}{line.designation}
                           </td>
                         </tr>
@@ -617,7 +620,10 @@ export default function DevisEditorPage() {
                     const puVente = item && qty ? Number(item.pv) / qty : null;
                     return (
                       <tr key={line.id} style={item?.forced ? { background: '#fff7ed' } : undefined}>
-                        <td style={{ paddingLeft: 8 + depth * 16 }}>{line.designation}</td>
+                        <td style={{ paddingLeft: 8 + depth * 16 }}>
+                          <span style={{ fontFamily: 'monospace', color: 'var(--accent)', marginRight: 8, fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
+                          {line.designation}
+                        </td>
                         <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
                         <td style={{ textAlign: 'right', color: item?.forced ? 'var(--accent)' : undefined, fontWeight: item?.forced ? 600 : undefined }}>
                           {puVente != null ? e(puVente) : '—'}

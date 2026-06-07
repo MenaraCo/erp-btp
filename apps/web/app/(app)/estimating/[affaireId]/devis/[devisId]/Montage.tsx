@@ -18,6 +18,19 @@ export interface MontageLine {
   section_type: 'option' | 'variante' | null;
   source_ouvrage_id: string | null;
   sort_order: number;
+  numero?: string | null;       // numéro hiérarchique calculé serveur (1, 1.1, 1.2.1…)
+  num_custom?: string | null;   // override manuel du numéro (titre/sous-titre)
+}
+
+/* Style d'en-tête de section par profondeur (titre foncé → sous-niveaux dégressifs). */
+function levelStyle(depth: number): { bg: string; color: string; num: string } {
+  const cfgs = [
+    { bg: 'var(--primary)', color: '#fff', num: 'rgba(255,255,255,0.7)' },        // titre
+    { bg: '#e2e8f0', color: 'var(--primary)', num: 'var(--accent)' },             // sous-titre n1
+    { bg: '#eef2f7', color: 'var(--primary)', num: 'var(--accent)' },             // n2
+    { bg: '#f1f5f9', color: '#334155', num: 'var(--accent)' },                    // n3+
+  ];
+  return cfgs[Math.min(depth, cfgs.length - 1)];
 }
 interface Library { id: string; code: string; name: string }
 interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
@@ -123,23 +136,33 @@ function Node({
   const pad = depth * 16;
 
   if (line.type === 'titre' || line.type === 'sous_titre') {
+    const ls = levelStyle(depth);
     return (
       <div style={{
         marginLeft: pad, marginBottom: 6, borderLeft: sect ? `3px solid ${SECTION_BORDER[sect]}` : '3px solid transparent',
         background: sect ? SECTION_BG[sect] : undefined, borderRadius: 6,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: ls.bg, color: ls.color, borderRadius: 5 }}>
+          {/* Numéro hiérarchique (calculé serveur) */}
+          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: ls.num, minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>
+            {line.numero ?? ''}
+          </span>
           <input className="title-input" defaultValue={line.designation} disabled={readOnly}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })}
-            style={{ fontWeight: 600, flex: 1, border: '1px solid transparent', background: 'transparent' }} />
-          <span style={{ fontWeight: 600, color: '#1e3a8a', fontVariantNumeric: 'tabular-nums' }}>{euro(subtree(line))}</span>
+            style={{ fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', flex: 1, border: '1px solid transparent', background: 'transparent', color: ls.color }} />
+          {!readOnly && (
+            <input title="N° personnalisé (remplace le numéro auto)" placeholder="N°" defaultValue={line.num_custom ?? ''}
+              onBlur={(e) => (e.target.value || '') !== (line.num_custom ?? '') && updateLine.mutate({ id: line.id, patch: { numCustom: e.target.value } })}
+              style={{ width: 56, fontSize: 11, fontFamily: 'monospace', textAlign: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, color: ls.color, padding: '2px 4px' }} />
+          )}
+          <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: ls.color }}>{euro(subtree(line))}</span>
           {!readOnly && (
             <>
               <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'variante' ? null : 'variante' })}
                 style={togBtn(sect === 'variante', '#f97316')}>V</button>
               <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'option' ? null : 'option' })}
                 style={togBtn(sect === 'option', '#a855f7')}>O</button>
-              <button title="Supprimer" className="btn-ghost" onClick={() => deleteLine.mutate(line.id)}>✕</button>
+              <button title="Supprimer" className="btn-ghost" onClick={() => deleteLine.mutate(line.id)} style={{ color: ls.color }}>✕</button>
             </>
           )}
         </div>
@@ -161,6 +184,7 @@ function Node({
     return (
       <div style={{ marginLeft: pad }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
+          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
           <span style={{ flex: 1 }}>{line.code ? <strong>{line.code} </strong> : null}{line.designation}</span>
           <label style={{ fontSize: 12, color: '#6b7280' }}>Qté</label>
           <input defaultValue={line.quantity ?? ''} disabled={readOnly} style={{ width: 64, textAlign: 'right' }}
