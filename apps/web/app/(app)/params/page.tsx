@@ -196,12 +196,18 @@ function TabLots({ token }: { token: string }) {
     onSuccess: () => { inv(); setEditing(null); },
   });
   const del = useMutation({
-    mutationFn: (id: string) => api(`/params/lots/${id}`, { method: 'DELETE' }),
-    onSuccess: inv,
+    mutationFn: (id: string) => api<{ orphanedFamilles?: number }>(`/params/lots/${id}`, { method: 'DELETE' }),
+    onSuccess: (res) => {
+      inv();
+      qc.invalidateQueries({ queryKey: ['params-familles'] });
+      if (res?.orphanedFamilles && res.orphanedFamilles > 0) {
+        alert(`Lot supprimé. ${res.orphanedFamilles} famille(s) ne sont plus rattachées à un lot — rattachez-les dans l'onglet Familles.`);
+      }
+    },
   });
   const bulkDelete = useMutation({
     mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/lots/${id}`, { method: 'DELETE' }))),
-    onSuccess: () => { inv(); clear(); },
+    onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ['params-familles'] }); clear(); },
   });
 
   return (
@@ -269,17 +275,25 @@ function TabFamilles({ token }: { token: string }) {
     onSuccess: () => { inv(); setNf({ lotId: '', code: '', label: '', nature: 'material' }); },
   });
   const update = useMutation({
-    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/familles/${e.id}`, { method: 'PATCH', body: { lotId: e.lotId, code: e.code, label: e.label, nature: e.nature } }),
+    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/familles/${e.id}`, { method: 'PATCH', body: { lotId: e.lotId || null, code: e.code, label: e.label, nature: e.nature } }),
     onSuccess: () => { inv(); setEditing(null); },
   });
   const del = useMutation({
-    mutationFn: (id: string) => api(`/params/familles/${id}`, { method: 'DELETE' }),
-    onSuccess: inv,
+    mutationFn: (id: string) => api<{ orphanedCodes?: number }>(`/params/familles/${id}`, { method: 'DELETE' }),
+    onSuccess: (res) => {
+      inv();
+      qc.invalidateQueries({ queryKey: ['params-codes'] });
+      if (res?.orphanedCodes && res.orphanedCodes > 0) {
+        alert(`Famille supprimée. ${res.orphanedCodes} code(s) analytique(s) ne sont plus rattachés — rattachez-les dans l'onglet Codes analytiques.`);
+      }
+    },
   });
   const bulkDelete = useMutation({
     mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/familles/${id}`, { method: 'DELETE' }))),
-    onSuccess: () => { inv(); clear(); },
+    onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ['params-codes'] }); clear(); },
   });
+
+  const orphanFam = familles.filter((f) => !f.lot_id).length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -302,18 +316,19 @@ function TabFamilles({ token }: { token: string }) {
         </Row>
       </Card>
       <Card title={`Familles de ressources${familles.length > 0 ? ` (${familles.length})` : ''}`}>
+        {orphanFam > 0 && <OrphanBanner n={orphanFam} kind="famille" />}
         {selectedIds.size > 0 && (
           <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending}
             onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} famille(s) ?`)) bulkDelete.mutate(); }} />
         )}
         <RefTable
-          rows={familles.map((f) => [f.code, f.label, f.lot_code ? `${f.lot_code} — ${f.lot_label}` : '—', natLabel(f.nature)])}
+          rows={familles.map((f) => [f.code, f.label, f.lot_code ? `${f.lot_code} — ${f.lot_label}` : '⚠ non rattaché', natLabel(f.nature)])}
           headers={['Code', 'Désignation', 'Lot parent', 'Nature']}
           ids={familles.map((f) => f.id)}
           selectedIds={selectedIds}
           onToggle={toggle}
           onToggleAll={() => toggleAll(familles.map((f) => f.id))}
-          onEdit={(i) => setEditing({ id: familles[i].id, lotId: familles[i].lot_id, code: familles[i].code, label: familles[i].label, nature: familles[i].nature })}
+          onEdit={(i) => setEditing({ id: familles[i].id, lotId: familles[i].lot_id || '', code: familles[i].code, label: familles[i].label, nature: familles[i].nature })}
           onDelete={(i) => { if (confirm('Supprimer cette famille ?')) del.mutate(familles[i].id); }}
         />
       </Card>
@@ -321,6 +336,7 @@ function TabFamilles({ token }: { token: string }) {
         <Modal title="Modifier la famille" onClose={() => setEditing(null)}>
           <Field label="Lot parent">
             <select className="input" value={editing.lotId} onChange={(e) => setEditing({ ...editing, lotId: e.target.value })}>
+              <option value="">— non rattaché —</option>
               {lots.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
             </select>
           </Field>
@@ -373,7 +389,7 @@ function TabCodes({ token }: { token: string }) {
     onSuccess: () => { inv(); setNf({ familleId: '', code: '', label: '', nature: 'material' }); },
   });
   const update = useMutation({
-    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/codes/${e.id}`, { method: 'PATCH', body: { familleId: e.familleId, code: e.code, label: e.label, nature: e.nature } }),
+    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/codes/${e.id}`, { method: 'PATCH', body: { familleId: e.familleId || null, code: e.code, label: e.label, nature: e.nature } }),
     onSuccess: () => { inv(); setEditing(null); },
   });
   const del = useMutation({
@@ -384,6 +400,8 @@ function TabCodes({ token }: { token: string }) {
     mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/codes/${id}`, { method: 'DELETE' }))),
     onSuccess: () => { inv(); clear(); },
   });
+
+  const orphanCodes = codes.filter((c) => !c.famille_id).length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -407,18 +425,19 @@ function TabCodes({ token }: { token: string }) {
         </Row>
       </Card>
       <Card title={`Codes analytiques${codes.length > 0 ? ` (${codes.length})` : ''}`}>
+        {orphanCodes > 0 && <OrphanBanner n={orphanCodes} kind="code" />}
         {selectedIds.size > 0 && (
           <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending}
             onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} code(s) analytique(s) ?`)) bulkDelete.mutate(); }} />
         )}
         <RefTable
-          rows={codes.map((c) => [c.code, c.label, c.famille_code ? `${c.famille_code} — ${c.famille_label}` : '—', natLabel(c.nature)])}
+          rows={codes.map((c) => [c.code, c.label, c.famille_code ? `${c.famille_code} — ${c.famille_label}` : '⚠ non rattaché', natLabel(c.nature)])}
           headers={['Code', 'Désignation', 'Famille', 'Nature']}
           ids={codes.map((c) => c.id)}
           selectedIds={selectedIds}
           onToggle={toggle}
           onToggleAll={() => toggleAll(codes.map((c) => c.id))}
-          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id, code: codes[i].code, label: codes[i].label, nature: codes[i].nature })}
+          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id || '', code: codes[i].code, label: codes[i].label, nature: codes[i].nature })}
           onDelete={(i) => { if (confirm('Supprimer ce code analytique ?')) del.mutate(codes[i].id); }}
         />
       </Card>
@@ -427,6 +446,7 @@ function TabCodes({ token }: { token: string }) {
           <Field label="Famille">
             <select className="input" value={editing.familleId}
               onChange={(e) => { const id = e.target.value; const fa = familles.find((x) => x.id === id); setEditing({ ...editing, familleId: id, nature: fa ? fa.nature : editing.nature }); }}>
+              <option value="">— non rattaché —</option>
               {familles.map((fa) => <option key={fa.id} value={fa.id}>{fa.code} — {fa.label}</option>)}
             </select>
           </Field>
@@ -797,6 +817,24 @@ function TabPreferences({ token }: { token: string }) {
 }
 
 /* ─────────── Shared components ─────────── */
+
+/* ─────────── Bandeau d'alerte « éléments non rattachés » ─────────── */
+function OrphanBanner({ n, kind }: { n: number; kind: 'famille' | 'code' }) {
+  const label = kind === 'famille'
+    ? `${n} famille${n > 1 ? 's ne sont' : ' n’est'} rattachée${n > 1 ? 's' : ''} à aucun lot`
+    : `${n} code${n > 1 ? 's analytiques ne sont' : ' analytique n’est'} rattaché${n > 1 ? 's' : ''} à aucune famille`;
+  const action = kind === 'famille' ? 'Modifiez-les pour choisir un lot parent.' : 'Modifiez-les pour choisir une famille.';
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 12,
+      background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 6,
+      color: '#9a3412', fontSize: 12, fontWeight: 500,
+    }}>
+      <span style={{ fontSize: 15 }}>⚠</span>
+      <span><strong>{label}.</strong> {action}</span>
+    </div>
+  );
+}
 
 /* ─────────── Barre d'actions groupées ─────────── */
 function BulkBar({ count, onDelete, isPending, actions }: {

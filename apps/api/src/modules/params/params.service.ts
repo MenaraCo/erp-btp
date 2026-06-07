@@ -148,7 +148,13 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertExists(em, 'analytical_lot', id);
+      // Familles rattachées : elles deviendront orphelines (lot_id → NULL via ON DELETE SET NULL)
+      const orphaned = await em.query(
+        `SELECT count(*)::int AS n FROM analytical_famille WHERE lot_id = $1`,
+        [id],
+      );
       await em.query(`DELETE FROM analytical_lot WHERE id = $1`, [id]);
+      return { deleted: true, orphanedFamilles: orphaned[0]?.n ?? 0 };
     });
   }
 
@@ -161,8 +167,8 @@ export class ParamsService {
         `SELECT f.id, f.code, f.label, f.lot_id, f.nature,
                 l.code AS lot_code, l.label AS lot_label
          FROM analytical_famille f
-         JOIN analytical_lot l ON l.id = f.lot_id
-         ORDER BY f.nature, l.code, f.code`,
+         LEFT JOIN analytical_lot l ON l.id = f.lot_id
+         ORDER BY (f.lot_id IS NULL) DESC, f.nature, l.code, f.code`,
       ),
     );
   }
@@ -201,7 +207,12 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertExists(em, 'analytical_famille', id);
+      const orphaned = await em.query(
+        `SELECT count(*)::int AS n FROM analytical_code WHERE famille_id = $1`,
+        [id],
+      );
       await em.query(`DELETE FROM analytical_famille WHERE id = $1`, [id]);
+      return { deleted: true, orphanedCodes: orphaned[0]?.n ?? 0 };
     });
   }
 
@@ -215,9 +226,9 @@ export class ParamsService {
                 f.code AS famille_code, f.label AS famille_label,
                 l.code AS lot_code
          FROM analytical_code c
-         JOIN analytical_famille f ON f.id = c.famille_id
-         JOIN analytical_lot l ON l.id = f.lot_id
-         ORDER BY c.nature, f.code, c.code`,
+         LEFT JOIN analytical_famille f ON f.id = c.famille_id
+         LEFT JOIN analytical_lot l ON l.id = f.lot_id
+         ORDER BY (c.famille_id IS NULL) DESC, c.nature, f.code, c.code`,
       ),
     );
   }
