@@ -293,6 +293,19 @@ function TabFamilles({ token }: { token: string }) {
     onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ['params-codes'] }); clear(); },
   });
 
+  // Réaffectation en masse : lot et/ou nature
+  const [bulkLot, setBulkLot] = useState('');
+  const [bulkNature, setBulkNature] = useState('');
+  const bulkAssign = useMutation({
+    mutationFn: () => {
+      const body: Record<string, string> = {};
+      if (bulkLot) body.lotId = bulkLot;
+      if (bulkNature) body.nature = bulkNature;
+      return Promise.all([...selectedIds].map((id) => api(`/params/familles/${id}`, { method: 'PATCH', body })));
+    },
+    onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ['params-codes'] }); clear(); setBulkLot(''); setBulkNature(''); },
+  });
+
   const orphanFam = familles.filter((f) => !f.lot_id).length;
 
   return (
@@ -318,8 +331,23 @@ function TabFamilles({ token }: { token: string }) {
       <Card title={`Familles de ressources${familles.length > 0 ? ` (${familles.length})` : ''}`}>
         {orphanFam > 0 && <OrphanBanner n={orphanFam} kind="famille" />}
         {selectedIds.size > 0 && (
-          <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending}
-            onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} famille(s) ?`)) bulkDelete.mutate(); }} />
+          <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending || bulkAssign.isPending}
+            onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} famille(s) ?`)) bulkDelete.mutate(); }}>
+            <BulkSelect value={bulkLot} onChange={setBulkLot}>
+              <option value="">Lot : inchangé</option>
+              {lots.map((l) => <option key={l.id} value={l.id}>→ {l.code} — {l.label}</option>)}
+            </BulkSelect>
+            <BulkSelect value={bulkNature} onChange={setBulkNature}>
+              <option value="">Nature : inchangée</option>
+              {NAT_OPTS.map((n) => <option key={n.v} value={n.v}>→ {n.l}</option>)}
+            </BulkSelect>
+            <button
+              style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+              disabled={(!bulkLot && !bulkNature) || bulkAssign.isPending}
+              onClick={() => bulkAssign.mutate()}>
+              Appliquer
+            </button>
+          </BulkBar>
         )}
         <RefTable
           rows={familles.map((f) => [f.code, f.label, f.lot_code ? `${f.lot_code} — ${f.lot_label}` : '⚠ non rattaché', natLabel(f.nature)])}
@@ -401,6 +429,17 @@ function TabCodes({ token }: { token: string }) {
     onSuccess: () => { inv(); clear(); },
   });
 
+  // Réaffectation en masse : famille (la nature suit la famille)
+  const [bulkFamille, setBulkFamille] = useState('');
+  const bulkAssign = useMutation({
+    mutationFn: () => {
+      const fa = familles.find((x) => x.id === bulkFamille);
+      const body = { familleId: bulkFamille, nature: fa ? fa.nature : undefined };
+      return Promise.all([...selectedIds].map((id) => api(`/params/codes/${id}`, { method: 'PATCH', body })));
+    },
+    onSuccess: () => { inv(); clear(); setBulkFamille(''); },
+  });
+
   const orphanCodes = codes.filter((c) => !c.famille_id).length;
 
   return (
@@ -427,8 +466,19 @@ function TabCodes({ token }: { token: string }) {
       <Card title={`Codes analytiques${codes.length > 0 ? ` (${codes.length})` : ''}`}>
         {orphanCodes > 0 && <OrphanBanner n={orphanCodes} kind="code" />}
         {selectedIds.size > 0 && (
-          <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending}
-            onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} code(s) analytique(s) ?`)) bulkDelete.mutate(); }} />
+          <BulkBar count={selectedIds.size} isPending={bulkDelete.isPending || bulkAssign.isPending}
+            onDelete={() => { if (confirm(`Supprimer ${selectedIds.size} code(s) analytique(s) ?`)) bulkDelete.mutate(); }}>
+            <BulkSelect value={bulkFamille} onChange={setBulkFamille}>
+              <option value="">Famille : inchangée</option>
+              {familles.map((fa) => <option key={fa.id} value={fa.id}>→ {fa.code} — {fa.label}</option>)}
+            </BulkSelect>
+            <button
+              style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+              disabled={!bulkFamille || bulkAssign.isPending}
+              onClick={() => bulkAssign.mutate()}>
+              Appliquer (nature héritée)
+            </button>
+          </BulkBar>
         )}
         <RefTable
           rows={codes.map((c) => [c.code, c.label, c.famille_code ? `${c.famille_code} — ${c.famille_label}` : '⚠ non rattaché', natLabel(c.nature)])}
@@ -837,32 +887,37 @@ function OrphanBanner({ n, kind }: { n: number; kind: 'famille' | 'code' }) {
 }
 
 /* ─────────── Barre d'actions groupées ─────────── */
-function BulkBar({ count, onDelete, isPending, actions }: {
+function BulkBar({ count, onDelete, isPending, children }: {
   count: number;
   onDelete: () => void;
   isPending: boolean;
-  actions?: { label: string; onClick: () => void }[];
+  /** Contrôles de réaffectation en masse (sélecteurs + bouton Appliquer). */
+  children?: React.ReactNode;
 }) {
-  const btnStyle: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.18)', border: 'none', color: '#fff',
-    padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-  };
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
-      background: 'var(--primary)', color: '#fff', borderRadius: 6, fontSize: 12,
+      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', marginBottom: 12,
+      background: 'var(--primary)', color: '#fff', borderRadius: 6, fontSize: 12, flexWrap: 'wrap',
     }}>
       <span style={{ fontWeight: 700 }}>{count} sélectionné{count > 1 ? 's' : ''}</span>
       <div style={{ flex: 1 }} />
-      {actions?.map((a) => (
-        <button key={a.label} style={btnStyle} onClick={a.onClick} disabled={isPending}>{a.label}</button>
-      ))}
+      {children}
       <button
         style={{ background: '#e53e3e', border: 'none', color: '#fff', padding: '4px 12px', borderRadius: 4, cursor: isPending ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600, opacity: isPending ? 0.7 : 1 }}
         onClick={onDelete} disabled={isPending}>
         {isPending ? '…' : `Supprimer (${count})`}
       </button>
     </div>
+  );
+}
+
+/** Petit select pour la barre d'actions groupées (style sombre). */
+function BulkSelect({ value, onChange, children }: { value: string; onChange: (v: string) => void; children: React.ReactNode }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
+      {children}
+    </select>
   );
 }
 
