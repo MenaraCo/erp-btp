@@ -8,7 +8,11 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
 import { usePreferences, fmtEuro } from '@/lib/preferences';
+import { downloadXlsx } from '@/lib/xlsx';
 import { Montage, MontageLine } from './Montage';
+
+/** Arrondi numérique à n décimales (cellule numérique Excel). */
+const round = (v: number, n: number) => Number((Number(v) || 0).toFixed(n));
 
 interface Version { id: string; version_no: number; label: string }
 interface DevisDetail {
@@ -332,15 +336,8 @@ export default function DevisEditorPage() {
       agg.set(key, cur);
     }
     const rows: (string | number)[][] = [['Code', 'Désignation', 'Quantité', 'PU déboursé', 'Montant HT']];
-    for (const r of agg.values()) rows.push([r.code, r.designation, r.qty.toFixed(3), r.pu.toFixed(4), r.montant.toFixed(2)]);
-    const csv = rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `debours_${d?.numero || devisId}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    for (const r of agg.values()) rows.push([r.code, r.designation, round(r.qty, 3), round(r.pu, 4), round(r.montant, 2)]);
+    downloadXlsx(`debours_${d?.numero || devisId}`, rows, 'Déboursé');
   }
 
   // Calcul Appro (modal)
@@ -351,16 +348,10 @@ export default function DevisEditorPage() {
     queryFn: () => apiFetch<ApproRow[]>(`/versions/${versionId}/appro`, { token }),
   });
   function exportAppro() {
+    const num = (v: unknown) => (v == null || v === '' ? '' : Number(v));
     const rows: (string | number)[][] = [['Code', 'Désignation', 'Qté emploi', 'Unité achat', 'Coeff', 'Qté appro', 'Prix public', 'Montant HT', 'Fournisseur']];
-    for (const r of appro.data ?? []) rows.push([r.code ?? '', r.designation, r.qteEmploi, r.uniteAchat ?? '', r.coeffConversion ?? '', r.qteAppro, r.prixPublic ?? '', r.montant, r.fournisseur ?? '']);
-    const csv = rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `appro_${d?.numero || devisId}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    for (const r of appro.data ?? []) rows.push([r.code ?? '', r.designation, num(r.qteEmploi), r.uniteAchat ?? '', num(r.coeffConversion), num(r.qteAppro), num(r.prixPublic), num(r.montant), r.fournisseur ?? '']);
+    downloadXlsx(`appro_${d?.numero || devisId}`, rows, 'Appro');
   }
 
   // Préremplit le formulaire avec la config stockée (une fois par version chargée).
@@ -489,7 +480,7 @@ export default function DevisEditorPage() {
               </form>
             </div>
             <p className="muted" style={{ marginTop: 4 }}>
-              Construisez le devis sur place : chaque titre propose « + Ligne / Bibliothèque / Texte libre / + Sous-niveau X ». Les ouvrages copient leur sous-détail (éditable). « V » = variante, « O » = option (hors total).
+              Construisez le devis sur place : le bouton « + » ouvre un menu (Ligne / Ressources / Texte libre / Sous-niveau X). Les ouvrages copient leur sous-détail, modifiable ici sans impacter la bibliothèque société. « V » = variante, « O » = option (hors total).
             </p>
             <div style={{ marginTop: 8 }}>
               <Montage
@@ -497,6 +488,7 @@ export default function DevisEditorPage() {
                 token={token}
                 lines={(lines.data ?? []) as MontageLine[]}
                 deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
+                decimals={prefs.nb_decimales}
                 onChanged={refresh}
                 readOnly={false}
               />
@@ -737,7 +729,7 @@ export default function DevisEditorPage() {
                     <span className="val" style={{ color: 'var(--accent)', fontSize: 14 }}>{e(sale.data?.totalDebourse)}</span>
                   </div>
                   <button type="button" className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: 10 }} onClick={exportDebours}>
-                    Export Débours
+                    Export Débours (Excel)
                   </button>
                   <button type="button" className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} onClick={() => setApproOpen(true)}>
                     Calcul Appro
@@ -783,7 +775,7 @@ export default function DevisEditorPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ margin: 0 }}>Calcul approvisionnement</h2>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn-secondary" onClick={exportAppro} disabled={!appro.data?.length}>Export CSV</button>
+                <button className="btn-secondary" onClick={exportAppro} disabled={!appro.data?.length}>Export Excel</button>
                 <button className="btn-ghost" onClick={() => setApproOpen(false)}>✕</button>
               </div>
             </div>

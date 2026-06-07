@@ -170,8 +170,9 @@ function Node({
   const pad = depth * 16;
   // Contexte vente propagé tel quel aux enfants.
   const vctx: VenteCtx = { vente, valueOf, saleById, setLinePv, decimals };
-  // Montant affiché : déboursé ou prix de vente selon le mode.
-  const fmtV = (n: number) => (vente ? fmtEuro(n, decimals) : euro(n));
+  // Montant affiché : déboursé ou prix de vente selon le mode — toujours selon la règle
+  // des décimales (préférences société).
+  const fmtV = (n: number) => fmtEuro(n, decimals);
 
   if (line.type === 'titre' || line.type === 'sous_titre') {
     const ls = levelStyle(depth);
@@ -223,11 +224,19 @@ function Node({
     const info = saleById?.get(line.id);
     const qtyN = Number(line.quantity) || 0;
     const puVente = vente && info && qtyN ? Number(info.pv) / qtyN : null;
+    const puDebours = qtyN ? subtree(line) / qtyN : null; // PU déboursé unitaire (dérivé)
     return (
       <div style={{ marginLeft: pad }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
           <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
-          <span style={{ flex: 1 }}>{line.code ? <strong>{line.code} </strong> : null}{line.designation}</span>
+          {line.code ? <strong style={{ whiteSpace: 'nowrap' }}>{line.code}</strong> : null}
+          <input defaultValue={line.designation} disabled={readOnly} title="Désignation (devis uniquement)" style={{ flex: 1, fontWeight: 500 }}
+            onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })} />
+          {!vente && (
+            <span style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }} title="PU déboursé unitaire">
+              PU&nbsp;<span style={{ fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 600 }}>{puDebours != null ? fmtV(puDebours) : '—'}</span>
+            </span>
+          )}
           <label style={{ fontSize: 12, color: '#6b7280' }}>Qté</label>
           <input defaultValue={line.quantity ?? ''} disabled={readOnly} style={{ width: 64, textAlign: 'right' }}
             onBlur={(e) => e.target.value !== (line.quantity ?? '') && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
@@ -242,7 +251,8 @@ function Node({
         {/* Sous-détail copié & éditable — masqué en mode vente (détail de débours). */}
         {!vente && comps.map((c) => (
           <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 2px 24px', fontSize: 13, color: '#475569' }}>
-            <span style={{ flex: 1 }}>{c.designation}</span>
+            <input defaultValue={c.designation} disabled={readOnly} title="Désignation (devis uniquement)" style={{ flex: 1 }}
+              onBlur={(e) => e.target.value !== c.designation && updateLine.mutate({ id: c.id, patch: { designation: e.target.value } })} />
             <input defaultValue={c.quantity ?? ''} disabled={readOnly} title="Ratio/quantité" style={{ width: 56, textAlign: 'right' }}
               onBlur={(e) => e.target.value !== (c.quantity ?? '') && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
             <input defaultValue={c.perte ?? '0'} disabled={readOnly} title="Perte %" style={{ width: 44, textAlign: 'right' }}
@@ -295,22 +305,59 @@ function SectionActions({
 }: {
   parentId: string; childCount: number; depth: number; token: string | null; versionId: string;
 } & Pick<Muts, 'addLine' | 'insertOuvrage'>) {
+  const [menu, setMenu] = useState(false);
   const [picker, setPicker] = useState(false);
   // Niveau du sous-titre qui sera ajouté : un titre (depth 0) = niveau 1 → son enfant = niveau 2.
   const childLevel = depth + 2;
+  const close = () => setMenu(false);
   return (
-    <div style={{ display: 'flex', gap: 6, padding: '6px 8px', marginLeft: (depth + 1) * 16, flexWrap: 'wrap' }}>
-      <button style={pillBtn()}
-        onClick={() => addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: 'Ligne', quantity: '1', pu: '0', sortOrder: childCount })}>+ Ligne</button>
-      <button style={pillBtn()} onClick={() => setPicker((v) => !v)}>⊟ Bibliothèque</button>
-      <button style={pillBtn('#d97706', '#fffbeb', '#fcd34d')}
-        onClick={() => addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount })}>▤ Texte libre</button>
-      <button style={pillBtn('var(--primary)', '#eef2f7', '#cbd5e1')}
-        onClick={() => addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount })}>+ Sous-niveau {childLevel}</button>
+    <div style={{ padding: '6px 8px', marginLeft: (depth + 1) * 16, position: 'relative' }}>
+      <button title="Ajouter…" onClick={() => setMenu((v) => !v)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
+          fontSize: 16, fontWeight: 700, lineHeight: 1, color: 'var(--accent)', background: '#fff',
+          border: '1px dashed var(--accent)', borderRadius: 6, cursor: 'pointer',
+        }}>+</button>
+      {menu && (
+        <>
+          {/* Couche de fermeture au clic extérieur */}
+          <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 20 }} />
+          <div style={{
+            position: 'absolute', top: 34, left: 8, zIndex: 21, minWidth: 180,
+            background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(15,23,42,0.14)', padding: 4,
+          }}>
+            <button style={menuItem()} onClick={() => { addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: 'Ligne', quantity: '1', pu: '0', sortOrder: childCount }); close(); }}>
+              <span style={menuIco('var(--muted)')}>+</span> Ligne
+            </button>
+            <button style={menuItem()} onClick={() => { setPicker(true); close(); }}>
+              <span style={menuIco('var(--primary)')}>⊟</span> Ressources
+            </button>
+            <button style={menuItem()} onClick={() => { addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount }); close(); }}>
+              <span style={menuIco('#d97706')}>▤</span> Texte libre
+            </button>
+            <button style={menuItem()} onClick={() => { addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount }); close(); }}>
+              <span style={menuIco('var(--primary)')}>+</span> Sous-niveau {childLevel}
+            </button>
+          </div>
+        </>
+      )}
       {picker && <OuvragePicker token={token} parentId={parentId}
         onPick={(ouvrageId, quantity) => { insertOuvrage.mutate({ ouvrageId, parentLineId: parentId, quantity }); setPicker(false); }} />}
     </div>
   );
+}
+
+/** Style d'un item du menu contextuel « + ». */
+function menuItem(): React.CSSProperties {
+  return {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+    padding: '7px 10px', fontSize: 12.5, fontWeight: 500, color: 'var(--primary)',
+    background: 'transparent', border: 'none', borderRadius: 6, cursor: 'pointer',
+  };
+}
+function menuIco(color: string): React.CSSProperties {
+  return { display: 'inline-flex', width: 16, justifyContent: 'center', color, fontWeight: 700 };
 }
 
 /**
@@ -358,15 +405,6 @@ export function PvCell({ computed, forced, pending, decimals, onForce, onRelease
       )}
     </span>
   );
-}
-
-/** Bouton « pilule » des actions d'ajout (couleur/fond/bordure paramétrables). */
-function pillBtn(color = 'var(--muted)', bg = '#fff', border = 'var(--border)'): React.CSSProperties {
-  return {
-    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 12px',
-    fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px',
-    color, background: bg, border: `1px solid ${border}`, borderRadius: 16, cursor: 'pointer', whiteSpace: 'nowrap',
-  };
 }
 
 function OuvragePicker({ token, parentId, onPick }: { token: string | null; parentId: string; onPick: (ouvrageId: string, quantity: string) => void }) {
