@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -47,10 +48,10 @@ export class LibrariesController {
   @RequiresPermission('estimating.devis.write')
   createResource(@Param('libraryId') libraryId: string, @Body() body: ResourceInput) {
     if (!body?.code || !body?.label || !body?.unit || !body?.nature) {
-      throw new BadRequestException('code, label, unit and nature are required');
+      throw new BadRequestException('Le code, la désignation, l’unité et le type sont obligatoires.');
     }
     if (!NATURES.includes(body.nature)) {
-      throw new BadRequestException(`nature must be one of ${NATURES.join(', ')}`);
+      throw new BadRequestException('Le type de ressource est invalide.');
     }
     return this.libraries.createResource(libraryId, body);
   }
@@ -85,9 +86,19 @@ export class LibrariesController {
     @Body() body: Partial<ResourceInput>,
   ) {
     if (body?.nature && !NATURES.includes(body.nature)) {
-      throw new BadRequestException(`nature must be one of ${NATURES.join(', ')}`);
+      throw new BadRequestException('Le type de ressource est invalide.');
     }
     return this.libraries.updateResource(libraryId, resourceId, body);
+  }
+
+  @Delete(':libraryId/resources/:resourceId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  deleteResource(
+    @Param('libraryId') libraryId: string,
+    @Param('resourceId') resourceId: string,
+  ) {
+    return this.libraries.deleteResource(libraryId, resourceId);
   }
 
   @Put(':libraryId/resources/:resourceId/code-analytique')

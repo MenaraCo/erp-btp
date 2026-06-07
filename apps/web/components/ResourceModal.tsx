@@ -149,13 +149,22 @@ export function ResourceModal({ libId, resource, onClose }: {
     },
     onError: (e) => {
       const msg = e instanceof ApiError ? e.message : '';
-      // Traduction des erreurs serveur génériques
-      if (!msg || /internal server error/i.test(msg)) {
-        setErr("Impossible d'enregistrer la ressource. Vérifiez les champs (les prix et coefficients doivent être des nombres).");
-      } else {
-        setErr(msg);
-      }
+      // On affiche la vraie erreur métier (le backend renvoie désormais des messages FR :
+      // code dupliqué, champs requis…). Repli générique seulement si aucun message exploitable.
+      setErr(msg && !/internal server error/i.test(msg)
+        ? msg
+        : "Enregistrement impossible. Vérifiez les champs saisis.");
     },
+  });
+
+  const del = useMutation({
+    mutationFn: () => apiFetch(`/libraries/${libId}/resources/${resource!.id}`, { method: 'DELETE', token }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['resources', libId] });
+      qc.invalidateQueries({ queryKey: ['ouvrages', libId] });
+      onClose();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Suppression impossible.'),
   });
 
   // Cascade : codes de la famille choisie ; repli sur TOUS les codes si la famille n'en a aucun
@@ -265,12 +274,25 @@ export function ResourceModal({ libId, resource, onClose }: {
         </Field>
 
         {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-          <button className="btn-secondary btn" onClick={onClose}>Annuler</button>
-          <button className="btn" disabled={!f.code || !f.label || save.isPending}
-            onClick={() => { setErr(null); save.mutate(); }}>
-            {save.isPending ? '…' : isEdit ? 'Modifier' : 'Créer'}
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 20 }}>
+          <div>
+            {isEdit && (
+              <button className="btn-danger btn" disabled={del.isPending}
+                onClick={() => {
+                  setErr(null);
+                  if (confirm(`Supprimer la ressource « ${resource!.code} » ? Cette action est définitive.`)) del.mutate();
+                }}>
+                {del.isPending ? '…' : 'Supprimer'}
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn-secondary btn" onClick={onClose}>Annuler</button>
+            <button className="btn" disabled={!f.code || !f.label || save.isPending}
+              onClick={() => { setErr(null); save.mutate(); }}>
+              {save.isPending ? '…' : isEdit ? 'Modifier' : 'Créer'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
@@ -28,6 +33,18 @@ function numOrNull(v: string | number | null | undefined): string | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(String(v).replace(',', '.'));
   return Number.isFinite(n) ? String(n) : null;
+}
+
+/** Traduit une erreur Postgres en exception métier française (sinon relaie l'erreur). */
+function translateDbError(e: unknown, code?: string): unknown {
+  const err = e as { code?: string; driverError?: { code?: string } };
+  const pgCode = err?.code ?? err?.driverError?.code;
+  if (pgCode === '23505') {
+    return new ConflictException(
+      `Le code « ${code ?? ''} » existe déjà dans cette bibliothèque. Choisissez un code unique.`,
+    );
+  }
+  return e instanceof Error ? e : new BadRequestException('Enregistrement impossible.');
 }
 
 export interface ResourceInput {
@@ -117,26 +134,30 @@ export class LibrariesService {
         await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
       }
       const repo = em.getRepository(ResourceEntity);
-      return repo.save(
-        repo.create({
-          tenantId,
-          libraryId,
-          code: input.code,
-          label: input.label,
-          unit: input.unit,
-          nature: input.nature,
-          unitCost: numOr(input.unitCost, '0'),
-          output: input.output == null ? null : numOrNull(input.output),
-          codeProduit: input.codeProduit ?? input.code,
-          codeAnalytiqueId: input.codeAnalytiqueId ?? null,
-          prixPublic: numOrNull(input.prixPublic),
-          uniteAchat: input.uniteAchat ?? null,
-          coeffConversion: numOr(input.coeffConversion, '1'),
-          supplierId: input.supplierId ?? null,
-          refFournisseur: input.refFournisseur ?? null,
-          conditionnement: input.conditionnement ?? null,
-        }),
-      );
+      try {
+        return await repo.save(
+          repo.create({
+            tenantId,
+            libraryId,
+            code: input.code,
+            label: input.label,
+            unit: input.unit,
+            nature: input.nature,
+            unitCost: numOr(input.unitCost, '0'),
+            output: input.output == null ? null : numOrNull(input.output),
+            codeProduit: input.codeProduit ?? input.code,
+            codeAnalytiqueId: input.codeAnalytiqueId ?? null,
+            prixPublic: numOrNull(input.prixPublic),
+            uniteAchat: input.uniteAchat ?? null,
+            coeffConversion: numOr(input.coeffConversion, '1'),
+            supplierId: input.supplierId ?? null,
+            refFournisseur: input.refFournisseur ?? null,
+            conditionnement: input.conditionnement ?? null,
+          }),
+        );
+      } catch (e) {
+        throw translateDbError(e, input.code);
+      }
     });
   }
 
@@ -158,7 +179,8 @@ export class LibrariesService {
       if (input.codeAnalytiqueId != null) {
         await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
       }
-      await em.query(
+      try {
+        await em.query(
         `UPDATE resource SET
            code               = COALESCE($2, code),
            label              = COALESCE($3, label),
@@ -191,11 +213,41 @@ export class LibrariesService {
           input.refFournisseur ?? null,
           input.conditionnement ?? null,
         ],
-      );
+        );
+      } catch (e) {
+        throw translateDbError(e, input.code);
+      }
       return (await em.query(`SELECT * FROM resource WHERE id = $1`, [resourceId]))[0];
     });
     await this.ouvrages.recomputeTenant();
     return updated;
+  }
+
+  /** Supprime une ressource. Bloque si elle compose un ouvrage (FK), message FR. */
+  async deleteResource(libraryId: string, resourceId: string): Promise<{ deleted: true }> {
+    const tenantId = this.context.requireTenantId();
+    await runInTenant(this.dataSource, tenantId, async (em) => {
+      const existing = await em.query(
+        `SELECT id FROM resource WHERE id = $1 AND library_id = $2`,
+        [resourceId, libraryId],
+      );
+      if (existing.length === 0) {
+        throw new NotFoundException('Ressource introuvable.');
+      }
+      // Bloque la suppression si la ressource est utilisée dans un ouvrage
+      const used = await em.query(
+        `SELECT 1 FROM ouvrage_component WHERE child_resource_id = $1 LIMIT 1`,
+        [resourceId],
+      );
+      if (used.length > 0) {
+        throw new ConflictException(
+          'Cette ressource est utilisée dans un ou plusieurs ouvrages. Retirez-la de ces ouvrages avant de la supprimer.',
+        );
+      }
+      await em.query(`DELETE FROM resource WHERE id = $1`, [resourceId]);
+    });
+    await this.ouvrages.recomputeTenant();
+    return { deleted: true };
   }
 
   /** Classifies a resource onto a code analytique of the analytical plan (cahier §5.8). */
