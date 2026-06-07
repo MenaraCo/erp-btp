@@ -1,16 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { usePreferences, fmtEuro } from '@/lib/preferences';
 import { ResourceModal, FullResource } from './ResourceModal';
+import { SortHeader, SortState, nextSort } from './SortHeader';
 
 interface Library { id: string; code: string; name: string }
-type Resource = FullResource;
+type Resource = FullResource & {
+  familleCode?: string | null; familleLabel?: string | null;
+  codeAnalytiqueCode?: string | null; codeAnalytiqueLabel?: string | null;
+  supplierName?: string | null;
+};
 interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
 interface Page<T> { rows: T[]; total: number }
+
+/* Colonnes du tableau ressources : clé, libellé, tri serveur, rendu, alignement */
+interface ResColumn {
+  key: string; label: string; sort: string;
+  render: (r: Resource, nbDec: number) => React.ReactNode;
+  right?: boolean; cls?: string;
+}
+const RES_COLUMNS: ResColumn[] = [
+  { key: 'code', label: 'Code', sort: 'code', render: (r) => r.code, cls: 'code-cell' },
+  { key: 'label', label: 'Désignation', sort: 'label', render: (r) => r.label },
+  { key: 'famille', label: 'Famille', sort: 'familleCode', render: (r) => r.familleCode ? `${r.familleCode}` : '—' },
+  { key: 'nature', label: 'Type', sort: 'nature', render: (r) => NATURES.find((n) => n.v === r.nature)?.l ?? r.nature },
+  { key: 'unit', label: 'Unité', sort: 'unit', render: (r) => r.unit },
+  { key: 'unitCost', label: 'PU Débours', sort: 'unitCost', render: (r, d) => fmtEuro(r.unitCost, d), right: true },
+  { key: 'codeAna', label: 'Code ana.', sort: 'codeAnalytiqueCode', render: (r) => r.codeAnalytiqueCode ?? '—' },
+  { key: 'supplier', label: 'Distributeur', sort: 'supplierName', render: (r) => r.supplierName ?? '—' },
+  { key: 'uniteAchat', label: 'U. achat', sort: 'uniteAchat', render: (r) => r.uniteAchat ?? '—' },
+];
+const RES_COL_STORAGE = 'erp.bibliotheque.resColOrder';
 
 const NATURES = [
   { v: 'material', l: 'Matériaux' },
@@ -30,19 +54,55 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
   const [natFilter, setNatFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  // Ordre des colonnes (déplaçables), persisté en localStorage
+  const [colOrder, setColOrder] = useState<string[]>(RES_COLUMNS.map((c) => c.key));
+  const [dragKey, setDragKey] = useState<string | null>(null); // visuel uniquement
+  const dragKeyRef = useRef<string | null>(null); // source fiable (synchrone)
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(RES_COL_STORAGE) || 'null');
+      if (Array.isArray(saved)) {
+        const keys = RES_COLUMNS.map((c) => c.key);
+        const valid = saved.filter((k: string) => keys.includes(k));
+        const merged = [...valid, ...keys.filter((k) => !valid.includes(k))];
+        if (merged.length) setColOrder(merged);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const persistOrder = (order: string[]) => {
+    setColOrder(order);
+    try { localStorage.setItem(RES_COL_STORAGE, JSON.stringify(order)); } catch { /* ignore */ }
+  };
+  const onColDragStart = (key: string) => { dragKeyRef.current = key; setDragKey(key); };
+  const onColDrop = (targetKey: string) => {
+    const src = dragKeyRef.current;
+    dragKeyRef.current = null;
+    setDragKey(null);
+    if (!src || src === targetKey) return;
+    const next = [...colOrder];
+    next.splice(next.indexOf(src), 1);
+    next.splice(next.indexOf(targetKey), 0, src);
+    persistOrder(next);
+  };
+  const orderedCols = colOrder.map((k) => RES_COLUMNS.find((c) => c.key === k)!).filter(Boolean);
+  const doSort = (key: string) => { setSort((s) => nextSort(s, key)); setPage(1); };
 
   const libs = useQuery({
     queryKey: ['libraries'],
     enabled: Boolean(token),
     queryFn: () => apiFetch<Page<Library>>('/libraries?pageSize=100', { token }),
   });
-  // Liste paginée (recherche + filtre nature côté serveur → scale à des milliers d'articles)
+  // Liste paginée (recherche + filtre nature + tri côté serveur → scale à des milliers d'articles)
   const resources = useQuery({
-    queryKey: ['resources', libId, page, search, natFilter],
+    queryKey: ['resources', libId, page, search, natFilter, sort.key, sort.dir],
     enabled: Boolean(token && libId),
     queryFn: () => apiFetch<Page<Resource>>(
       `/libraries/${libId}/resources?page=${page}&pageSize=${PAGE_SIZE}`
-      + `&search=${encodeURIComponent(search)}${natFilter ? `&nature=${natFilter}` : ''}`,
+      + `&search=${encodeURIComponent(search)}${natFilter ? `&nature=${natFilter}` : ''}`
+      + `${sort.key ? `&sort=${sort.key}&dir=${sort.dir}` : ''}`,
       { token },
     ),
   });
@@ -127,16 +187,26 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
           </div>
           {resRows.length > 0 ? (
             <>
-              <table className="grid" style={{ marginTop: 10 }}>
-                <thead><tr><th>Code</th><th>Libellé</th><th>Unité</th><th>Nature</th><th style={{ textAlign: 'right' }}>Déboursé U.</th><th>Unité achat</th><th style={{ textAlign: 'right' }}>Coeff</th></tr></thead>
+              <p className="muted" style={{ fontSize: 10.5, margin: '8px 0 0' }}>
+                Cliquez sur un en-tête pour trier · glissez un en-tête (⠿) pour déplacer la colonne.
+              </p>
+              <table className="grid" style={{ marginTop: 6 }}>
+                <thead>
+                  <tr>
+                    {orderedCols.map((col) => (
+                      <SortHeader key={col.key} label={col.label} colKey={col.sort} sort={sort} onSort={doSort} right={col.right}
+                        draggable onDragStart={() => onColDragStart(col.key)} onDragOver={(e) => e.preventDefault()} onDrop={() => onColDrop(col.key)} dragging={dragKey === col.key} />
+                    ))}
+                  </tr>
+                </thead>
                 <tbody>
                   {resRows.map((r) => (
                     <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setResModal(r)} title="Modifier la ressource">
-                      <td className="code-cell">{r.code}</td><td>{r.label}</td><td>{r.unit}</td>
-                      <td className="muted">{NATURES.find((n) => n.v === r.nature)?.l ?? r.nature}</td>
-                      <td style={{ textAlign: 'right' }}>{fmtEuro(r.unitCost, nbDec)}</td>
-                      <td className="muted">{r.uniteAchat ?? '—'}</td>
-                      <td style={{ textAlign: 'right' }} className="muted">{r.coeffConversion ? Number(r.coeffConversion) : '—'}</td>
+                      {orderedCols.map((col) => (
+                        <td key={col.key} className={col.cls} style={{ textAlign: col.right ? 'right' : 'left' }}>
+                          {col.render(r, nbDec)}
+                        </td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>

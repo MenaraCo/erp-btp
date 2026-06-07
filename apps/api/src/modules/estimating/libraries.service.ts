@@ -281,28 +281,67 @@ export class LibrariesService {
     }
   }
 
-  listResources(
+  /**
+   * Liste paginée des ressources avec colonnes jointes (famille, code analytique, distributeur).
+   * Tri serveur sur toutes les colonnes affichées (whitelist), recherche, filtre nature.
+   */
+  async listResources(
     libraryId: string,
-    query: DataGridQuery,
-  ): Promise<PaginatedResult<ResourceEntity>> {
+    query: DataGridQuery & { nature?: string },
+  ): Promise<PaginatedResult<Record<string, unknown>>> {
     const tenantId = this.context.requireTenantId();
-    return runInTenant(this.dataSource, tenantId, (em) => {
-      const qb = em
-        .getRepository(ResourceEntity)
-        .createQueryBuilder('p')
-        .where('p.library_id = :libraryId', { libraryId });
-      // Filtre optionnel par nature (côté serveur, compatible pagination)
-      const nature = (query as DataGridQuery & { nature?: string }).nature;
-      if (nature) {
-        qb.andWhere('p.nature = :nature', { nature });
+    // Whitelist tri : clé front → expression SQL (anti-injection)
+    const SORT: Record<string, string> = {
+      code: 'r.code', label: 'r.label', unit: 'r.unit', nature: 'r.nature',
+      unitCost: 'r.unit_cost', prixPublic: 'r.prix_public', uniteAchat: 'r.unite_achat',
+      coeffConversion: 'r.coeff_conversion', familleCode: 'fam.code',
+      codeAnalytiqueCode: 'ca.code', supplierName: 's.name', createdAt: 'r.created_at',
+    };
+    const sortCol = SORT[query.sort ?? ''] ?? 'r.code';
+    const dir = String(query.dir ?? '').toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(5000, Math.max(1, Number(query.pageSize) || 50));
+    const search = query.search?.trim();
+
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const params: unknown[] = [libraryId];
+      let where = 'r.library_id = $1';
+      if (query.nature) {
+        params.push(query.nature);
+        where += ` AND r.nature = $${params.length}`;
       }
-      return paginate(qb, query, {
-        alias: 'p',
-        sortable: ['code', 'label', 'unitCost', 'createdAt'],
-        searchable: ['code', 'label'],
-        defaultSort: 'code',
-        maxPageSize: 5000,
-      });
+      if (search) {
+        params.push(`%${search}%`);
+        where += ` AND (r.code ILIKE $${params.length} OR r.label ILIKE $${params.length})`;
+      }
+
+      const totalRows = await em.query(
+        `SELECT count(*)::int AS n FROM resource r WHERE ${where}`,
+        params,
+      );
+      const total = totalRows[0]?.n ?? 0;
+
+      const offset = (page - 1) * pageSize;
+      const rows = await em.query(
+        `SELECT r.id, r.code, r.label, r.unit, r.nature,
+                r.unit_cost AS "unitCost", r.prix_public AS "prixPublic",
+                r.unite_achat AS "uniteAchat", r.coeff_conversion AS "coeffConversion",
+                r.code_produit AS "codeProduit", r.code_analytique_id AS "codeAnalytiqueId",
+                r.supplier_id AS "supplierId", r.ref_fournisseur AS "refFournisseur",
+                r.conditionnement,
+                ca.code AS "codeAnalytiqueCode", ca.label AS "codeAnalytiqueLabel",
+                fam.code AS "familleCode", fam.label AS "familleLabel",
+                s.name AS "supplierName"
+         FROM resource r
+         LEFT JOIN analytical_code ca ON ca.id = r.code_analytique_id
+         LEFT JOIN analytical_famille fam ON fam.id = ca.famille_id
+         LEFT JOIN supplier s ON s.id = r.supplier_id
+         WHERE ${where}
+         ORDER BY ${sortCol} ${dir} NULLS LAST, r.code ASC
+         LIMIT ${pageSize} OFFSET ${offset}`,
+        params,
+      );
+      return { rows, total, page, pageSize };
     });
   }
 }
