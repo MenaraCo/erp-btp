@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { usePreferences, fmtEuro } from '@/lib/preferences';
 import { ResourceModal, FullResource } from './ResourceModal';
-import { SortHeader, SortState, nextSort } from './SortHeader';
+import { SortHeader, SortState, nextSort, applySort } from './SortHeader';
 
 interface Library { id: string; code: string; name: string }
 type Resource = FullResource & {
@@ -116,6 +116,7 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
   });
 
   const [libForm, setLibForm] = useState({ code: '', name: '' });
+  const [ouvSort, setOuvSort] = useState<SortState>({ key: null, dir: 'asc' });
   // Modale ressource : null = fermée, 'new' = création, sinon ressource à éditer
   const [resModal, setResModal] = useState<'new' | Resource | null>(null);
 
@@ -238,9 +239,15 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
           <p className="muted" style={{ marginTop: 4 }}>Cliquez sur un ouvrage pour le composer (ajout de ressources, ratios, pertes…).</p>
           {ouvrages.data && ouvrages.data.rows.length > 0 ? (
             <table className="grid" style={{ marginTop: 8 }}>
-              <thead><tr><th>Code</th><th>Libellé</th><th>Unité</th><th style={{ textAlign: 'right' }}>Déboursé</th><th style={{ width: 80 }} /></tr></thead>
+              <thead><tr>
+                <SortHeader label="Code" colKey="code" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} />
+                <SortHeader label="Libellé" colKey="label" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} />
+                <SortHeader label="Unité" colKey="unit" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} />
+                <SortHeader label="Déboursé" colKey="debourse" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} right />
+                <th style={{ width: 80 }} />
+              </tr></thead>
               <tbody>
-                {ouvrages.data.rows.map((o) => (
+                {applySort(ouvrages.data.rows, ouvSort, (o, k) => k === 'debourse' ? Number((o as unknown as Record<string, unknown>)[k]) : (o as unknown as Record<string, unknown>)[k]).map((o) => (
                   <tr key={o.id} style={{ cursor: 'pointer' }} onClick={() => router.push(`/estimating/bibliotheque/ouvrages/${o.id}`)}>
                     <td className="code-cell">{o.code}</td>
                     <td>{o.label}</td>

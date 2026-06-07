@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
-import { usePreferences, fmtEuro } from '@/lib/preferences';
+import { usePreferences, fmtEuro, cleanNum } from '@/lib/preferences';
+import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 
 /* ─────────── types ─────────── */
 interface Ouvrage {
@@ -23,6 +24,21 @@ interface Lot { id: string; code: string; label: string }
 interface ResourcePick { id: string; code: string; label: string; unit: string; unitCost: string; nature: string }
 
 const NAT: Record<string, string> = { material: 'Mat.', labor: 'MO', equipment: 'Matér.', subcontract: 'ST' };
+
+const montantOf = (c: Component) => (Number(c.quantity) || 0) * (1 + (Number(c.perte) || 0) / 100) * (Number(c.childUnitCost) || 0);
+/* Colonnes (re)positionnables/triables de la composition (hors # et actions). */
+interface CompoCol { key: string; label: string; right?: boolean; accessor: (c: Component) => unknown }
+const COMPO_COLS: CompoCol[] = [
+  { key: 'type', label: 'Type', accessor: (c) => c.childNature },
+  { key: 'code', label: 'Code', accessor: (c) => c.childCode },
+  { key: 'label', label: 'Désignation', accessor: (c) => c.childLabel },
+  { key: 'unit', label: 'Unité', accessor: (c) => c.childUnit },
+  { key: 'ratio', label: 'Ratio', right: true, accessor: (c) => Number(c.quantity) },
+  { key: 'perte', label: 'Perte %', right: true, accessor: (c) => Number(c.perte) },
+  { key: 'pu', label: 'PU déb.', right: true, accessor: (c) => Number(c.childUnitCost) },
+  { key: 'montant', label: 'Montant', right: true, accessor: montantOf },
+];
+const COMPO_COL_STORAGE = 'erp.ouvrage.compoColOrder';
 
 export default function OuvrageEditorPage() {
   const { token } = useAuth();
@@ -118,7 +134,33 @@ export default function OuvrageEditorPage() {
   }
 
   const debourse = ouvrage.data?.debourse ?? '0';
-  const comps = components.data ?? [];
+
+  /* Tri + ordre des colonnes de la composition (persisté) */
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  const [colOrder, setColOrder] = useState<string[]>(COMPO_COLS.map((c) => c.key));
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const dragRef = useRef<string | null>(null);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COMPO_COL_STORAGE) || 'null');
+      if (Array.isArray(saved)) {
+        const keys = COMPO_COLS.map((c) => c.key);
+        const valid = saved.filter((k: string) => keys.includes(k));
+        setColOrder([...valid, ...keys.filter((k) => !valid.includes(k))]);
+      }
+    } catch { /* ignore */ }
+  }, []);
+  const onColDrop = (target: string) => {
+    const src = dragRef.current; dragRef.current = null; setDragKey(null);
+    if (!src || src === target) return;
+    const next = [...colOrder];
+    next.splice(next.indexOf(src), 1); next.splice(next.indexOf(target), 0, src);
+    setColOrder(next);
+    try { localStorage.setItem(COMPO_COL_STORAGE, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+  const orderedCompoCols = colOrder.map((k) => COMPO_COLS.find((c) => c.key === k)!).filter(Boolean);
+  const rawComps = components.data ?? [];
+  const comps = applySort(rawComps, sort, (c, key) => COMPO_COLS.find((col) => col.key === key)?.accessor(c));
 
   return (
     <div>
@@ -182,13 +224,16 @@ export default function OuvrageEditorPage() {
             ) : (
               <table className="grid" style={{ marginTop: 10 }}>
                 <thead><tr>
-                  <th style={{ width: 28 }}>#</th><th>Type</th><th>Code</th><th>Désignation</th><th>Unité</th>
-                  <th style={{ textAlign: 'right' }}>Ratio</th><th style={{ textAlign: 'right' }}>Perte %</th>
-                  <th style={{ textAlign: 'right' }}>PU déb.</th><th style={{ textAlign: 'right' }}>Montant</th><th style={{ width: 36 }} />
+                  <th style={{ width: 28 }}>#</th>
+                  {orderedCompoCols.map((col) => (
+                    <SortHeader key={col.key} label={col.label} colKey={col.key} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} right={col.right}
+                      draggable onDragStart={() => { dragRef.current = col.key; setDragKey(col.key); }} onDragOver={(e) => e.preventDefault()} onDrop={() => onColDrop(col.key)} dragging={dragKey === col.key} />
+                  ))}
+                  <th style={{ width: 36 }} />
                 </tr></thead>
                 <tbody>
                   {comps.map((c, i) => (
-                    <ComponentRow key={c.id} c={c} index={i + 1} nbDec={nbDec}
+                    <ComponentRow key={c.id} c={c} index={i + 1} nbDec={nbDec} cols={orderedCompoCols}
                       onQty={(q) => updateComp.mutate({ cid: c.id, quantity: q })}
                       onPerte={(p) => updateComp.mutate({ cid: c.id, perte: p })}
                       onDelete={() => delComp.mutate(c.id)} />
@@ -225,38 +270,45 @@ export default function OuvrageEditorPage() {
   );
 }
 
-/* ─────────── ligne de composant (ratio/perte éditables) ─────────── */
-function ComponentRow({ c, index, nbDec, onQty, onPerte, onDelete }: {
-  c: Component; index: number; nbDec: number;
+/* ─────────── ligne de composant (cellules dans l'ordre des colonnes, ratio/perte éditables) ─────────── */
+function ComponentRow({ c, index, nbDec, cols, onQty, onPerte, onDelete }: {
+  c: Component; index: number; nbDec: number; cols: CompoCol[];
   onQty: (v: string) => void; onPerte: (v: string) => void; onDelete: () => void;
 }) {
-  const [qty, setQty] = useState(c.quantity ?? '0');
-  const [perte, setPerte] = useState(c.perte ?? '0');
-  useEffect(() => { setQty(c.quantity ?? '0'); setPerte(c.perte ?? '0'); }, [c.quantity, c.perte]);
+  // valeurs nettoyées (sans zéros inutiles : 0.3000 → 0.3)
+  const [qty, setQty] = useState(cleanNum(c.quantity) || '0');
+  const [perte, setPerte] = useState(cleanNum(c.perte) || '0');
+  useEffect(() => { setQty(cleanNum(c.quantity) || '0'); setPerte(cleanNum(c.perte) || '0'); }, [c.quantity, c.perte]);
 
-  const pu = Number(c.childUnitCost ?? 0);
-  const ratio = Number(qty) || 0;
-  const pertePct = Number(perte) || 0;
-  const montant = ratio * (1 + pertePct / 100) * pu;
   const clean = (v: string) => v.replace(',', '.').replace(/[^0-9.]/g, '');
+  const pu = Number(c.childUnitCost ?? 0);
+  const montant = (Number(qty) || 0) * (1 + (Number(perte) || 0) / 100) * pu;
+
+  const cell = (key: string) => {
+    switch (key) {
+      case 'type': return <span className="badge" style={{ fontSize: 9 }}>{NAT[c.childNature ?? 'material'] ?? '—'}</span>;
+      case 'code': return c.childCode ?? '—';
+      case 'label': return c.childLabel ?? '—';
+      case 'unit': return c.childUnit ?? '—';
+      case 'ratio': return <input className="input" inputMode="decimal" style={{ width: 60, textAlign: 'right' }} value={qty}
+        onChange={(e) => setQty(clean(e.target.value))} onBlur={() => qty !== cleanNum(c.quantity) && onQty(qty)} />;
+      case 'perte': return <input className="input" inputMode="decimal" style={{ width: 50, textAlign: 'right' }} value={perte}
+        onChange={(e) => setPerte(clean(e.target.value))} onBlur={() => perte !== cleanNum(c.perte) && onPerte(perte)} />;
+      case 'pu': return fmtEuro(pu, nbDec);
+      case 'montant': return <strong>{fmtEuro(montant, nbDec)}</strong>;
+      default: return null;
+    }
+  };
 
   return (
     <tr>
       <td className="muted">{index}</td>
-      <td><span className="badge" style={{ fontSize: 9 }}>{NAT[c.childNature ?? 'material'] ?? '—'}</span></td>
-      <td className="code-cell">{c.childCode ?? '—'}</td>
-      <td>{c.childLabel ?? '—'}</td>
-      <td className="muted">{c.childUnit ?? '—'}</td>
-      <td style={{ textAlign: 'right' }}>
-        <input className="input" inputMode="decimal" style={{ width: 60, textAlign: 'right' }} value={qty}
-          onChange={(e) => setQty(clean(e.target.value))} onBlur={() => qty !== (c.quantity ?? '0') && onQty(qty)} />
-      </td>
-      <td style={{ textAlign: 'right' }}>
-        <input className="input" inputMode="decimal" style={{ width: 50, textAlign: 'right' }} value={perte}
-          onChange={(e) => setPerte(clean(e.target.value))} onBlur={() => perte !== (c.perte ?? '0') && onPerte(perte)} />
-      </td>
-      <td style={{ textAlign: 'right' }} className="muted">{fmtEuro(pu, nbDec)}</td>
-      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtEuro(montant, nbDec)}</td>
+      {cols.map((col) => (
+        <td key={col.key} className={col.key === 'code' ? 'code-cell' : (col.key === 'unit' || col.key === 'pu') ? 'muted' : undefined}
+          style={{ textAlign: col.right ? 'right' : 'left' }}>
+          {cell(col.key)}
+        </td>
+      ))}
       <td><button className="btn-danger btn" onClick={onDelete}>✕</button></td>
     </tr>
   );
@@ -307,8 +359,14 @@ function ComponentPicker({ libId, token, nbDec, currentOuvrageId, onPickResource
     queryFn: () => apiFetch<{ rows: OuvragePick[] }>(`/libraries/${libId}/ouvrages?pageSize=500&search=${encodeURIComponent(search)}`, { token }),
   });
 
-  const resRows = resQuery.data?.rows ?? [];
-  const ouvRows = (ouvQuery.data?.rows ?? []).filter((o) => o.id !== currentOuvrageId);
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  const onSort = (k: string) => setSort((s) => nextSort(s, k));
+  const acc = (row: ResourcePick | OuvragePick, k: string) => {
+    const v = (row as unknown as Record<string, unknown>)[k];
+    return (k === 'unitCost' || k === 'debourse') ? Number(v) : v;
+  };
+  const resRows = applySort(resQuery.data?.rows ?? [], sort, acc);
+  const ouvRows = applySort((ouvQuery.data?.rows ?? []).filter((o) => o.id !== currentOuvrageId), sort, acc);
   const selStyle: React.CSSProperties = { padding: '6px 8px', fontSize: 12 };
 
   return (
@@ -358,7 +416,13 @@ function ComponentPicker({ libId, token, nbDec, currentOuvrageId, onPickResource
               <>
                 <p className="muted" style={{ fontSize: 10.5, margin: '0 0 6px' }}>{resQuery.data?.total ?? resRows.length} ressource(s)</p>
                 <table className="grid">
-                  <thead><tr><th>Code</th><th>Désignation</th><th>Unité</th><th style={{ textAlign: 'right' }}>PU déb.</th><th style={{ width: 60 }} /></tr></thead>
+                  <thead><tr>
+                    <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
+                    <SortHeader label="Désignation" colKey="label" sort={sort} onSort={onSort} />
+                    <SortHeader label="Unité" colKey="unit" sort={sort} onSort={onSort} />
+                    <SortHeader label="PU déb." colKey="unitCost" sort={sort} onSort={onSort} right />
+                    <th style={{ width: 60 }} />
+                  </tr></thead>
                   <tbody>
                     {resRows.map((r) => (
                       <tr key={r.id}>
@@ -377,7 +441,13 @@ function ComponentPicker({ libId, token, nbDec, currentOuvrageId, onPickResource
             <input className="input" style={{ width: '100%', marginBottom: 10 }} placeholder="Rechercher un ouvrage…" value={search} onChange={(e) => setSearch(e.target.value)} />
             {ouvRows.length === 0 ? <p className="muted" style={{ textAlign: 'center', padding: '20px 0' }}>Aucun autre ouvrage.</p> : (
               <table className="grid">
-                <thead><tr><th>Code</th><th>Désignation</th><th>Unité</th><th style={{ textAlign: 'right' }}>Déboursé</th><th style={{ width: 60 }} /></tr></thead>
+                <thead><tr>
+                  <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
+                  <SortHeader label="Désignation" colKey="label" sort={sort} onSort={onSort} />
+                  <SortHeader label="Unité" colKey="unit" sort={sort} onSort={onSort} />
+                  <SortHeader label="Déboursé" colKey="debourse" sort={sort} onSort={onSort} right />
+                  <th style={{ width: 60 }} />
+                </tr></thead>
                 <tbody>
                   {ouvRows.map((o) => (
                     <tr key={o.id}>
