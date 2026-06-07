@@ -33,16 +33,23 @@ const NAV: NavItem[] = [
 function isActive(href: string, pathname: string): boolean {
   const base = href.split('#')[0];
   if (base === '/') return pathname === '/';
+  // Éditeur de devis : /estimating/{affaireId}/devis/{devisId}
+  const isDevisEditor = /^\/estimating\/[^/]+\/devis\/[^/]+/.test(pathname);
   if (base === '/estimating') {
-    // Affaires : actif sur la liste, le détail affaire et l'éditeur de devis,
-    // mais pas sur les sous-routes dédiées (planning, liste devis, bibliothèque).
+    // Affaires : liste + détail affaire, MAIS pas l'éditeur de devis (→ Devis)
+    // ni les sous-routes dédiées (planning, liste devis, bibliothèque).
     return (
       pathname === '/estimating' ||
       (pathname.startsWith('/estimating/') &&
+        !isDevisEditor &&
         !pathname.startsWith('/estimating/planning') &&
         !pathname.startsWith('/estimating/devis') &&
         !pathname.startsWith('/estimating/bibliotheque'))
     );
+  }
+  if (base === '/estimating/devis') {
+    // Devis : liste des devis + éditeur d'un devis
+    return pathname.startsWith('/estimating/devis') || isDevisEditor;
   }
   return pathname.startsWith(base);
 }
