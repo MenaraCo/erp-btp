@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
+import { SortHeader, SortState, nextSort, applySort } from './SortHeader';
 
 interface Party {
   id: string;
@@ -103,7 +104,10 @@ export function PartyManager({
     setShowForm(true);
   }
 
-  const rows = list.data?.rows ?? [];
+  const rawRows = list.data?.rows ?? [];
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  const rows = applySort(rawRows, sort, (p, k) => (p as unknown as Record<string, unknown>)[k]);
+  const onSort = (k: string) => setSort((s) => nextSort(s, k));
 
   return (
     <div>
@@ -170,10 +174,10 @@ export function PartyManager({
           <table className="grid">
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Nom</th>
-                <th>E-mail</th>
-                <th>Téléphone</th>
+                <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
+                <SortHeader label="Nom" colKey="name" sort={sort} onSort={onSort} />
+                <SortHeader label="E-mail" colKey="email" sort={sort} onSort={onSort} />
+                <SortHeader label="Téléphone" colKey="phone" sort={sort} onSort={onSort} />
                 <th></th>
               </tr>
             </thead>

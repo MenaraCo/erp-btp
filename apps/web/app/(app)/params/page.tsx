@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 
 /* ─────────── hook token ─────────── */
 function useApi() {
@@ -949,27 +950,35 @@ function RefTable({ rows, headers, onEdit, onDelete, ids, selectedIds, onToggle,
   const someSelected = selectable && selectedIds!.size > 0 && !allSelected;
   const cbRef = (el: HTMLInputElement | null) => { if (el) el.indeterminate = someSelected; };
 
+  // Tri client : on trie des tuples {row, id, origIndex} pour conserver l'alignement
+  // et passer l'index d'ORIGINE à onEdit/onDelete.
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  const tuples = rows.map((row, i) => ({ row, id: ids?.[i], origIndex: i }));
+  const sorted = applySort(tuples, sort, (t, key) => t.row[Number(key)]);
+
   if (rows.length === 0) return <p className="muted" style={{ margin: 0 }}>Aucun élément.</p>;
   return (
     <table className="grid">
       <thead>
         <tr>
           {selectable && <th style={{ width: 36 }}><input type="checkbox" ref={cbRef} checked={allSelected} onChange={onToggleAll} /></th>}
-          {headers.map((h) => <th key={h}>{h}</th>)}
+          {headers.map((h, idx) => (
+            <SortHeader key={h} label={h} colKey={String(idx)} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+          ))}
           <th style={{ width: 72 }}></th>
         </tr>
       </thead>
       <tbody>
-        {rows.map((row, i) => {
-          const id = ids?.[i];
+        {sorted.map((t) => {
+          const id = t.id;
           const isSelected = id ? selectedIds?.has(id) : false;
           return (
-            <tr key={i} style={{ background: isSelected ? '#f0f4ff' : undefined }}>
+            <tr key={t.origIndex} style={{ background: isSelected ? '#f0f4ff' : undefined }}>
               {selectable && id && <td><input type="checkbox" checked={isSelected} onChange={() => onToggle!(id)} /></td>}
-              {row.map((cell, j) => <td key={j}>{cell}</td>)}
+              {t.row.map((cell, j) => <td key={j}>{cell}</td>)}
               <td style={{ display: 'flex', gap: 4 }}>
-                <button className="btn-ghost btn" onClick={() => onEdit(i)}>✎</button>
-                <button className="btn-danger btn" onClick={() => onDelete(i)}>✕</button>
+                <button className="btn-ghost btn" onClick={() => onEdit(t.origIndex)}>✎</button>
+                <button className="btn-danger btn" onClick={() => onDelete(t.origIndex)}>✕</button>
               </td>
             </tr>
           );

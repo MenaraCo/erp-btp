@@ -1,10 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 
 interface Marche {
   id: string;
@@ -20,6 +22,9 @@ export default function InvoicingPage() {
     enabled: Boolean(token),
     queryFn: () => apiFetch<Marche[]>('/marches', { token }),
   });
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  const onSort = (k: string) => setSort((s) => nextSort(s, k));
+  const marcheRows = applySort(data ?? [], sort, (m, k) => (m as unknown as Record<string, unknown>)[k]);
 
   return (
     <div>
@@ -36,14 +41,14 @@ export default function InvoicingPage() {
           <table className="grid">
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Nom</th>
-                <th>Total HT</th>
+                <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
+                <SortHeader label="Nom" colKey="name" sort={sort} onSort={onSort} />
+                <SortHeader label="Total HT" colKey="total_ht" sort={sort} onSort={onSort} />
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {data.map((m) => (
+              {marcheRows.map((m) => (
                 <tr key={m.id}>
                   <td>
                     <Link href={`/invoicing/${m.id}`} className="link">{m.code}</Link>

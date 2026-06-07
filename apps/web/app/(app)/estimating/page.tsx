@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
+import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 
 interface Affaire {
   id: string;
@@ -34,6 +35,9 @@ export default function EstimatingPage() {
     enabled: Boolean(token),
     queryFn: () => apiFetch<AffairesPage>('/affaires?sort=code&pageSize=50', { token }),
   });
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  const onSort = (k: string) => setSort((s) => nextSort(s, k));
+  const affaireRows = applySort(data?.rows ?? [], sort, (a, k) => (a as unknown as Record<string, unknown>)[k]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -112,14 +116,14 @@ export default function EstimatingPage() {
           <table className="grid">
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Nom</th>
-                <th>Statut</th>
+                <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
+                <SortHeader label="Nom" colKey="name" sort={sort} onSort={onSort} />
+                <SortHeader label="Statut" colKey="status" sort={sort} onSort={onSort} />
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {data.rows.map((a) => (
+              {affaireRows.map((a) => (
                 <tr key={a.id}>
                   <td>
                     <Link href={`/estimating/${a.id}`} className="link">

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 
 interface Chantier {
   id: string;
@@ -27,6 +28,9 @@ export default function ChantiersPage() {
     enabled: Boolean(token),
     queryFn: () => apiFetch<Chantier[]>('/chantiers', { token }),
   });
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  const onSort = (k: string) => setSort((s) => nextSort(s, k));
+  const chantierRows = applySort(data ?? [], sort, (c, k) => (c as unknown as Record<string, unknown>)[k]);
 
   const create = useMutation({
     mutationFn: () => apiFetch('/chantiers', { method: 'POST', body: { code, name }, token }),
@@ -95,14 +99,14 @@ export default function ChantiersPage() {
           <table className="grid">
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Nom</th>
-                <th>Budget de vente</th>
+                <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
+                <SortHeader label="Nom" colKey="name" sort={sort} onSort={onSort} />
+                <SortHeader label="Budget de vente" colKey="budget_vente_ht" sort={sort} onSort={onSort} />
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {data.map((c) => (
+              {chantierRows.map((c) => (
                 <tr key={c.id}>
                   <td>
                     <Link href={`/chantiers/${c.id}`} className="link">

@@ -1,10 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
+import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 
 interface DevisRow {
   id: string;
@@ -29,6 +31,9 @@ export default function DevisListPage() {
     enabled: Boolean(token),
     queryFn: () => apiFetch<DevisRow[]>('/devis', { token }),
   });
+  const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
+  const onSort = (k: string) => setSort((s) => nextSort(s, k));
+  const rows = applySort(list.data ?? [], sort, (d, k) => (d as unknown as Record<string, unknown>)[k]);
 
   return (
     <div>
@@ -40,10 +45,15 @@ export default function DevisListPage() {
         {list.data && list.data.length > 0 ? (
           <table className="grid">
             <thead><tr>
-              <th>Numéro</th><th>Désignation</th><th>Affaire</th><th>Type</th><th>Statut</th><th />
+              <SortHeader label="Numéro" colKey="numero" sort={sort} onSort={onSort} />
+              <SortHeader label="Désignation" colKey="designation" sort={sort} onSort={onSort} />
+              <SortHeader label="Affaire" colKey="affaire_code" sort={sort} onSort={onSort} />
+              <SortHeader label="Type" colKey="type" sort={sort} onSort={onSort} />
+              <SortHeader label="Statut" colKey="status" sort={sort} onSort={onSort} />
+              <th />
             </tr></thead>
             <tbody>
-              {list.data.map((d) => (
+              {rows.map((d) => (
                 <tr key={d.id}>
                   <td className="code-cell">{d.numero ?? '—'}</td>
                   <td>{d.designation}</td>
