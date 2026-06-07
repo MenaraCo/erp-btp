@@ -303,20 +303,33 @@ export class LibrariesService {
     const pageSize = Math.min(5000, Math.max(1, Number(query.pageSize) || 50));
     const search = query.search?.trim();
 
+    const q = query as DataGridQuery & { nature?: string; lotId?: string; familleId?: string };
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const params: unknown[] = [libraryId];
       let where = 'r.library_id = $1';
-      if (query.nature) {
-        params.push(query.nature);
+      if (q.nature) {
+        params.push(q.nature);
         where += ` AND r.nature = $${params.length}`;
+      }
+      if (q.familleId) {
+        params.push(q.familleId);
+        where += ` AND ca.famille_id = $${params.length}`;
+      }
+      if (q.lotId) {
+        params.push(q.lotId);
+        where += ` AND fam.lot_id = $${params.length}`;
       }
       if (search) {
         params.push(`%${search}%`);
         where += ` AND (r.code ILIKE $${params.length} OR r.label ILIKE $${params.length})`;
       }
+      // Jointures partagées (nécessaires aux filtres lot/famille) pour count + select
+      const joins = `
+        LEFT JOIN analytical_code ca ON ca.id = r.code_analytique_id
+        LEFT JOIN analytical_famille fam ON fam.id = ca.famille_id`;
 
       const totalRows = await em.query(
-        `SELECT count(*)::int AS n FROM resource r WHERE ${where}`,
+        `SELECT count(*)::int AS n FROM resource r ${joins} WHERE ${where}`,
         params,
       );
       const total = totalRows[0]?.n ?? 0;

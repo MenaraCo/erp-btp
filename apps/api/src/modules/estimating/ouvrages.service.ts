@@ -138,6 +138,27 @@ export class OuvragesService {
     });
   }
 
+  /** Supprime un ouvrage. Bloque s'il est utilisé comme sous-ouvrage dans un autre ouvrage. */
+  async deleteOuvrage(ouvrageId: string): Promise<{ deleted: true }> {
+    const tenantId = this.context.requireTenantId();
+    await runInTenant(this.dataSource, tenantId, async (em) => {
+      const ex = await em.query(`SELECT id FROM ouvrage WHERE id = $1`, [ouvrageId]);
+      if (ex.length === 0) throw new NotFoundException('Ouvrage introuvable.');
+      const used = await em.query(
+        `SELECT 1 FROM ouvrage_component WHERE child_ouvrage_id = $1 LIMIT 1`,
+        [ouvrageId],
+      );
+      if (used.length > 0) {
+        throw new BadRequestException(
+          'Cet ouvrage est utilisé comme sous-ouvrage dans un autre ouvrage. Retirez-le d\'abord.',
+        );
+      }
+      await em.query(`DELETE FROM ouvrage WHERE id = $1`, [ouvrageId]);
+    });
+    await this.recomputeTenant();
+    return { deleted: true };
+  }
+
   async deleteComponent(ouvrageId: string, componentId: string): Promise<OuvrageEntity> {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {

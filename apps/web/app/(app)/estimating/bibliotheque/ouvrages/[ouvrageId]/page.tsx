@@ -90,6 +90,18 @@ export default function OuvrageEditorPage() {
     onSuccess: () => { refreshComp(); setPickerOpen(false); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Ajout impossible.'),
   });
+  const addSubOuvrage = useMutation({
+    mutationFn: (o: { id: string }) => apiFetch(`/ouvrages/${ouvrageId}/components`, {
+      method: 'POST', body: { kind: 'sub_ouvrage', childOuvrageId: o.id, quantity: '1', perte: '0' }, token,
+    }),
+    onSuccess: () => { refreshComp(); setPickerOpen(false); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Ajout impossible.'),
+  });
+  const deleteOuvrage = useMutation({
+    mutationFn: () => apiFetch(`/ouvrages/${ouvrageId}`, { method: 'DELETE', token }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['ouvrages'] }); router.push('/estimating/bibliotheque/ouvrages'); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Suppression impossible.'),
+  });
   const updateComp = useMutation({
     mutationFn: (v: { cid: string; quantity?: string; perte?: string }) => apiFetch(`/ouvrages/${ouvrageId}/components/${v.cid}`, {
       method: 'PATCH', body: { quantity: v.quantity, perte: v.perte }, token,
@@ -142,10 +154,16 @@ export default function OuvrageEditorPage() {
                 </select>
               </Field>
             </div>
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button className="btn" disabled={!form.code || !form.label || save.isPending} onClick={() => { setErr(null); save.mutate(); }}>
                 {save.isPending ? '…' : isNew ? 'Créer l\'ouvrage' : 'Enregistrer'}
               </button>
+              {!isNew && (
+                <button className="btn-danger btn" disabled={deleteOuvrage.isPending}
+                  onClick={() => { setErr(null); if (confirm(`Supprimer l'ouvrage « ${form.code} » ? Cette action est définitive.`)) deleteOuvrage.mutate(); }}>
+                  {deleteOuvrage.isPending ? '…' : 'Supprimer l\'ouvrage'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -198,8 +216,10 @@ export default function OuvrageEditorPage() {
       </div>
 
       {pickerOpen && (libIdParam || ouvrage.data?.libraryId) && (
-        <ResourcePicker libId={(libIdParam || ouvrage.data!.libraryId)} token={token!} nbDec={nbDec}
-          onPick={(r) => addComp.mutate(r)} onClose={() => setPickerOpen(false)} isPending={addComp.isPending} />
+        <ComponentPicker libId={(libIdParam || ouvrage.data!.libraryId)} token={token!} nbDec={nbDec}
+          currentOuvrageId={ouvrageId}
+          onPickResource={(r) => addComp.mutate(r)} onPickOuvrage={(o) => addSubOuvrage.mutate(o)}
+          onClose={() => setPickerOpen(false)} isPending={addComp.isPending || addSubOuvrage.isPending} />
       )}
     </div>
   );
@@ -242,39 +262,134 @@ function ComponentRow({ c, index, nbDec, onQty, onPerte, onDelete }: {
   );
 }
 
-/* ─────────── modale picker de ressources ─────────── */
-function ResourcePicker({ libId, token, nbDec, onPick, onClose, isPending }: {
-  libId: string; token: string; nbDec: number;
-  onPick: (r: ResourcePick) => void; onClose: () => void; isPending: boolean;
+/* ─────────── modale picker : cheminement Lot → Nature → Famille → Ressources, ou Ouvrages ─────────── */
+interface FamillePick { id: string; code: string; label: string; lot_id: string | null; nature: string }
+interface LotPick { id: string; code: string; label: string }
+interface OuvragePick { id: string; code: string; label: string; unit: string; debourse: string }
+
+const NAT_OPTS = [
+  { v: 'material', l: 'Matériaux' }, { v: 'labor', l: "Main d'œuvre" },
+  { v: 'equipment', l: 'Matériel' }, { v: 'subcontract', l: 'Sous-traitance' },
+];
+
+function ComponentPicker({ libId, token, nbDec, currentOuvrageId, onPickResource, onPickOuvrage, onClose, isPending }: {
+  libId: string; token: string; nbDec: number; currentOuvrageId: string;
+  onPickResource: (r: ResourcePick) => void; onPickOuvrage: (o: OuvragePick) => void;
+  onClose: () => void; isPending: boolean;
 }) {
+  const [tab, setTab] = useState<'resource' | 'ouvrage'>('resource');
+  const [lotId, setLotId] = useState('');
+  const [nature, setNature] = useState('');
+  const [familleId, setFamilleId] = useState('');
   const [search, setSearch] = useState('');
-  const list = useQuery({
-    queryKey: ['picker-resources', libId, search],
-    queryFn: () => apiFetch<{ rows: ResourcePick[] }>(`/libraries/${libId}/resources?pageSize=50&search=${encodeURIComponent(search)}`, { token }),
-    enabled: Boolean(libId),
+
+  const lots = useQuery({ queryKey: ['params-lots'], queryFn: () => apiFetch<LotPick[]>('/params/lots', { token }) });
+  const familles = useQuery({ queryKey: ['params-familles'], queryFn: () => apiFetch<FamillePick[]>('/params/familles', { token }) });
+
+  // Familles filtrées par lot + nature (cheminement)
+  const familleOptions = (familles.data ?? []).filter((f) =>
+    (!lotId || f.lot_id === lotId) && (!nature || f.nature === nature));
+
+  // Ressources : on ne charge qu'après un filtre (famille OU recherche) pour éviter de tout tirer
+  const hasFilter = Boolean(familleId || search.trim() || nature || lotId);
+  const resQuery = useQuery({
+    queryKey: ['picker-resources', libId, familleId, nature, lotId, search],
+    enabled: Boolean(libId && tab === 'resource' && hasFilter),
+    queryFn: () => apiFetch<{ rows: ResourcePick[]; total: number }>(
+      `/libraries/${libId}/resources?pageSize=500`
+      + `${familleId ? `&familleId=${familleId}` : ''}${lotId ? `&lotId=${lotId}` : ''}`
+      + `${nature ? `&nature=${nature}` : ''}&search=${encodeURIComponent(search)}`,
+      { token }),
   });
-  const rows = list.data?.rows ?? [];
+  const ouvQuery = useQuery({
+    queryKey: ['picker-ouvrages', libId, search],
+    enabled: Boolean(libId && tab === 'ouvrage'),
+    queryFn: () => apiFetch<{ rows: OuvragePick[] }>(`/libraries/${libId}/ouvrages?pageSize=500&search=${encodeURIComponent(search)}`, { token }),
+  });
+
+  const resRows = resQuery.data?.rows ?? [];
+  const ouvRows = (ouvQuery.data?.rows ?? []).filter((o) => o.id !== currentOuvrageId);
+  const selStyle: React.CSSProperties = { padding: '6px 8px', fontSize: 12 };
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 12, padding: '20px 24px', width: 640, maxWidth: '100%', boxShadow: '0 12px 40px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ background: '#fff', borderRadius: 12, padding: '20px 24px', width: 720, maxWidth: '100%', boxShadow: '0 12px 40px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <strong style={{ fontSize: 15 }}>Ajouter une ressource</strong>
+          <strong style={{ fontSize: 15 }}>Ajouter un composant</strong>
           <button className="btn-ghost btn" onClick={onClose} style={{ fontSize: 16 }}>✕</button>
         </div>
-        <input className="input" autoFocus placeholder="Rechercher code / libellé…" style={{ width: '100%', marginBottom: 12 }} value={search} onChange={(e) => setSearch(e.target.value)} />
-        {rows.length === 0 ? <p className="muted">Aucune ressource.</p> : (
-          <table className="grid">
-            <thead><tr><th>Code</th><th>Désignation</th><th>Unité</th><th style={{ textAlign: 'right' }}>PU déb.</th><th style={{ width: 60 }} /></tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="code-cell">{r.code}</td><td>{r.label}</td><td className="muted">{r.unit}</td>
-                  <td style={{ textAlign: 'right' }}>{fmtEuro(r.unitCost, nbDec)}</td>
-                  <td><button className="btn" disabled={isPending} onClick={() => onPick(r)}>+ Ajouter</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        {/* Onglets Ressource / Sous-ouvrage */}
+        <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 14 }}>
+          {[{ v: 'resource', l: 'Ressources' }, { v: 'ouvrage', l: 'Sous-ouvrages' }].map((t) => (
+            <button key={t.v} onClick={() => setTab(t.v as 'resource' | 'ouvrage')}
+              style={{ background: 'none', border: 'none', padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                color: tab === t.v ? 'var(--primary)' : 'var(--muted)', borderBottom: tab === t.v ? '2px solid var(--primary)' : '2px solid transparent', marginBottom: -2 }}>
+              {t.l}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'resource' ? (
+          <>
+            {/* Cheminement Lot → Nature → Famille */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              <select className="input" style={selStyle} value={lotId} onChange={(e) => { setLotId(e.target.value); setFamilleId(''); }}>
+                <option value="">Lot : tous</option>
+                {(lots.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
+              </select>
+              <select className="input" style={selStyle} value={nature} onChange={(e) => { setNature(e.target.value); setFamilleId(''); }}>
+                <option value="">Nature : toutes</option>
+                {NAT_OPTS.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+              </select>
+              <select className="input" style={selStyle} value={familleId} onChange={(e) => setFamilleId(e.target.value)}>
+                <option value="">Famille : toutes</option>
+                {familleOptions.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.label}</option>)}
+              </select>
+              <input className="input" style={{ ...selStyle, flex: 1, minWidth: 160 }} placeholder="Rechercher code / libellé…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            {!hasFilter ? (
+              <p className="muted" style={{ textAlign: 'center', padding: '20px 0' }}>
+                Choisissez un lot, une nature, une famille ou tapez une recherche pour afficher les ressources.
+              </p>
+            ) : resRows.length === 0 ? (
+              <p className="muted" style={{ textAlign: 'center', padding: '20px 0' }}>{resQuery.isLoading ? 'Chargement…' : 'Aucune ressource.'}</p>
+            ) : (
+              <>
+                <p className="muted" style={{ fontSize: 10.5, margin: '0 0 6px' }}>{resQuery.data?.total ?? resRows.length} ressource(s)</p>
+                <table className="grid">
+                  <thead><tr><th>Code</th><th>Désignation</th><th>Unité</th><th style={{ textAlign: 'right' }}>PU déb.</th><th style={{ width: 60 }} /></tr></thead>
+                  <tbody>
+                    {resRows.map((r) => (
+                      <tr key={r.id}>
+                        <td className="code-cell">{r.code}</td><td>{r.label}</td><td className="muted">{r.unit}</td>
+                        <td style={{ textAlign: 'right' }}>{fmtEuro(r.unitCost, nbDec)}</td>
+                        <td><button className="btn" disabled={isPending} onClick={() => onPickResource(r)}>+ Ajouter</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <input className="input" style={{ width: '100%', marginBottom: 10 }} placeholder="Rechercher un ouvrage…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            {ouvRows.length === 0 ? <p className="muted" style={{ textAlign: 'center', padding: '20px 0' }}>Aucun autre ouvrage.</p> : (
+              <table className="grid">
+                <thead><tr><th>Code</th><th>Désignation</th><th>Unité</th><th style={{ textAlign: 'right' }}>Déboursé</th><th style={{ width: 60 }} /></tr></thead>
+                <tbody>
+                  {ouvRows.map((o) => (
+                    <tr key={o.id}>
+                      <td className="code-cell">{o.code}</td><td>{o.label}</td><td className="muted">{o.unit}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtEuro(o.debourse, nbDec)}</td>
+                      <td><button className="btn" disabled={isPending} onClick={() => onPickOuvrage(o)}>+ Ajouter</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
         )}
       </div>
     </div>

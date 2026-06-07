@@ -53,6 +53,13 @@ export class OuvragesController {
     return this.ouvrages.updateOuvrage(id, body);
   }
 
+  @Delete('ouvrages/:id')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  deleteOuvrage(@Param('id') id: string) {
+    return this.ouvrages.deleteOuvrage(id);
+  }
+
   @Get('ouvrages/:id/components')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.read')
