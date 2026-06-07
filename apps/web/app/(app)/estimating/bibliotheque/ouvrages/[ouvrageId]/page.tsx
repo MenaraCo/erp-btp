@@ -34,7 +34,7 @@ const COMPO_COLS: CompoCol[] = [
   { key: 'label', label: 'Désignation', accessor: (c) => c.childLabel },
   { key: 'unit', label: 'Unité', accessor: (c) => c.childUnit },
   { key: 'ratio', label: 'Ratio', right: true, accessor: (c) => Number(c.quantity) },
-  { key: 'perte', label: 'Perte %', right: true, accessor: (c) => Number(c.perte) },
+  { key: 'perte', label: 'Perte', right: true, accessor: (c) => Number(c.perte) },
   { key: 'pu', label: 'PU déb.', right: true, accessor: (c) => Number(c.childUnitCost) },
   { key: 'montant', label: 'Montant', right: true, accessor: montantOf },
 ];
@@ -292,8 +292,13 @@ function ComponentRow({ c, index, nbDec, cols, onQty, onPerte, onDelete }: {
       case 'unit': return c.childUnit ?? '—';
       case 'ratio': return <input className="input" inputMode="decimal" style={{ width: 60, textAlign: 'right' }} value={qty}
         onChange={(e) => setQty(clean(e.target.value))} onBlur={() => qty !== cleanNum(c.quantity) && onQty(qty)} />;
-      case 'perte': return <input className="input" inputMode="decimal" style={{ width: 50, textAlign: 'right' }} value={perte}
-        onChange={(e) => setPerte(clean(e.target.value))} onBlur={() => perte !== cleanNum(c.perte) && onPerte(perte)} />;
+      case 'perte': return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
+          <input className="input" inputMode="decimal" style={{ width: 46, textAlign: 'right' }} value={perte}
+            onChange={(e) => setPerte(clean(e.target.value))} onBlur={() => perte !== cleanNum(c.perte) && onPerte(perte)} />
+          <span className="muted" style={{ fontSize: 11 }}>%</span>
+        </span>
+      );
       case 'pu': return fmtEuro(pu, nbDec);
       case 'montant': return <strong>{fmtEuro(montant, nbDec)}</strong>;
       default: return null;
