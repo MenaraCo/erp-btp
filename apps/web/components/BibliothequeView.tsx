@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -49,6 +51,7 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
   const { token } = useAuth();
   const { nb_decimales: nbDec } = usePreferences();
   const qc = useQueryClient();
+  const router = useRouter();
   const [libId, setLibId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [natFilter, setNatFilter] = useState('');
@@ -106,12 +109,6 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
       { token },
     ),
   });
-  // Jeu complet pour le compositeur d'ouvrages (sélecteur de ressources)
-  const resourcesPicker = useQuery({
-    queryKey: ['resources-picker', libId],
-    enabled: Boolean(token && libId && section !== 'ressources'),
-    queryFn: () => apiFetch<Page<Resource>>(`/libraries/${libId}/resources?pageSize=5000`, { token }),
-  });
   const ouvrages = useQuery({
     queryKey: ['ouvrages', libId],
     enabled: Boolean(token && libId && section !== 'ressources'),
@@ -119,18 +116,12 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
   });
 
   const [libForm, setLibForm] = useState({ code: '', name: '' });
-  const [ouvForm, setOuvForm] = useState({ code: '', label: '', unit: '' });
   // Modale ressource : null = fermée, 'new' = création, sinon ressource à éditer
   const [resModal, setResModal] = useState<'new' | Resource | null>(null);
 
   const createLib = useMutation({
     mutationFn: () => apiFetch<Library>('/libraries', { method: 'POST', body: libForm, token }),
     onSuccess: (lib) => { qc.invalidateQueries({ queryKey: ['libraries'] }); setLibForm({ code: '', name: '' }); setLibId(lib.id); },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
-  const createOuv = useMutation({
-    mutationFn: () => apiFetch(`/libraries/${libId}/ouvrages`, { method: 'POST', body: ouvForm, token }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['ouvrages', libId] }); setOuvForm({ code: '', label: '', unit: '' }); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
 
@@ -240,25 +231,29 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
 
       {libId && section !== 'ressources' && (
         <div className="card" style={{ marginTop: 16 }}>
-          <h2>Ouvrages composés {ouvrages.data ? `(${ouvrages.data.total})` : ''}</h2>
-          <p className="muted" style={{ marginTop: 0 }}>Composez un ouvrage à partir de ressources : son déboursé se met à jour.</p>
-          {ouvrages.data && ouvrages.data.rows.length > 0 && (
-            <table className="grid">
-              <thead><tr><th>Code</th><th>Libellé</th><th>Unité</th><th style={{ textAlign: 'right' }}>Déboursé</th><th>Composer</th></tr></thead>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0 }}>Ouvrages composés {ouvrages.data ? `(${ouvrages.data.total})` : ''}</h2>
+            <Link className="btn" href={`/estimating/bibliotheque/ouvrages/new?lib=${libId}`}>+ Nouvel ouvrage</Link>
+          </div>
+          <p className="muted" style={{ marginTop: 4 }}>Cliquez sur un ouvrage pour le composer (ajout de ressources, ratios, pertes…).</p>
+          {ouvrages.data && ouvrages.data.rows.length > 0 ? (
+            <table className="grid" style={{ marginTop: 8 }}>
+              <thead><tr><th>Code</th><th>Libellé</th><th>Unité</th><th style={{ textAlign: 'right' }}>Déboursé</th><th style={{ width: 80 }} /></tr></thead>
               <tbody>
                 {ouvrages.data.rows.map((o) => (
-                  <OuvrageRow key={o.id} ouvrage={o} resources={resourcesPicker.data?.rows ?? []} libId={libId} />
+                  <tr key={o.id} style={{ cursor: 'pointer' }} onClick={() => router.push(`/estimating/bibliotheque/ouvrages/${o.id}`)}>
+                    <td className="code-cell">{o.code}</td>
+                    <td>{o.label}</td>
+                    <td className="muted">{o.unit}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtEuro(o.debourse, nbDec)}</td>
+                    <td><span className="link">Composer →</span></td>
+                  </tr>
                 ))}
               </tbody>
             </table>
+          ) : (
+            <p className="muted" style={{ marginTop: 12 }}>Aucun ouvrage. Cliquez sur « + Nouvel ouvrage ».</p>
           )}
-          <form style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'flex-end' }}
-            onSubmit={(e) => { e.preventDefault(); setErr(null); if (ouvForm.code && ouvForm.label && ouvForm.unit) createOuv.mutate(); }}>
-            <Field label="Code"><input value={ouvForm.code} onChange={(e) => setOuvForm({ ...ouvForm, code: e.target.value })} /></Field>
-            <Field label="Libellé"><input value={ouvForm.label} onChange={(e) => setOuvForm({ ...ouvForm, label: e.target.value })} /></Field>
-            <Field label="Unité"><input style={{ width: 64 }} value={ouvForm.unit} onChange={(e) => setOuvForm({ ...ouvForm, unit: e.target.value })} /></Field>
-            <button className="btn" type="submit">+ Ouvrage</button>
-          </form>
         </div>
       )}
     </div>
@@ -267,36 +262,4 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="field" style={{ marginBottom: 0 }}><label>{label}</label>{children}</div>;
-}
-
-function OuvrageRow({ ouvrage, resources, libId }: { ouvrage: Ouvrage; resources: Resource[]; libId: string }) {
-  const { token } = useAuth();
-  const { nb_decimales: nbDec } = usePreferences();
-  const qc = useQueryClient();
-  const [resId, setResId] = useState('');
-  const [qty, setQty] = useState('');
-
-  const addComp = useMutation({
-    mutationFn: () => apiFetch(`/ouvrages/${ouvrage.id}/components`, { method: 'POST', body: { kind: 'resource', childResourceId: resId, quantity: qty || '0' }, token }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['ouvrages', libId] }); setResId(''); setQty(''); },
-  });
-
-  return (
-    <tr>
-      <td className="code-cell">{ouvrage.code}</td>
-      <td>{ouvrage.label}</td>
-      <td>{ouvrage.unit}</td>
-      <td style={{ textAlign: 'right' }}>{fmtEuro(ouvrage.debourse, nbDec)}</td>
-      <td>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <select value={resId} onChange={(e) => setResId(e.target.value)}>
-            <option value="">— ressource —</option>
-            {resources.map((r) => <option key={r.id} value={r.id}>{r.code} ({fmtEuro(r.unitCost, nbDec)})</option>)}
-          </select>
-          <input style={{ width: 60 }} placeholder="qté" value={qty} onChange={(e) => setQty(e.target.value)} />
-          <button className="link" disabled={!resId || !qty || addComp.isPending} onClick={() => addComp.mutate()}>+ ajouter</button>
-        </div>
-      </td>
-    </tr>
-  );
 }

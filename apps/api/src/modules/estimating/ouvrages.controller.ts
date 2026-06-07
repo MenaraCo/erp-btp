@@ -2,8 +2,10 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -44,6 +46,20 @@ export class OuvragesController {
     return this.ouvrages.getOuvrage(id);
   }
 
+  @Patch('ouvrages/:id')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  update(@Param('id') id: string, @Body() body: Partial<OuvrageInput>) {
+    return this.ouvrages.updateOuvrage(id, body);
+  }
+
+  @Get('ouvrages/:id/components')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  components(@Param('id') id: string) {
+    return this.ouvrages.getComponents(id);
+  }
+
   @Post('ouvrages/:id/components')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')
@@ -52,5 +68,19 @@ export class OuvragesController {
       throw new BadRequestException('kind is required');
     }
     return this.ouvrages.addComponent(id, body);
+  }
+
+  @Patch('ouvrages/:id/components/:cid')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  updateComponent(@Param('id') id: string, @Param('cid') cid: string, @Body() body: { quantity?: string | number; perte?: string | number; rate?: string | number }) {
+    return this.ouvrages.updateComponent(id, cid, body);
+  }
+
+  @Delete('ouvrages/:id/components/:cid')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  deleteComponent(@Param('id') id: string, @Param('cid') cid: string) {
+    return this.ouvrages.deleteComponent(id, cid);
   }
 }
