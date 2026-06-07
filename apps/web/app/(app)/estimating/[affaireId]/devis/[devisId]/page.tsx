@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
-import { usePreferences, fmtEuro, fmtNum } from '@/lib/preferences';
+import { usePreferences, fmtEuro } from '@/lib/preferences';
 import { Montage, MontageLine } from './Montage';
 
 interface Version { id: string; version_no: number; label: string }
@@ -259,16 +259,13 @@ export default function DevisEditorPage() {
   });
 
   // --- PV forcé par ligne ---
-  const setLinePv = useMutation({
-    mutationFn: ({ lineId, puVente, force }: { lineId: string; puVente: string | null; force: boolean }) =>
-      apiFetch(`/versions/${versionId}/lines/${lineId}/pv`, {
-        method: 'PUT', body: { puVente, force }, token,
-      }),
-    onSuccess: () => refresh(),
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
   const itemById = useMemo(
     () => new Map((sale.data?.items ?? []).map((i) => [i.id, i])),
+    [sale.data],
+  );
+  // Map line -> info vente (pv + forcé) pour le montage en mode vente (onglet Devis client).
+  const saleById = useMemo(
+    () => new Map((sale.data?.items ?? []).map((i) => [i.id, { pv: i.pv, forced: i.forced }])),
     [sale.data],
   );
   // Onglet « Devis client » : titres + lignes valorisées, SANS le sous-détail ressources
@@ -600,65 +597,25 @@ export default function DevisEditorPage() {
           {tab === 'client' && (
           <div className="card" style={{ marginTop: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0 }}>Prix de vente par ligne</h2>
+              <h2 style={{ margin: 0 }}>Devis client — prix de vente</h2>
               <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
             </div>
-            <p className="muted" style={{ marginTop: 2 }}>Vue commerciale : prix de vente par ligne, sans le sous-détail de débours.</p>
-            {pdfError && <p className="muted">{pdfError}</p>}
-            {clientLines.length > 0 ? (
-              <table className="grid" style={{ marginTop: 12 }}>
-                <thead><tr>
-                  <th>Désignation</th>
-                  <th style={{ textAlign: 'right' }}>Qté</th>
-                  <th style={{ textAlign: 'right' }}>PV HT / U</th>
-                  <th style={{ textAlign: 'right' }}>Total HT</th>
-                </tr></thead>
-                <tbody>
-                  {clientLines.map(({ line, depth }) => {
-                    const item = itemById.get(line.id);
-                    if (line.type === 'titre' || line.type === 'sous_titre') {
-                      return (
-                        <tr key={line.id} style={{ background: 'var(--surface)' }}>
-                          <td colSpan={4} style={{ paddingLeft: 8 + depth * 16, fontWeight: 600 }}>
-                            <span style={{ fontFamily: 'monospace', color: 'var(--accent)', marginRight: 8, fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
-                            {line.code ? <strong>{line.code} </strong> : null}{line.designation}
-                          </td>
-                        </tr>
-                      );
-                    }
-                    if (line.type === 'texte') {
-                      return (
-                        <tr key={line.id}><td colSpan={4} style={{ paddingLeft: 8 + depth * 16, fontStyle: 'italic', color: 'var(--muted)' }}>{line.designation}</td></tr>
-                      );
-                    }
-                    const qty = Number(line.quantity) || 0;
-                    const puVente = item && qty ? Number(item.pv) / qty : null;
-                    return (
-                      <tr key={line.id} style={item?.forced ? { background: '#fff7ed' } : undefined}>
-                        <td style={{ paddingLeft: 8 + depth * 16 }}>
-                          <span style={{ fontFamily: 'monospace', color: 'var(--accent)', marginRight: 8, fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
-                          {line.designation}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>{line.quantity ?? '—'} {line.unit ?? ''}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          {item ? (
-                            <PvCell
-                              computed={puVente}
-                              forced={!!item.forced}
-                              pending={setLinePv.isPending}
-                              decimals={prefs.nb_decimales}
-                              onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
-                              onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })}
-                            />
-                          ) : '—'}
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? e(item.pv) : '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            ) : <p className="muted">Devis vide — construisez-le dans l’onglet Étude de prix.</p>}
+            <p className="muted" style={{ marginTop: 2 }}>
+              Montez le devis et fixez les prix de vente par ligne (mêmes actions qu’en étude). Saisir un prix le force (champ orange + cadenas pour libérer) ; le sous-détail de débours n’est pas affiché ici.
+            </p>
+            <div style={{ marginTop: 8 }}>
+              <Montage
+                versionId={versionId!}
+                token={token}
+                lines={(lines.data ?? []) as MontageLine[]}
+                deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
+                mode="vente"
+                saleById={saleById}
+                decimals={prefs.nb_decimales}
+                onChanged={refresh}
+                readOnly={false}
+              />
+            </div>
           </div>
           )}
 
@@ -869,53 +826,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <div className="field" style={{ marginBottom: 0 }}><label>{label}</label>{children}</div>;
 }
 
-/**
- * Prix de vente unitaire éditable en place (onglet Devis client).
- * Saisir une valeur force le prix (champ surligné orange + cadenas pour libérer) ;
- * le cadenas rétablit le prix calculé. Pas de champ « Forcer » séparé.
- */
-function PvCell({ computed, forced, pending, decimals, onForce, onRelease }: {
-  computed: number | null;
-  forced: boolean;
-  pending: boolean;
-  decimals: number;
-  onForce: (v: string) => void;
-  onRelease: () => void;
-}) {
-  const [focused, setFocused] = useState(false);
-  const [draft, setDraft] = useState('');
-  const shown = focused ? draft : (computed != null ? fmtNum(computed, decimals) : '');
-  const commit = () => {
-    setFocused(false);
-    const cleaned = draft.replace(',', '.').replace(/[^0-9.]/g, '');
-    if (cleaned === '') return; // vide → aucun changement
-    const n = Number(cleaned);
-    if (!Number.isFinite(n)) return;
-    // Ne pas forcer si la valeur saisie égale le calcul (évite un forçage inutile).
-    if (!forced && computed != null && Math.abs(n - computed) < 1e-6) return;
-    onForce(cleaned);
-  };
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
-      <input
-        style={{
-          width: 84, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-          ...(forced ? { borderColor: 'var(--accent)', background: '#fff7ed', color: 'var(--accent)', fontWeight: 600 } : {}),
-        }}
-        value={shown}
-        disabled={pending}
-        onFocus={() => { setFocused(true); setDraft(computed != null ? String(Number(computed.toFixed(decimals))) : ''); }}
-        onChange={(ev) => setDraft(ev.target.value)}
-        onBlur={commit}
-        onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); (ev.target as HTMLInputElement).blur(); } }}
-      />
-      {forced && (
-        <button type="button" className="btn-ghost" title="Libérer le prix forcé (revenir au prix calculé)"
-          disabled={pending} onClick={onRelease} style={{ padding: '2px 6px', color: 'var(--accent)', lineHeight: 1 }}>🔒</button>
-      )}
-    </span>
-  );
-}
 
 /** « (X %) » de marge par rapport au PV net, ou '' */
 function marginPct(value?: string, base?: string): string {

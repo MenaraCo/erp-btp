@@ -4,6 +4,10 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { fmtEuro, fmtNum } from '@/lib/preferences';
+
+/** Élément valorisé côté vente (prix de vente + drapeau « forcé »). */
+export interface SaleLineInfo { pv: string; forced: boolean }
 
 export interface MontageLine {
   id: string;
@@ -41,6 +45,7 @@ const SECTION_BORDER: Record<string, string> = { option: '#a855f7', variante: '#
 
 export function Montage({
   versionId, token, lines, deboursById, onChanged, readOnly,
+  mode = 'debours', saleById, decimals = 2,
 }: {
   versionId: string;
   token: string | null;
@@ -48,7 +53,14 @@ export function Montage({
   deboursById: Map<string, string>; // lineId -> déboursé (items priced)
   onChanged: () => void;
   readOnly: boolean;
+  /** 'debours' = sous-détail & déboursés ; 'vente' = prix de vente par ligne (forçage en place). */
+  mode?: 'debours' | 'vente';
+  /** lineId -> info vente (prix de vente, forcé) — requis en mode 'vente'. */
+  saleById?: Map<string, SaleLineInfo>;
+  /** Nb de décimales d'affichage (préférences) — mode vente. */
+  decimals?: number;
 }) {
+  const vente = mode === 'vente';
   const childrenOf = (pid: string | null) =>
     lines.filter((l) => l.parent_line_id === pid).sort((a, b) => a.sort_order - b.sort_order);
 
@@ -57,6 +69,12 @@ export function Montage({
   const subtree = (l: MontageLine): number => {
     if (l.type === 'ouvrage' || l.type === 'ressource') return Number(deboursById.get(l.id) ?? 0);
     return childrenOf(l.id).reduce((s, c) => s + subtree(c), 0);
+  };
+  // Valeur affichée : déboursé (mode débours) ou prix de vente agrégé (mode vente).
+  const valueOf = (l: MontageLine): number => {
+    if (!vente) return subtree(l);
+    if (l.type === 'ouvrage' || l.type === 'ressource') return Number(saleById?.get(l.id)?.pv ?? 0);
+    return childrenOf(l.id).reduce((s, c) => s + valueOf(c), 0);
   };
   const sectionOf = (l: MontageLine): 'option' | 'variante' | null => {
     let cur: MontageLine | undefined = l;
@@ -91,6 +109,11 @@ export function Montage({
       apiFetch(`/lines/${id}/section`, { method: 'PUT', body: { sectionType }, token }),
     onSuccess: onChanged,
   });
+  const setLinePv = useMutation({
+    mutationFn: ({ lineId, puVente, force }: { lineId: string; puVente: string | null; force: boolean }) =>
+      apiFetch(`/versions/${versionId}/lines/${lineId}/pv`, { method: 'PUT', body: { puVente, force }, token }),
+    onSuccess: onChanged,
+  });
 
   const roots = childrenOf(null);
   return (
@@ -101,6 +124,7 @@ export function Montage({
           token={token} versionId={versionId} readOnly={readOnly}
           addLine={addLine} insertOuvrage={insertOuvrage} updateLine={updateLine}
           deleteLine={deleteLine} setSection={setSection}
+          vente={vente} valueOf={valueOf} saleById={saleById} setLinePv={setLinePv} decimals={decimals}
         />
       ))}
       {!readOnly && (
@@ -121,19 +145,33 @@ type Muts = {
   setSection: ReturnType<typeof useMutation<unknown, Error, { id: string; sectionType: 'option' | 'variante' | null }>>;
 };
 
+/** Props du mode vente (prix de vente + forçage en place). */
+type VenteCtx = {
+  vente: boolean;
+  valueOf: (l: MontageLine) => number;
+  saleById?: Map<string, SaleLineInfo>;
+  setLinePv: ReturnType<typeof useMutation<unknown, Error, { lineId: string; puVente: string | null; force: boolean }>>;
+  decimals: number;
+};
+
 function Node({
   line, depth, childrenOf, subtree, sectionOf, token, versionId, readOnly,
   addLine, insertOuvrage, updateLine, deleteLine, setSection,
+  vente, valueOf, saleById, setLinePv, decimals,
 }: {
   line: MontageLine; depth: number;
   childrenOf: (pid: string | null) => MontageLine[];
   subtree: (l: MontageLine) => number;
   sectionOf: (l: MontageLine) => 'option' | 'variante' | null;
   token: string | null; versionId: string; readOnly: boolean;
-} & Muts) {
+} & Muts & VenteCtx) {
   const kids = childrenOf(line.id);
   const sect = line.section_type;
   const pad = depth * 16;
+  // Contexte vente propagé tel quel aux enfants.
+  const vctx: VenteCtx = { vente, valueOf, saleById, setLinePv, decimals };
+  // Montant affiché : déboursé ou prix de vente selon le mode.
+  const fmtV = (n: number) => (vente ? fmtEuro(n, decimals) : euro(n));
 
   if (line.type === 'titre' || line.type === 'sous_titre') {
     const ls = levelStyle(depth);
@@ -155,7 +193,7 @@ function Node({
               onBlur={(e) => (e.target.value || '') !== (line.num_custom ?? '') && updateLine.mutate({ id: line.id, patch: { numCustom: e.target.value } })}
               style={{ width: 56, fontSize: 11, fontFamily: 'monospace', textAlign: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, color: ls.color, padding: '2px 4px' }} />
           )}
-          <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: ls.color }}>{euro(subtree(line))}</span>
+          <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: ls.color }}>{fmtV(valueOf(line))}</span>
           {!readOnly && (
             <>
               <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'variante' ? null : 'variante' })}
@@ -169,7 +207,8 @@ function Node({
         {kids.map((k) => (
           <Node key={k.id} line={k} depth={depth + 1} childrenOf={childrenOf} subtree={subtree} sectionOf={sectionOf}
             token={token} versionId={versionId} readOnly={readOnly}
-            addLine={addLine} insertOuvrage={insertOuvrage} updateLine={updateLine} deleteLine={deleteLine} setSection={setSection} />
+            addLine={addLine} insertOuvrage={insertOuvrage} updateLine={updateLine} deleteLine={deleteLine} setSection={setSection}
+            {...vctx} />
         ))}
         {!readOnly && (
           <SectionActions parentId={line.id} childCount={kids.length} depth={depth}
@@ -181,6 +220,9 @@ function Node({
 
   if (line.type === 'ouvrage') {
     const comps = childrenOf(line.id);
+    const info = saleById?.get(line.id);
+    const qtyN = Number(line.quantity) || 0;
+    const puVente = vente && info && qtyN ? Number(info.pv) / qtyN : null;
     return (
       <div style={{ marginLeft: pad }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
@@ -189,11 +231,16 @@ function Node({
           <label style={{ fontSize: 12, color: '#6b7280' }}>Qté</label>
           <input defaultValue={line.quantity ?? ''} disabled={readOnly} style={{ width: 64, textAlign: 'right' }}
             onBlur={(e) => e.target.value !== (line.quantity ?? '') && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
-          <span style={{ width: 90, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{euro(subtree(line))}</span>
+          {vente && (
+            <PvCell computed={puVente} forced={!!info?.forced} pending={setLinePv.isPending} decimals={decimals}
+              onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
+              onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
+          )}
+          <span style={{ width: 90, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
           {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(line.id)}>✕</button>}
         </div>
-        {/* Sous-détail copié & éditable */}
-        {comps.map((c) => (
+        {/* Sous-détail copié & éditable — masqué en mode vente (détail de débours). */}
+        {!vente && comps.map((c) => (
           <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 2px 24px', fontSize: 13, color: '#475569' }}>
             <span style={{ flex: 1 }}>{c.designation}</span>
             <input defaultValue={c.quantity ?? ''} disabled={readOnly} title="Ratio/quantité" style={{ width: 56, textAlign: 'right' }}
@@ -210,15 +257,24 @@ function Node({
   }
 
   if (line.type === 'ressource') {
+    const info = saleById?.get(line.id);
+    const qtyN = Number(line.quantity) || 0;
+    const puVente = vente && info && qtyN ? Number(info.pv) / qtyN : null;
     return (
       <div style={{ marginLeft: pad, display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', fontSize: 13 }}>
         <input defaultValue={line.designation} disabled={readOnly} style={{ flex: 1 }}
           onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })} />
         <input defaultValue={line.quantity ?? ''} disabled={readOnly} title="Quantité" style={{ width: 56, textAlign: 'right' }}
           onBlur={(e) => e.target.value !== (line.quantity ?? '') && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
-        <input defaultValue={line.pu ?? ''} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
-          onBlur={(e) => e.target.value !== (line.pu ?? '') && updateLine.mutate({ id: line.id, patch: { pu: e.target.value || '0' } })} />
-        <span style={{ width: 80, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(subtree(line))}</span>
+        {vente ? (
+          <PvCell computed={puVente} forced={!!info?.forced} pending={setLinePv.isPending} decimals={decimals}
+            onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
+            onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
+        ) : (
+          <input defaultValue={line.pu ?? ''} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
+            onBlur={(e) => e.target.value !== (line.pu ?? '') && updateLine.mutate({ id: line.id, patch: { pu: e.target.value || '0' } })} />
+        )}
+        <span style={{ width: 80, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
         {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(line.id)}>✕</button>}
       </div>
     );
@@ -254,6 +310,53 @@ function SectionActions({
       {picker && <OuvragePicker token={token} parentId={parentId}
         onPick={(ouvrageId, quantity) => { insertOuvrage.mutate({ ouvrageId, parentLineId: parentId, quantity }); setPicker(false); }} />}
     </div>
+  );
+}
+
+/**
+ * Prix de vente unitaire éditable en place (mode vente / onglet Devis client).
+ * Saisir une valeur force le prix (champ orange + cadenas pour libérer) ; le cadenas
+ * rétablit le prix calculé. Pas de champ « Forcer » séparé.
+ */
+export function PvCell({ computed, forced, pending, decimals, onForce, onRelease }: {
+  computed: number | null;
+  forced: boolean;
+  pending: boolean;
+  decimals: number;
+  onForce: (v: string) => void;
+  onRelease: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [draft, setDraft] = useState('');
+  const shown = focused ? draft : (computed != null ? fmtNum(computed, decimals) : '');
+  const commit = () => {
+    setFocused(false);
+    const cleaned = draft.replace(',', '.').replace(/[^0-9.]/g, '');
+    if (cleaned === '') return; // vide → aucun changement
+    const n = Number(cleaned);
+    if (!Number.isFinite(n)) return;
+    if (!forced && computed != null && Math.abs(n - computed) < 1e-6) return;
+    onForce(cleaned);
+  };
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+      <input
+        style={{
+          width: 84, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+          ...(forced ? { borderColor: 'var(--accent)', background: '#fff7ed', color: 'var(--accent)', fontWeight: 600 } : {}),
+        }}
+        value={shown}
+        disabled={pending}
+        onFocus={() => { setFocused(true); setDraft(computed != null ? String(Number(computed.toFixed(decimals))) : ''); }}
+        onChange={(ev) => setDraft(ev.target.value)}
+        onBlur={commit}
+        onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); (ev.target as HTMLInputElement).blur(); } }}
+      />
+      {forced && (
+        <button type="button" className="btn-ghost" title="Libérer le prix forcé (revenir au prix calculé)"
+          disabled={pending} onClick={onRelease} style={{ padding: '2px 6px', color: 'var(--accent)', lineHeight: 1 }}>🔒</button>
+      )}
+    </span>
   );
 }
 
