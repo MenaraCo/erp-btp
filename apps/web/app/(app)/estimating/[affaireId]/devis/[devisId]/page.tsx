@@ -203,14 +203,6 @@ export default function DevisEditorPage() {
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
 
-  // --- métré variable ---
-  const [varForm, setVarForm] = useState({ name: '', value: '' });
-  const setVar = useMutation({
-    mutationFn: () => apiFetch(`/versions/${versionId}/variables/${varForm.name}`, { method: 'PUT', body: { value: varForm.value || '0' }, token }),
-    onSuccess: () => { refresh(); setVarForm({ name: '', value: '' }); },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
-
   // --- coefficients (feuille de vente) : FG% + Bénéfice% par nature ---
   const [coef, setCoef] = useState<Record<Nat, { fg: string; ben: string }>>({
     labor: { fg: '10', ben: '15' },
@@ -468,17 +460,9 @@ export default function DevisEditorPage() {
 
           {tab === 'etude' && (
           <div className="card" style={{ marginTop: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-              <h2 style={{ margin: 0 }}>Corps du devis</h2>
-              <form
-                style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}
-                onSubmit={(e) => { e.preventDefault(); setErr(null); if (varForm.name) setVar.mutate(); }}
-              >
-                <Field label="Variable de métré"><input placeholder="ex: surface" value={varForm.name} onChange={(e) => setVarForm({ ...varForm, name: e.target.value })} /></Field>
-                <Field label="Valeur"><input style={{ width: 80 }} value={varForm.value} onChange={(e) => setVarForm({ ...varForm, value: e.target.value })} /></Field>
-                <button className="btn" type="submit">Définir</button>
-              </form>
-            </div>
+            {/* Le formulaire « Variable de métré » (quantités par formule) est masqué tant que la
+                saisie de formules dans les quantités n'est pas construite (backend conservé). */}
+            <h2 style={{ margin: 0 }}>Corps du devis</h2>
             <p className="muted" style={{ marginTop: 4 }}>
               Construisez le devis sur place : le bouton « + » ouvre un menu (Ligne / Ressources / Texte libre / Sous-niveau X). Les ouvrages copient leur sous-détail, modifiable ici sans impacter la bibliothèque société. « V » = variante, « O » = option (hors total).
             </p>
