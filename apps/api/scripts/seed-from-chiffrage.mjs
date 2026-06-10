@@ -36,8 +36,28 @@ function natureFromType(t) {
   if (t === 'ST') return 'subcontract';
   return 'material';
 }
-function u(s, max = 16) { return s ? String(s).toUpperCase().trim().substring(0, max) : 'U'; }
-function s(v, max = 255) { return v ? String(v).substring(0, max) : null; }
+/**
+ * Répare le double-encodage UTF-8→Latin-1 présent dans certaines chaînes de CHIFFRAGE
+ * (ex. « prÃ©paratoires » → « préparatoires », « MÂ² » → « M² »). Gère aussi les chaînes
+ * mixtes (mojibake + caractère déjà correct comme le tiret cadratin « — »).
+ * Garde-fou : ne corrige que si un motif mojibake Latin-1 est présent ET si le décodage
+ * est propre (pas de caractère de remplacement) — sinon la chaîne est laissée intacte.
+ */
+function demojibake(str) {
+  if (typeof str !== 'string' || str === '') return str;
+  if (!/[\u00C2-\u00C5][\u0080-\u00BF]/.test(str)) return str;
+  const bytes = [];
+  for (const ch of str) {
+    const cp = ch.codePointAt(0);
+    if (cp <= 0xff) bytes.push(cp);
+    else for (const b of Buffer.from(ch, 'utf8')) bytes.push(b);
+  }
+  const decoded = Buffer.from(bytes).toString('utf8');
+  return decoded.includes('\uFFFD') ? str : decoded;
+}
+
+function u(s, max = 16) { return s ? demojibake(String(s)).toUpperCase().trim().substring(0, max) : 'U'; }
+function s(v, max = 255) { return v ? demojibake(String(v)).substring(0, max) : null; }
 function n(v, def = 0) { const x = Number(v); return isNaN(x) ? def : x; }
 
 async function q(sql, params = []) { return pgClient.query(sql, params); }
