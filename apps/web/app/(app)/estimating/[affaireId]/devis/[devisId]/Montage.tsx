@@ -122,6 +122,8 @@ export function Montage({
 
   const [infoLine, setInfoLine] = useState<MontageLine | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  // true quand un élément de la bibliothèque survole le montage (pour afficher les zones)
+  const [dragActive, setDragActive] = useState(false);
 
   const onDropItem = (parentId: string | null, item: DragItem) => {
     if (item.kind === 'ouvrage') {
@@ -134,12 +136,14 @@ export function Montage({
   const roots = childrenOf(null);
   return (
     <div
+      onDragEnter={() => { if (acceptDrop) setDragActive(true); }}
+      onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as HTMLElement)) { setDragActive(false); setDragOverId(null); } }}
       onDragOver={(e) => { if (acceptDrop) e.preventDefault(); }}
       onDrop={(e) => {
+        // Le drop sur la racine (hors d'une section) est ignoré — un message visuel suffit.
         if (!acceptDrop) return;
         e.preventDefault();
-        const raw = e.dataTransfer.getData('application/json');
-        if (raw) { try { onDropItem(null, JSON.parse(raw)); } catch {} }
+        setDragActive(false);
         setDragOverId(null);
       }}
     >
@@ -151,7 +155,7 @@ export function Montage({
           deleteLine={deleteLine} setSection={setSection}
           vente={vente} valueOf={valueOf} saleById={saleById} setLinePv={setLinePv} decimals={decimals}
           onShowInfo={setInfoLine}
-          acceptDrop={acceptDrop} dragOverId={dragOverId}
+          acceptDrop={acceptDrop} dragActive={dragActive} dragOverId={dragOverId}
           onDragEnter={setDragOverId} onDragLeave={() => setDragOverId(null)} onDropItem={onDropItem}
         />
       ))}
@@ -193,6 +197,8 @@ type VenteCtx = {
   onShowInfo: (l: MontageLine) => void;
   /** Drag & drop depuis la bibliothèque volante. */
   acceptDrop: boolean;
+  /** true quand un glisser est en cours (affiche les zones de dépôt sur tous les titres). */
+  dragActive: boolean;
   dragOverId: string | null;
   onDragEnter: (id: string) => void;
   onDragLeave: () => void;
@@ -203,7 +209,7 @@ function Node({
   line, depth, childrenOf, subtree, sectionOf, token, versionId, readOnly,
   addLine, insertOuvrage, updateLine, deleteLine, setSection,
   vente, valueOf, saleById, setLinePv, decimals, onShowInfo,
-  acceptDrop, dragOverId, onDragEnter, onDragLeave, onDropItem,
+  acceptDrop, dragActive, dragOverId, onDragEnter, onDragLeave, onDropItem,
 }: {
   line: MontageLine; depth: number;
   childrenOf: (pid: string | null) => MontageLine[];
@@ -215,7 +221,7 @@ function Node({
   const sect = line.section_type;
   const pad = depth * 16;
   // Contexte vente propagé tel quel aux enfants.
-  const vctx: VenteCtx = { vente, valueOf, saleById, setLinePv, decimals, onShowInfo, acceptDrop, dragOverId, onDragEnter, onDragLeave, onDropItem };
+  const vctx: VenteCtx = { vente, valueOf, saleById, setLinePv, decimals, onShowInfo, acceptDrop, dragActive, dragOverId, onDragEnter, onDragLeave, onDropItem };
   // Montant affiché : déboursé ou prix de vente selon le mode — toujours selon la règle
   // des décimales (préférences société).
   const fmtV = (n: number) => fmtEuro(n, decimals);
@@ -223,16 +229,22 @@ function Node({
   if (line.type === 'titre' || line.type === 'sous_titre') {
     const ls = levelStyle(depth);
     const isDropTarget = acceptDrop && dragOverId === line.id;
+    // Zone potentielle de dépôt (drag en cours mais pas encore sur ce titre)
+    const isDropZone = acceptDrop && dragActive && dragOverId !== line.id;
     return (
-      <div style={{
-        marginLeft: pad, marginBottom: 6, borderLeft: sect ? `3px solid ${SECTION_BORDER[sect]}` : '3px solid transparent',
-        background: sect ? SECTION_BG[sect] : undefined, borderRadius: 6,
-      }}>
-        <div
-          onDragOver={(e) => { if (acceptDrop) { e.preventDefault(); e.stopPropagation(); onDragEnter(line.id); } }}
-          onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as HTMLElement)) onDragLeave(); }}
-          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const raw = e.dataTransfer.getData('application/json'); if (raw) { try { onDropItem(line.id, JSON.parse(raw)); } catch {} } onDragLeave(); }}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: ls.bg, color: ls.color, borderRadius: 5, outline: isDropTarget ? '2px dashed var(--accent)' : undefined, outlineOffset: -2 }}>
+      <div
+        onDragOver={(e) => { if (acceptDrop) { e.preventDefault(); e.stopPropagation(); onDragEnter(line.id); } }}
+        onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as HTMLElement)) { onDragLeave(); } }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const raw = e.dataTransfer.getData('application/json'); if (raw) { try { onDropItem(line.id, JSON.parse(raw)); } catch {} } onDragLeave(); }}
+        style={{
+          marginLeft: pad, marginBottom: 6,
+          borderLeft: sect ? `3px solid ${SECTION_BORDER[sect]}` : isDropTarget ? '3px solid var(--accent)' : isDropZone ? '3px dashed #cbd5e1' : '3px solid transparent',
+          background: sect ? SECTION_BG[sect] : undefined, borderRadius: 6,
+          outline: isDropTarget ? '2px dashed var(--accent)' : undefined, outlineOffset: -2,
+          opacity: isDropTarget ? 0.95 : 1,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: isDropTarget ? ls.bg : ls.bg, color: ls.color, borderRadius: 5 }}>
           {/* Numéro hiérarchique (calculé serveur) + champ de forçage juste à côté */}
           <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: ls.num, minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {line.numero ?? ''}
@@ -276,9 +288,16 @@ function Node({
     const info = saleById?.get(line.id);
     const qtyN = Number(line.quantity) || 0;
     const puVente = vente && info && qtyN ? Number(info.pv) / qtyN : null;
-    const puDebours = qtyN ? subtree(line) / qtyN : null; // PU déboursé unitaire (dérivé)
+    const puDebours = qtyN ? subtree(line) / qtyN : null;
+    const ouvrSect = line.section_type;
     return (
-      <div style={{ marginLeft: pad }}>
+      <div style={{
+        marginLeft: pad,
+        borderLeft: ouvrSect ? `3px solid ${SECTION_BORDER[ouvrSect]}` : undefined,
+        background: ouvrSect ? SECTION_BG[ouvrSect] : undefined,
+        borderRadius: ouvrSect ? 6 : undefined,
+        marginBottom: ouvrSect ? 4 : undefined,
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
           <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
           {!readOnly && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
@@ -299,7 +318,15 @@ function Node({
               onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
           )}
           <span style={{ width: 90, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
-          {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(line.id)}>✕</button>}
+          {!readOnly && (
+            <>
+              <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'variante' ? null : 'variante' })}
+                style={togBtn(ouvrSect === 'variante', '#f97316')}>V</button>
+              <button title="Option (hors total)" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'option' ? null : 'option' })}
+                style={togBtn(ouvrSect === 'option', '#a855f7')}>O</button>
+              <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(line.id)}>✕</button>
+            </>
+          )}
         </div>
         {/* Sous-détail copié & éditable — masqué en mode vente (détail de débours). */}
         {!vente && comps.map((c) => (
