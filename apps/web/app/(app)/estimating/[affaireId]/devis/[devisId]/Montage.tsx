@@ -284,14 +284,37 @@ function Node({
     const puVente = vente && info && qtyN ? Number(info.pv) / qtyN : null;
     const puDebours = qtyN ? subtree(line) / qtyN : null;
     const ouvrSect = line.section_type;
+    const isOuvrDrop = acceptDrop && dragOverId === line.id;
     return (
-      <div style={{
-        marginLeft: pad,
-        borderLeft: ouvrSect ? `3px solid ${SECTION_BORDER[ouvrSect]}` : undefined,
-        background: ouvrSect ? SECTION_BG[ouvrSect] : undefined,
-        borderRadius: ouvrSect ? 6 : undefined,
-        marginBottom: ouvrSect ? 4 : undefined,
-      }}>
+      <div
+        onDragOver={(e) => { if (acceptDrop) { e.preventDefault(); e.stopPropagation(); onDragEnter(line.id); } }}
+        onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as HTMLElement)) onDragLeave(); }}
+        onDrop={(e) => {
+          e.preventDefault(); e.stopPropagation();
+          const raw = e.dataTransfer.getData('application/json');
+          if (raw) {
+            try {
+              const item: DragItem = JSON.parse(raw);
+              if (item.kind === 'ressource') {
+                // Ressource de bibliothèque → enfant de cet ouvrage (même logique que + Ressource interne)
+                onDropItem(line.id, item);
+              } else {
+                // Ouvrage de bibliothèque → sibling (au niveau du parent de cet ouvrage)
+                onDropItem(line.parent_line_id, item);
+              }
+            } catch {}
+          }
+          onDragLeave();
+        }}
+        style={{
+          marginLeft: pad,
+          borderLeft: ouvrSect ? `3px solid ${SECTION_BORDER[ouvrSect]}` : isOuvrDrop ? '3px solid var(--accent)' : undefined,
+          background: ouvrSect ? SECTION_BG[ouvrSect] : undefined,
+          borderRadius: ouvrSect ? 6 : isOuvrDrop ? 6 : undefined,
+          marginBottom: ouvrSect ? 4 : undefined,
+          outline: isOuvrDrop ? '2px dashed var(--accent)' : undefined,
+          outlineOffset: isOuvrDrop ? -2 : undefined,
+        }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
           <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
           {!readOnly && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
@@ -347,6 +370,13 @@ function Node({
             </div>
           );
         })}
+        {/* Carré R pour ajouter une ressource enfant directement dans cet ouvrage */}
+        {!vente && !readOnly && (
+          <div style={{ padding: '3px 8px 3px 24px' }}>
+            <ActionSquare label="R" title="Ajouter une ressource à cet ouvrage" color="#64748b"
+              onClick={() => addLine.mutate({ type: 'ressource', parentLineId: line.id, designation: 'Nouvelle ressource', quantity: '1', pu: '0', sortOrder: comps.length })} />
+          </div>
+        )}
       </div>
     );
   }
@@ -388,76 +418,53 @@ function Node({
   );
 }
 
+/**
+ * Barre d'actions compacte d'une section (titre / sous-titre).
+ * Affiche des petits carrés lettrés directement cliquables — pas de menu déroulant.
+ *   R = Ressource libre  (débours uniquement)
+ *   O = Ouvrage libre
+ *   T = Texte libre
+ *   S = Sous-section
+ */
 function SectionActions({
   parentId, childCount, depth, vente, addLine,
 }: {
   parentId: string; childCount: number; depth: number; vente: boolean;
 } & Pick<Muts, 'addLine'>) {
-  const [menu, setMenu] = useState(false);
-  // Niveau du sous-titre qui sera ajouté : un titre (depth 0) = niveau 1 → son enfant = niveau 2.
   const childLevel = depth + 2;
-  const close = () => setMenu(false);
   return (
-    <div style={{ padding: '6px 8px', marginLeft: (depth + 1) * 16, position: 'relative' }}>
-      <button title="Ajouter…" onClick={() => setMenu((v) => !v)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
-          fontSize: 16, fontWeight: 700, lineHeight: 1, color: 'var(--accent)', background: '#fff',
-          border: '1px dashed var(--accent)', borderRadius: 6, cursor: 'pointer',
-        }}>+</button>
-      {menu && (
-        <>
-          <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 20 }} />
-          <div style={{
-            position: 'absolute', top: 34, left: 8, zIndex: 21, minWidth: 200,
-            background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
-            boxShadow: '0 8px 24px rgba(15,23,42,0.14)', padding: 4,
-          }}>
-            {/* Ressource libre (sans bibliothèque) */}
-            <button style={menuItem()} onClick={() => {
-              addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: '', quantity: '1', pu: '0', sortOrder: childCount });
-              close();
-            }}>
-              <span style={menuIco('#64748b')}>R</span> Ressource libre
-            </button>
-            {/* Ouvrage libre (à composer manuellement, sans bibliothèque) */}
-            {!vente && (
-              <button style={menuItem()} onClick={() => {
-                addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: '', quantity: '1', sortOrder: childCount });
-                close();
-              }}>
-                <span style={menuIco('var(--primary)')}>O</span> Ouvrage libre
-              </button>
-            )}
-            <button style={menuItem()} onClick={() => {
-              addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount });
-              close();
-            }}>
-              <span style={menuIco('#d97706')}>▤</span> Texte libre
-            </button>
-            <button style={menuItem()} onClick={() => {
-              addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount });
-              close();
-            }}>
-              <span style={menuIco('var(--primary)')}>+</span> Sous-niveau {childLevel}
-            </button>
-          </div>
-        </>
+    <div style={{ padding: '3px 8px', marginLeft: (depth + 1) * 16, display: 'flex', gap: 4, alignItems: 'center' }}>
+      {!vente && (
+        <ActionSquare label="R" title="Ajouter une ressource libre" color="#64748b"
+          onClick={() => addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: 'Nouvelle ressource', quantity: '1', pu: '0', sortOrder: childCount })} />
       )}
+      <ActionSquare label="O" title="Ajouter un ouvrage libre" color="var(--primary)"
+        onClick={() => addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: 'Nouvel ouvrage', quantity: '1', sortOrder: childCount })} />
+      <ActionSquare label="T" title="Ajouter un texte libre" color="#d97706"
+        onClick={() => addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount })} />
+      <ActionSquare label="S" title={`Ajouter un sous-niveau ${childLevel}`} color="#64748b"
+        onClick={() => addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount })} />
     </div>
   );
 }
 
-/** Style d'un item du menu contextuel « + ». */
-function menuItem(): React.CSSProperties {
-  return {
-    display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-    padding: '7px 10px', fontSize: 12.5, fontWeight: 500, color: 'var(--primary)',
-    background: 'transparent', border: 'none', borderRadius: 6, cursor: 'pointer',
-  };
-}
-function menuIco(color: string): React.CSSProperties {
-  return { display: 'inline-flex', width: 16, justifyContent: 'center', color, fontWeight: 700 };
+/** Petit carré letté cliquable — R, O, T ou S. Le `title` s'affiche au survol. */
+function ActionSquare({ label, title, color, onClick }: {
+  label: string; title: string; color: string; onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      style={{
+        width: 22, height: 22, borderRadius: 4, border: `1px solid ${color}`,
+        background: 'transparent', color, fontSize: 10, fontWeight: 700,
+        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        lineHeight: 1, flexShrink: 0,
+      }}
+    >{label}</button>
+  );
 }
 
 /** Bouton « ⓘ » d'accès aux informations d'une ligne. */

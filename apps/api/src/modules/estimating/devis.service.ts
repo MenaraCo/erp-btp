@@ -66,7 +66,7 @@ export interface DevisPlanningPatch {
   dateEcheance?: string | null;
 }
 
-export type DevisLineType = 'titre' | 'sous_titre' | 'ouvrage' | 'ressource';
+export type DevisLineType = 'titre' | 'sous_titre' | 'ouvrage' | 'ressource' | 'texte';
 export type DevisType = 'principal' | 'lot' | 'avenant';
 
 export interface AffaireInput {
