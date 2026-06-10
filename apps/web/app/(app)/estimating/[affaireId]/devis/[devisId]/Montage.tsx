@@ -1,9 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-import { euro } from '@/lib/format';
 import { fmtEuro, fmtNum, cleanNum } from '@/lib/preferences';
 
 /** Élément valorisé côté vente (prix de vente + drapeau « forcé »). */
@@ -39,10 +38,6 @@ function levelStyle(depth: number): { bg: string; color: string; num: string } {
   ];
   return cfgs[Math.min(depth, cfgs.length - 1)];
 }
-interface Library { id: string; code: string; name: string }
-interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
-interface Page<T> { rows: T[] }
-
 const SECTION_BG: Record<string, string> = { option: '#faf5ff', variante: '#fff7ed' };
 const SECTION_BORDER: Record<string, string> = { option: '#a855f7', variante: '#f97316' };
 
@@ -276,8 +271,7 @@ function Node({
           />
         ))}
         {!readOnly && (
-          <SectionActions parentId={line.id} childCount={kids.length} depth={depth} vente={vente}
-            token={token} versionId={versionId} addLine={addLine} insertOuvrage={insertOuvrage} />
+          <SectionActions parentId={line.id} childCount={kids.length} depth={depth} vente={vente} addLine={addLine} />
         )}
       </div>
     );
@@ -329,20 +323,30 @@ function Node({
           )}
         </div>
         {/* Sous-détail copié & éditable — masqué en mode vente (détail de débours). */}
-        {!vente && comps.map((c) => (
-          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 2px 24px', fontSize: 13, color: '#475569' }}>
-            <input defaultValue={c.designation} disabled={readOnly} title="Désignation (devis uniquement)" style={{ flex: 1 }}
-              onBlur={(e) => e.target.value !== c.designation && updateLine.mutate({ id: c.id, patch: { designation: e.target.value } })} />
-            <input defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio/quantité" style={{ width: 56, textAlign: 'right' }}
-              onBlur={(e) => e.target.value !== cleanNum(c.quantity) && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
-            <input defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: 44, textAlign: 'right' }}
-              onBlur={(e) => e.target.value !== cleanNum(c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0' } })} />
-            <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
-              onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0' } })} />
-            <button type="button" className="btn-ghost" title="Voir les informations de la ressource" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
-            {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
-          </div>
-        ))}
+        {!vente && comps.map((c) => {
+          const cQty = Number(c.quantity) || 0;
+          const cPu  = Number(c.pu) || 0;
+          const cPerte = Number(c.perte) || 0;
+          const montant = cQty * cPu * (1 + cPerte / 100);
+          return (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 2px 24px', fontSize: 13, color: '#475569' }}>
+              <input defaultValue={c.designation} disabled={readOnly} title="Désignation (devis uniquement)" style={{ flex: 1 }}
+                onBlur={(e) => e.target.value !== c.designation && updateLine.mutate({ id: c.id, patch: { designation: e.target.value } })} />
+              <input defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio/quantité" style={{ width: 56, textAlign: 'right' }}
+                onBlur={(e) => e.target.value !== cleanNum(c.quantity) && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
+              <input defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: 44, textAlign: 'right' }}
+                onBlur={(e) => e.target.value !== cleanNum(c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0' } })} />
+              <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
+                onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0' } })} />
+              {/* Montant = ratio × PU × (1 + perte%) — contribution à 1 unité de l'ouvrage */}
+              <span style={{ width: 72, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500 }} title="Ratio × PU × (1 + perte)">
+                {fmtEuro(montant, decimals)}
+              </span>
+              <button type="button" className="btn-ghost" title="Voir les informations de la ressource" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
+              {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -385,12 +389,11 @@ function Node({
 }
 
 function SectionActions({
-  parentId, childCount, depth, token, versionId, vente, addLine, insertOuvrage,
+  parentId, childCount, depth, vente, addLine,
 }: {
-  parentId: string; childCount: number; depth: number; token: string | null; versionId: string; vente: boolean;
-} & Pick<Muts, 'addLine' | 'insertOuvrage'>) {
+  parentId: string; childCount: number; depth: number; vente: boolean;
+} & Pick<Muts, 'addLine'>) {
   const [menu, setMenu] = useState(false);
-  const [picker, setPicker] = useState(false);
   // Niveau du sous-titre qui sera ajouté : un titre (depth 0) = niveau 1 → son enfant = niveau 2.
   const childLevel = depth + 2;
   const close = () => setMenu(false);
@@ -404,30 +407,43 @@ function SectionActions({
         }}>+</button>
       {menu && (
         <>
-          {/* Couche de fermeture au clic extérieur */}
           <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 20 }} />
           <div style={{
-            position: 'absolute', top: 34, left: 8, zIndex: 21, minWidth: 180,
+            position: 'absolute', top: 34, left: 8, zIndex: 21, minWidth: 200,
             background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
             boxShadow: '0 8px 24px rgba(15,23,42,0.14)', padding: 4,
           }}>
-            <button style={menuItem()} onClick={() => { addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: 'Ligne', quantity: '1', pu: '0', sortOrder: childCount }); close(); }}>
-              <span style={menuIco('var(--muted)')}>+</span> Ligne
+            {/* Ressource libre (sans bibliothèque) */}
+            <button style={menuItem()} onClick={() => {
+              addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: '', quantity: '1', pu: '0', sortOrder: childCount });
+              close();
+            }}>
+              <span style={menuIco('#64748b')}>R</span> Ressource libre
             </button>
-            <button style={menuItem()} onClick={() => { setPicker(true); close(); }}>
-              <span style={menuIco('var(--primary)')}>⊟</span> {vente ? 'Ouvrage' : 'Ressources'}
-            </button>
-            <button style={menuItem()} onClick={() => { addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount }); close(); }}>
+            {/* Ouvrage libre (à composer manuellement, sans bibliothèque) */}
+            {!vente && (
+              <button style={menuItem()} onClick={() => {
+                addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: '', quantity: '1', sortOrder: childCount });
+                close();
+              }}>
+                <span style={menuIco('var(--primary)')}>O</span> Ouvrage libre
+              </button>
+            )}
+            <button style={menuItem()} onClick={() => {
+              addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount });
+              close();
+            }}>
               <span style={menuIco('#d97706')}>▤</span> Texte libre
             </button>
-            <button style={menuItem()} onClick={() => { addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount }); close(); }}>
+            <button style={menuItem()} onClick={() => {
+              addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount });
+              close();
+            }}>
               <span style={menuIco('var(--primary)')}>+</span> Sous-niveau {childLevel}
             </button>
           </div>
         </>
       )}
-      {picker && <OuvragePicker token={token} parentId={parentId}
-        onPick={(ouvrageId, quantity) => { insertOuvrage.mutate({ ouvrageId, parentLineId: parentId, quantity }); setPicker(false); }} />}
     </div>
   );
 }
@@ -584,34 +600,6 @@ export function PvCell({ computed, forced, pending, decimals, onForce, onRelease
   );
 }
 
-function OuvragePicker({ token, parentId, onPick }: { token: string | null; parentId: string; onPick: (ouvrageId: string, quantity: string) => void }) {
-  const [libId, setLibId] = useState('');
-  const [ouvrageId, setOuvrageId] = useState('');
-  const [qty, setQty] = useState('1');
-  const libs = useQuery({
-    queryKey: ['libraries'], enabled: Boolean(token),
-    queryFn: () => apiFetch<Page<Library>>('/libraries?pageSize=100', { token }),
-  });
-  const ouvrages = useQuery({
-    queryKey: ['ouvrages', libId], enabled: Boolean(token && libId),
-    queryFn: () => apiFetch<Page<Ouvrage>>(`/libraries/${libId}/ouvrages?pageSize=200`, { token }),
-  });
-  void parentId;
-  return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%', marginTop: 4, padding: 6, background: '#f8fafc', borderRadius: 6 }}>
-      <select value={libId} onChange={(e) => { setLibId(e.target.value); setOuvrageId(''); }}>
-        <option value="">Bibliothèque…</option>
-        {(libs.data?.rows ?? []).map((l) => <option key={l.id} value={l.id}>{l.code}</option>)}
-      </select>
-      <select value={ouvrageId} onChange={(e) => setOuvrageId(e.target.value)} style={{ flex: 1 }}>
-        <option value="">Ouvrage…</option>
-        {(ouvrages.data?.rows ?? []).map((o) => <option key={o.id} value={o.id}>{o.code} — {o.label} ({euro(o.debourse)})</option>)}
-      </select>
-      <input value={qty} onChange={(e) => setQty(e.target.value)} title="Quantité" style={{ width: 56, textAlign: 'right' }} />
-      <button className="btn" disabled={!ouvrageId} onClick={() => onPick(ouvrageId, qty || '1')}>Insérer</button>
-    </div>
-  );
-}
 function togBtn(active: boolean, color: string): React.CSSProperties {
   return {
     fontSize: 12, fontWeight: 700, width: 22, height: 22, borderRadius: 4, cursor: 'pointer',
