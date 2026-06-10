@@ -9,6 +9,9 @@ import { fmtEuro, fmtNum, cleanNum } from '@/lib/preferences';
 /** Élément valorisé côté vente (prix de vente + drapeau « forcé »). */
 export interface SaleLineInfo { pv: string; forced: boolean }
 
+/** Élément glissé depuis le panneau bibliothèque. */
+export interface DragItem { kind: 'ouvrage' | 'ressource'; id: string; code: string; label: string; unit: string | null; debourse?: string }
+
 export interface MontageLine {
   id: string;
   parent_line_id: string | null;
@@ -45,7 +48,7 @@ const SECTION_BORDER: Record<string, string> = { option: '#a855f7', variante: '#
 
 export function Montage({
   versionId, token, lines, deboursById, onChanged, readOnly,
-  mode = 'debours', saleById, decimals = 2,
+  mode = 'debours', saleById, decimals = 2, acceptDrop = false,
 }: {
   versionId: string;
   token: string | null;
@@ -59,6 +62,8 @@ export function Montage({
   saleById?: Map<string, SaleLineInfo>;
   /** Nb de décimales d'affichage (préférences) — mode vente. */
   decimals?: number;
+  /** Active les zones de dépôt (bibliothèque volante). */
+  acceptDrop?: boolean;
 }) {
   const vente = mode === 'vente';
   const childrenOf = (pid: string | null) =>
@@ -116,9 +121,28 @@ export function Montage({
   });
 
   const [infoLine, setInfoLine] = useState<MontageLine | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  const onDropItem = (parentId: string | null, item: DragItem) => {
+    if (item.kind === 'ouvrage') {
+      insertOuvrage.mutate({ ouvrageId: item.id, parentLineId: parentId, quantity: '1' });
+    } else {
+      addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: item.label, code: item.code, unit: item.unit ?? '', quantity: '1', pu: item.debourse ?? '0' });
+    }
+  };
+
   const roots = childrenOf(null);
   return (
-    <div>
+    <div
+      onDragOver={(e) => { if (acceptDrop) e.preventDefault(); }}
+      onDrop={(e) => {
+        if (!acceptDrop) return;
+        e.preventDefault();
+        const raw = e.dataTransfer.getData('application/json');
+        if (raw) { try { onDropItem(null, JSON.parse(raw)); } catch {} }
+        setDragOverId(null);
+      }}
+    >
       {roots.map((l) => (
         <Node
           key={l.id} line={l} depth={0} childrenOf={childrenOf} subtree={subtree} sectionOf={sectionOf}
@@ -127,6 +151,8 @@ export function Montage({
           deleteLine={deleteLine} setSection={setSection}
           vente={vente} valueOf={valueOf} saleById={saleById} setLinePv={setLinePv} decimals={decimals}
           onShowInfo={setInfoLine}
+          acceptDrop={acceptDrop} dragOverId={dragOverId}
+          onDragEnter={setDragOverId} onDragLeave={() => setDragOverId(null)} onDropItem={onDropItem}
         />
       ))}
       {!readOnly && (
@@ -165,12 +191,19 @@ type VenteCtx = {
   decimals: number;
   /** Ouvre la fenêtre d'informations d'une ligne (ouvrage/ressource). */
   onShowInfo: (l: MontageLine) => void;
+  /** Drag & drop depuis la bibliothèque volante. */
+  acceptDrop: boolean;
+  dragOverId: string | null;
+  onDragEnter: (id: string) => void;
+  onDragLeave: () => void;
+  onDropItem: (parentId: string | null, item: DragItem) => void;
 };
 
 function Node({
   line, depth, childrenOf, subtree, sectionOf, token, versionId, readOnly,
   addLine, insertOuvrage, updateLine, deleteLine, setSection,
   vente, valueOf, saleById, setLinePv, decimals, onShowInfo,
+  acceptDrop, dragOverId, onDragEnter, onDragLeave, onDropItem,
 }: {
   line: MontageLine; depth: number;
   childrenOf: (pid: string | null) => MontageLine[];
@@ -182,19 +215,24 @@ function Node({
   const sect = line.section_type;
   const pad = depth * 16;
   // Contexte vente propagé tel quel aux enfants.
-  const vctx: VenteCtx = { vente, valueOf, saleById, setLinePv, decimals, onShowInfo };
+  const vctx: VenteCtx = { vente, valueOf, saleById, setLinePv, decimals, onShowInfo, acceptDrop, dragOverId, onDragEnter, onDragLeave, onDropItem };
   // Montant affiché : déboursé ou prix de vente selon le mode — toujours selon la règle
   // des décimales (préférences société).
   const fmtV = (n: number) => fmtEuro(n, decimals);
 
   if (line.type === 'titre' || line.type === 'sous_titre') {
     const ls = levelStyle(depth);
+    const isDropTarget = acceptDrop && dragOverId === line.id;
     return (
       <div style={{
         marginLeft: pad, marginBottom: 6, borderLeft: sect ? `3px solid ${SECTION_BORDER[sect]}` : '3px solid transparent',
         background: sect ? SECTION_BG[sect] : undefined, borderRadius: 6,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: ls.bg, color: ls.color, borderRadius: 5 }}>
+        <div
+          onDragOver={(e) => { if (acceptDrop) { e.preventDefault(); e.stopPropagation(); onDragEnter(line.id); } }}
+          onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as HTMLElement)) onDragLeave(); }}
+          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const raw = e.dataTransfer.getData('application/json'); if (raw) { try { onDropItem(line.id, JSON.parse(raw)); } catch {} } onDragLeave(); }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: ls.bg, color: ls.color, borderRadius: 5, outline: isDropTarget ? '2px dashed var(--accent)' : undefined, outlineOffset: -2 }}>
           {/* Numéro hiérarchique (calculé serveur) + champ de forçage juste à côté */}
           <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: ls.num, minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {line.numero ?? ''}
@@ -222,7 +260,8 @@ function Node({
           <Node key={k.id} line={k} depth={depth + 1} childrenOf={childrenOf} subtree={subtree} sectionOf={sectionOf}
             token={token} versionId={versionId} readOnly={readOnly}
             addLine={addLine} insertOuvrage={insertOuvrage} updateLine={updateLine} deleteLine={deleteLine} setSection={setSection}
-            {...vctx} />
+            {...vctx}
+          />
         ))}
         {!readOnly && (
           <SectionActions parentId={line.id} childCount={kids.length} depth={depth} vente={vente}

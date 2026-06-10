@@ -10,6 +10,7 @@ import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
 import { usePreferences, fmtEuro, cleanNum } from '@/lib/preferences';
 import { downloadXlsx } from '@/lib/xlsx';
 import { Montage, MontageLine } from './Montage';
+import { LibraryDrawer } from './LibraryDrawer';
 
 /** Arrondi numérique à n décimales (cellule numérique Excel). */
 const round = (v: number, n: number) => Number((Number(v) || 0).toFixed(n));
@@ -115,6 +116,9 @@ export default function DevisEditorPage() {
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [marcheMsg, setMarcheMsg] = useState<string | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitVersionId, setSplitVersionId] = useState<string | null>(null);
 
   const detail = useQuery({
     queryKey: ['devis', devisId],
@@ -146,6 +150,16 @@ export default function DevisEditorPage() {
     enabled: Boolean(token),
     queryFn: () => apiFetch<Page<Library>>('/libraries?pageSize=100', { token }),
   });
+
+  // Devis de l'affaire (pour le split-view)
+  const affaireDetail = useQuery<{
+    devis: Array<{ id: string; numero: string | null; designation: string; versions: Version[] }>
+  }>({
+    queryKey: ['affaire', affaireId],
+    enabled: Boolean(token && splitOpen),
+    queryFn: () => apiFetch(`/affaires/${affaireId}`, { token }),
+  });
+  const otherDevis = (affaireDetail.data?.devis ?? []).filter((d) => d.id !== devisId);
 
   const ordered = useMemo(() => orderTree(lines.data ?? []), [lines.data]);
   const parents = ordered.filter((o) => o.line.type === 'titre' || o.line.type === 'sous_titre');
@@ -443,7 +457,7 @@ export default function DevisEditorPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 4, marginTop: 12, borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 12, borderBottom: '1px solid var(--border)' }}>
             {([['etude', 'Étude de prix'], ['coeffs', 'Coefficients & frais'], ['client', 'Devis client'], ['apercu', 'Aperçu devis']] as const).map(([key, label]) => (
               <button key={key} type="button" onClick={() => setTab(key)} className="editor-tab"
                 style={{
@@ -453,6 +467,27 @@ export default function DevisEditorPage() {
                 {label}
               </button>
             ))}
+            <div style={{ flex: 1 }} />
+            {(tab === 'etude' || tab === 'client') && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setSplitOpen((v) => !v); if (splitOpen) setSplitVersionId(null); }}
+                  className="btn-secondary"
+                  style={{ fontSize: 11, padding: '3px 10px', marginBottom: 2, background: splitOpen ? 'var(--primary)' : undefined, color: splitOpen ? '#fff' : undefined }}
+                >
+                  ⧉ Comparer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLibraryOpen((v) => !v)}
+                  className="btn-secondary"
+                  style={{ fontSize: 11, padding: '3px 10px', marginBottom: 2, background: libraryOpen ? 'var(--primary)' : undefined, color: libraryOpen ? '#fff' : undefined }}
+                >
+                  ⊟ Bibliothèque
+                </button>
+              </>
+            )}
           </div>
 
           <div className="editor-grid">
@@ -460,22 +495,35 @@ export default function DevisEditorPage() {
 
           {tab === 'etude' && (
           <div className="card" style={{ marginTop: 16 }}>
-            {/* Le formulaire « Variable de métré » (quantités par formule) est masqué tant que la
-                saisie de formules dans les quantités n'est pas construite (backend conservé). */}
             <h2 style={{ margin: 0 }}>Corps du devis</h2>
             <p className="muted" style={{ marginTop: 4 }}>
               Construisez le devis sur place : le bouton « + » ouvre un menu (Ligne / Ressources / Texte libre / Sous-niveau X). Les ouvrages copient leur sous-détail, modifiable ici sans impacter la bibliothèque société. « V » = variante, « O » = option (hors total).
             </p>
-            <div style={{ marginTop: 8 }}>
-              <Montage
-                versionId={versionId!}
-                token={token}
-                lines={(lines.data ?? []) as MontageLine[]}
-                deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
-                decimals={prefs.nb_decimales}
-                onChanged={refresh}
-                readOnly={false}
-              />
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Montage
+                  versionId={versionId!}
+                  token={token}
+                  lines={(lines.data ?? []) as MontageLine[]}
+                  deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
+                  decimals={prefs.nb_decimales}
+                  onChanged={refresh}
+                  readOnly={false}
+                  acceptDrop={libraryOpen}
+                />
+              </div>
+              {splitOpen && (
+                <SplitPane
+                  affaireId={affaireId}
+                  currentDevisId={devisId}
+                  otherDevis={otherDevis}
+                  selectedVersionId={splitVersionId}
+                  onSelectVersion={setSplitVersionId}
+                  token={token}
+                  decimals={prefs.nb_decimales}
+                  mode="debours"
+                />
+              )}
             </div>
           </div>
           )}
@@ -577,20 +625,35 @@ export default function DevisEditorPage() {
               <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
             </div>
             <p className="muted" style={{ marginTop: 2 }}>
-              Montez le devis et fixez les prix de vente par ligne (mêmes actions qu’en étude). Saisir un prix le force (champ orange + cadenas pour libérer) ; le sous-détail de débours n’est pas affiché ici.
+              Montez le devis et fixez les prix de vente par ligne (mêmes actions qu'en étude). Saisir un prix le force (champ orange + cadenas pour libérer) ; le sous-détail de débours n'est pas affiché ici.
             </p>
-            <div style={{ marginTop: 8 }}>
-              <Montage
-                versionId={versionId!}
-                token={token}
-                lines={(lines.data ?? []) as MontageLine[]}
-                deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
-                mode="vente"
-                saleById={saleById}
-                decimals={prefs.nb_decimales}
-                onChanged={refresh}
-                readOnly={false}
-              />
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Montage
+                  versionId={versionId!}
+                  token={token}
+                  lines={(lines.data ?? []) as MontageLine[]}
+                  deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
+                  mode="vente"
+                  saleById={saleById}
+                  decimals={prefs.nb_decimales}
+                  onChanged={refresh}
+                  readOnly={false}
+                  acceptDrop={libraryOpen}
+                />
+              </div>
+              {splitOpen && (
+                <SplitPane
+                  affaireId={affaireId}
+                  currentDevisId={devisId}
+                  otherDevis={otherDevis}
+                  selectedVersionId={splitVersionId}
+                  onSelectVersion={setSplitVersionId}
+                  token={token}
+                  decimals={prefs.nb_decimales}
+                  mode="vente"
+                />
+              )}
             </div>
           </div>
           )}
@@ -601,7 +664,7 @@ export default function DevisEditorPage() {
               <h2 style={{ margin: 0 }}>Aperçu du devis</h2>
               <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
             </div>
-            <p className="muted" style={{ marginTop: 0 }}>Rendu du document tel qu’il sera remis au client (indépendant de l’export PDF).</p>
+            <p className="muted" style={{ marginTop: 0 }}>Rendu du document tel qu'il sera remis au client (indépendant de l'export PDF).</p>
             {pdfError && <p className="muted">{pdfError}</p>}
             {clientLines.length > 0 ? (
               <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '28px 32px', maxWidth: 820, margin: '0 auto' }}>
@@ -665,7 +728,7 @@ export default function DevisEditorPage() {
                   </div>
                 </div>
               </div>
-            ) : <p className="muted">Devis vide — construisez-le dans l’onglet Étude de prix.</p>}
+            ) : <p className="muted">Devis vide — construisez-le dans l'onglet Étude de prix.</p>}
           </div>
           )}
 
@@ -750,6 +813,8 @@ export default function DevisEditorPage() {
         </>
       )}
 
+      {libraryOpen && <LibraryDrawer token={token} onClose={() => setLibraryOpen(false)} />}
+
       {approOpen && (
         <div
           style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
@@ -763,7 +828,7 @@ export default function DevisEditorPage() {
                 <button className="btn-ghost" onClick={() => setApproOpen(false)}>✕</button>
               </div>
             </div>
-            <p className="muted" style={{ marginTop: 2 }}>Quantités d’achat par ressource (quantité d’emploi ÷ coefficient de conversion).</p>
+            <p className="muted" style={{ marginTop: 2 }}>Quantités d'achat par ressource (quantité d'emploi ÷ coefficient de conversion).</p>
             {appro.isLoading ? <p className="muted">Calcul…</p> : appro.data?.length ? (
               <table className="grid" style={{ marginTop: 8 }}>
                 <thead><tr>
@@ -800,6 +865,93 @@ export default function DevisEditorPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="field" style={{ marginBottom: 0 }}><label>{label}</label>{children}</div>;
+}
+
+interface SplitPaneProps {
+  affaireId: string;
+  currentDevisId: string;
+  otherDevis: Array<{ id: string; numero: string | null; designation: string; versions: Version[] }>;
+  selectedVersionId: string | null;
+  onSelectVersion: (id: string | null) => void;
+  token: string | null;
+  decimals: number;
+  mode: 'debours' | 'vente';
+}
+
+function SplitPane({ otherDevis, selectedVersionId, onSelectVersion, token, decimals, mode }: SplitPaneProps) {
+  const [selectedDevisId, setSelectedDevisId] = useState<string | null>(null);
+  const selectedDevis = otherDevis.find((d) => d.id === selectedDevisId);
+
+  useEffect(() => {
+    if (selectedDevis) {
+      const latest = selectedDevis.versions[selectedDevis.versions.length - 1];
+      onSelectVersion(latest?.id ?? null);
+    } else {
+      onSelectVersion(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDevisId]);
+
+  const splitLines = useQuery({
+    queryKey: ['lines', selectedVersionId, 'split'],
+    enabled: Boolean(token && selectedVersionId),
+    queryFn: () => apiFetch<DevisLine[]>(`/versions/${selectedVersionId}/lines`, { token }),
+  });
+  const splitSale = useQuery({
+    queryKey: ['sale-sheet', selectedVersionId, 'split'],
+    enabled: Boolean(token && selectedVersionId),
+    retry: false,
+    queryFn: () => apiFetch<SaleSheet>(`/versions/${selectedVersionId}/sale-sheet`, { token }),
+  });
+
+  const splitSaleById = useMemo(
+    () => new Map((splitSale.data?.items ?? []).map((i) => [i.id, { pv: i.pv, forced: i.forced }])),
+    [splitSale.data],
+  );
+
+  return (
+    <div style={{ width: 'min(440px, 45%)', minWidth: 0, borderLeft: '2px solid var(--border)', paddingLeft: 16 }}>
+      <div style={{ marginBottom: 10, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>Comparer avec :</span>
+        {otherDevis.length === 0 ? (
+          <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>Aucun autre devis sur cette affaire</span>
+        ) : (
+          <select value={selectedDevisId ?? ''} onChange={(e) => setSelectedDevisId(e.target.value || null)} style={{ flex: 1 }}>
+            <option value="">— choisir un devis —</option>
+            {otherDevis.map((d) => (
+              <option key={d.id} value={d.id}>{d.numero ? `${d.numero} — ` : ''}{d.designation}</option>
+            ))}
+          </select>
+        )}
+        {selectedDevis && selectedDevis.versions.length > 1 && (
+          <select value={selectedVersionId ?? ''} onChange={(e) => onSelectVersion(e.target.value || null)} style={{ width: 80 }}>
+            {selectedDevis.versions.map((v) => (
+              <option key={v.id} value={v.id}>v{v.version_no}</option>
+            ))}
+          </select>
+        )}
+      </div>
+      {selectedVersionId ? (
+        splitLines.isLoading ? (
+          <p className="muted" style={{ fontSize: 12 }}>Chargement…</p>
+        ) : (
+          <Montage
+            versionId={selectedVersionId}
+            token={token}
+            lines={(splitLines.data ?? []) as MontageLine[]}
+            deboursById={new Map((splitSale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
+            mode={mode}
+            saleById={splitSaleById}
+            decimals={decimals}
+            onChanged={() => {}}
+            readOnly
+          />
+        )
+      ) : (
+        <p className="muted" style={{ fontSize: 12 }}>Sélectionnez un devis pour comparer côte à côte.</p>
+      )}
+    </div>
+  );
 }
 
 
