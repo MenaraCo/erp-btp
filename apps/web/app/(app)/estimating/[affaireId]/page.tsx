@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
+import { IconBtn } from '@/components/IconBtn';
 
 interface Kpis {
   debourse: string; revient: string; pvHt: string; margeBrute: string; margeNette: string;
@@ -43,6 +45,7 @@ const devisBadge = (s: string) =>
 export default function AffaireDetailPage() {
   const { token } = useAuth();
   const qc = useQueryClient();
+  const router = useRouter();
   const affaireId = String(useParams().affaireId);
   const [err, setErr] = useState<string | null>(null);
 
@@ -142,15 +145,30 @@ export default function AffaireDetailPage() {
                 </tr></thead>
                 <tbody>
                   {detail.data.devis.map((dv) => (
-                    <tr key={dv.id}>
-                      <td>{dv.numero ? <strong>{dv.numero} </strong> : null}{dv.designation}</td>
+                    <tr
+                      key={dv.id}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => router.push(`/estimating/${affaireId}/devis/${dv.id}`)}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
+                    >
+                      <td>
+                        {dv.numero ? <span className="code-cell" style={{ marginRight: 6 }}>{dv.numero}</span> : null}
+                        {dv.designation}
+                      </td>
                       <td className="muted">{DEVIS_TYPE_LABELS[dv.type] ?? dv.type}</td>
                       <td><span className={devisBadge(dv.status)}>{AFFAIRE_STATUS_LABELS[dv.status] ?? dv.status}</span></td>
                       <td style={{ textAlign: 'right' }}>{euro(dv.kpis?.debourse)}</td>
                       <td style={{ textAlign: 'right' }}>{euro(dv.kpis?.pvHt)}</td>
                       <td style={{ textAlign: 'right' }}>{euro(dv.kpis?.margeNette)}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        <Link className="link" href={`/estimating/${affaireId}/devis/${dv.id}`}>Ouvrir →</Link>
+                      <td style={{ textAlign: 'right', paddingRight: 8 }}>
+                        <IconBtn
+                          title="Ouvrir le devis"
+                          color="var(--muted)"
+                          onClick={(e) => { e.stopPropagation(); router.push(`/estimating/${affaireId}/devis/${dv.id}`); }}
+                        >
+                          <ArrowRight size={14} />
+                        </IconBtn>
                       </td>
                     </tr>
                   ))}

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
@@ -25,6 +25,7 @@ interface DevisLine {
   parent_line_id: string | null;
   type: string;
   code: string | null;
+  code_analytique: string | null;
   designation: string;
   unit: string | null;
   quantity: string | null;
@@ -87,12 +88,6 @@ interface Ouvrage { id: string; code: string; label: string; unit: string; debou
 interface Page<T> { rows: T[] }
 
 const TYPE_LABELS: Record<string, string> = { titre: 'Titre', sous_titre: 'Sous-titre', ouvrage: 'Ouvrage', ressource: 'Ressource' };
-/** Étape suivante canonique du workflow d'affaire. */
-const NEXT_STATUS: Record<string, string> = {
-  open: 'study', study: 'coeffs_proposed', coeffs_proposed: 'coeffs_validated',
-  coeffs_validated: 'sent', sent: 'won',
-};
-
 function orderTree(lines: DevisLine[]): { line: DevisLine; depth: number }[] {
   const byParent = new Map<string | null, DevisLine[]>();
   for (const l of lines) (byParent.get(l.parent_line_id) ?? byParent.set(l.parent_line_id, []).get(l.parent_line_id)!).push(l);
@@ -111,22 +106,27 @@ export default function DevisEditorPage() {
   const qc = useQueryClient();
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const affaireId = String(params.affaireId);
   const devisId = String(params.devisId);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [marcheMsg, setMarcheMsg] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [splitVersionId, setSplitVersionId] = useState<string | null>(null);
+  // ?v=<versionId> — permet d'atterrir directement sur une version depuis la liste
+  const vFromUrl = searchParams.get('v');
 
   const detail = useQuery({
     queryKey: ['devis', devisId],
     enabled: Boolean(token),
     queryFn: () => apiFetch<DevisDetail>(`/devis/${devisId}`, { token }),
   });
-  const versionId = detail.data?.versions[detail.data.versions.length - 1]?.id;
-  const latest = detail.data?.versions[detail.data.versions.length - 1];
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(vFromUrl);
+  const versions = detail.data?.versions ?? [];
+  const latest = versions[versions.length - 1];
+  const versionId = activeVersionId ?? latest?.id;
+  const isLatest = !activeVersionId || activeVersionId === latest?.id;
 
   const lines = useQuery({
     queryKey: ['lines', versionId],
@@ -151,15 +151,33 @@ export default function DevisEditorPage() {
     queryFn: () => apiFetch<Page<Library>>('/libraries?pageSize=100', { token }),
   });
 
-  // Devis de l'affaire (pour le split-view)
+  // Affaire courante (toujours chargée — sert au header + split-view)
   const affaireDetail = useQuery<{
+    affaire: { id: string; code: string; name: string };
     devis: Array<{ id: string; numero: string | null; designation: string; versions: Version[] }>
   }>({
     queryKey: ['affaire', affaireId],
-    enabled: Boolean(token && splitOpen),
+    enabled: Boolean(token),
     queryFn: () => apiFetch(`/affaires/${affaireId}`, { token }),
   });
   const otherDevis = (affaireDetail.data?.devis ?? []).filter((d) => d.id !== devisId);
+
+  // Sélecteur d'affaire (changement)
+  const [changingAffaire, setChangingAffaire] = useState(false);
+  const allAffaires = useQuery<{ rows: { id: string; code: string; name: string }[] }>({
+    queryKey: ['affaires-picker'],
+    enabled: changingAffaire && Boolean(token),
+    queryFn: () => apiFetch('/affaires?sort=code&pageSize=200', { token }),
+  });
+  const moveAffaireMut = useMutation({
+    mutationFn: (newAffaireId: string) =>
+      apiFetch(`/devis/${devisId}`, { token, method: 'PATCH', body: { affaire_id: newAffaireId } }),
+    onSuccess: (_, newAffaireId) => {
+      setChangingAffaire(false);
+      router.push(`/estimating/${newAffaireId}/devis/${devisId}`);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
 
   const ordered = useMemo(() => orderTree(lines.data ?? []), [lines.data]);
   const parents = ordered.filter((o) => o.line.type === 'titre' || o.line.type === 'sous_titre');
@@ -169,22 +187,6 @@ export default function DevisEditorPage() {
     qc.invalidateQueries({ queryKey: ['sale-sheet', versionId] });
     qc.invalidateQueries({ queryKey: ['sale-config', versionId] });
   }
-
-  const status = detail.data?.devis.status ?? 'open';
-  const advance = useMutation({
-    mutationFn: () => apiFetch(`/devis/${devisId}/transition`, { method: 'POST', body: { to: NEXT_STATUS[status] }, token }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['devis', devisId] }),
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
-  const accept = useMutation({
-    mutationFn: () => apiFetch<{ marche: { id: string; code: string } }>(`/devis/${devisId}/accept`, { method: 'POST', body: {}, token }),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['devis', devisId] });
-      setMarcheMsg(`Marché ${res.marche.code} créé.`);
-      router.push(`/invoicing/${res.marche.id}`);
-    },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
 
   // --- add line ---
   const [pl, setPl] = useState({ parentId: '', type: 'titre', code: '', designation: '', libId: '', ouvrageId: '', unit: '', quantity: '', formula: '' });
@@ -252,6 +254,16 @@ export default function DevisEditorPage() {
         token,
       }),
     onSuccess: () => refresh(),
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
+
+  // --- nouvelle révision ---
+  const createVersionMut = useMutation({
+    mutationFn: () => apiFetch<Version>(`/devis/${devisId}/versions`, { method: 'POST', body: { label: '' }, token }),
+    onSuccess: () => {
+      setActiveVersionId(null);
+      qc.invalidateQueries({ queryKey: ['devis', devisId] });
+    },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
 
@@ -324,6 +336,46 @@ export default function DevisEditorPage() {
     }
     return totals;
   }, [lines.data, sale.data]);
+
+  // Lookup rapide par id (aperçu : remonter l'arbre pour trouver section_type d'un ancêtre).
+  const lineById = useMemo(
+    () => new Map((lines.data ?? []).map((l) => [l.id, l])),
+    [lines.data],
+  );
+
+  // Effective section_type for aperçu: walks up ancestry to find nearest variante/option.
+  const apercuLinesWithSection = useMemo(
+    () => clientLines.map((o) => {
+      let cur: DevisLine | undefined = o.line;
+      let sect: 'option' | 'variante' | null = null;
+      while (cur) {
+        if (cur.section_type) { sect = cur.section_type; break; }
+        cur = cur.parent_line_id ? lineById.get(cur.parent_line_id) : undefined;
+      }
+      return { ...o, sect };
+    }),
+    [clientLines, lineById],
+  );
+
+  // Subtotals base / option / variante (PV) pour le récapitulatif de l'aperçu.
+  const apercuTotals = useMemo(() => {
+    let base = 0, option = 0, variante = 0;
+    for (const it of sale.data?.items ?? []) {
+      const line = lineById.get(it.id);
+      if (!line) continue;
+      let cur: DevisLine | undefined = line;
+      let sect: 'option' | 'variante' | null = null;
+      while (cur) {
+        if (cur.section_type) { sect = cur.section_type; break; }
+        cur = cur.parent_line_id ? lineById.get(cur.parent_line_id) : undefined;
+      }
+      const pv = Number(it.pv) || 0;
+      if (sect === 'option') option += pv;
+      else if (sect === 'variante') variante += pv;
+      else base += pv;
+    }
+    return { base, option, variante };
+  }, [sale.data, lineById]);
 
   // Export du déboursé par ressource (CSV — s'ouvre dans Excel).
   function exportDebours() {
@@ -433,29 +485,89 @@ export default function DevisEditorPage() {
 
       {d && (
         <>
-          <h1 style={{ marginBottom: 4 }}>{d.numero ? `${d.numero} — ` : ''}{d.designation}</h1>
-          <p className="muted" style={{ marginTop: 0 }}>
-            <span className={d.status === "won" ? "badge success" : d.status === "lost" ? "badge danger" : (d.status === "sent" || d.status === "coeffs_validated") ? "badge info" : "badge"}>{AFFAIRE_STATUS_LABELS[d.status] ?? d.status}</span>
-            {` · ${d.type}`}{latest ? ` · Version ${latest.version_no}` : ''}
-          </p>
-
-          <div className="card" style={{ marginTop: 12 }}>
-            <h2>Workflow & acceptation</h2>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              {NEXT_STATUS[d.status] && (
-                <button className="btn" onClick={() => { setErr(null); advance.mutate(); }} disabled={advance.isPending}>
-                  Avancer → {AFFAIRE_STATUS_LABELS[NEXT_STATUS[d.status]]}
-                </button>
-              )}
-              {d.status === 'won' && (
-                <button className="btn" onClick={() => { setErr(null); accept.mutate(); }} disabled={accept.isPending}>
-                  Accepter (créer le marché)
-                </button>
-              )}
-              {d.status === 'won' && <span className="muted">Devis gagné — prêt à être accepté en marché.</span>}
-              {marcheMsg && <span className="muted">{marcheMsg}</span>}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
+            <h1 style={{ margin: 0 }}>{d.numero ? `${d.numero} — ` : ''}{d.designation}</h1>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, paddingTop: 4 }}>
+              {versions.map((v) => {
+                const active = versionId === v.id;
+                return (
+                  <button key={v.id} type="button"
+                    onClick={() => setActiveVersionId(v.id === latest?.id ? null : v.id)}
+                    title={v.label || `Version ${v.version_no}`}
+                    style={{
+                      fontSize: 11, padding: '2px 10px', borderRadius: 12, cursor: 'pointer',
+                      border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
+                      background: active ? 'var(--primary)' : 'transparent',
+                      color: active ? '#fff' : 'var(--muted)',
+                      fontWeight: active ? 700 : 400,
+                    }}
+                  >v{v.version_no}</button>
+                );
+              })}
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ fontSize: 11, padding: '2px 10px' }}
+                onClick={() => { setErr(null); createVersionMut.mutate(); }}
+                disabled={createVersionMut.isPending || !isLatest}
+                title="Créer une nouvelle révision (copie de la version active)"
+              >+ Révision</button>
             </div>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 0, marginBottom: 8, flexWrap: 'wrap' }}>
+            <span className={d.status === "won" ? "badge success" : d.status === "lost" ? "badge danger" : (d.status === "sent" || d.status === "coeffs_validated") ? "badge info" : "badge"}>{AFFAIRE_STATUS_LABELS[d.status] ?? d.status}</span>
+            <span style={{ color: 'var(--muted)', fontSize: 11 }}>{d.type}</span>
+            <span style={{ color: 'var(--border)', fontSize: 11 }}>·</span>
+            {/* Affaire selector */}
+            {!changingAffaire ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <Link href={`/estimating/${affaireId}`} style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>
+                  {affaireDetail.data?.affaire?.code ?? affaireId}
+                </Link>
+                {affaireDetail.data?.affaire?.name && (
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>— {affaireDetail.data.affaire.name}</span>
+                )}
+                <button
+                  type="button"
+                  title="Changer d'affaire"
+                  onClick={() => setChangingAffaire(true)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '1px 4px', borderRadius: 4, fontSize: 11 }}
+                >✎</button>
+              </span>
+            ) : (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <select
+                  autoFocus
+                  defaultValue={affaireId}
+                  disabled={moveAffaireMut.isPending}
+                  onChange={(e) => { if (e.target.value && e.target.value !== affaireId) moveAffaireMut.mutate(e.target.value); }}
+                  style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border-strong)' }}
+                >
+                  <option value={affaireId}>
+                    {affaireDetail.data?.affaire ? `${affaireDetail.data.affaire.code} — ${affaireDetail.data.affaire.name}` : affaireId}
+                  </option>
+                  {(allAffaires.data?.rows ?? [])
+                    .filter((a) => a.id !== affaireId)
+                    .map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setChangingAffaire(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 12 }}
+                >✕</button>
+              </span>
+            )}
+          </div>
+
+          {!isLatest && (
+            <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, padding: '8px 14px', marginBottom: 8, fontSize: 13, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>🔒</span>
+              <span>
+                Version {versions.find((v) => v.id === versionId)?.version_no} — lecture seule.
+                {' '}<button type="button" className="link" onClick={() => setActiveVersionId(null)} style={{ fontSize: 13 }}>Revenir à la v{latest?.version_no}</button> pour modifier.
+              </span>
+            </div>
+          )}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 12, borderBottom: '1px solid var(--border)' }}>
             {([['etude', 'Étude de prix'], ['coeffs', 'Coefficients & frais'], ['client', 'Devis client'], ['apercu', 'Aperçu devis']] as const).map(([key, label]) => (
@@ -490,7 +602,7 @@ export default function DevisEditorPage() {
             )}
           </div>
 
-          <div className="editor-grid">
+          <div className={`editor-grid${libraryOpen ? ' library-open' : ''}`}>
             <div className="editor-main" data-panel="1">
 
           {tab === 'etude' && (
@@ -508,7 +620,7 @@ export default function DevisEditorPage() {
                   deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
                   decimals={prefs.nb_decimales}
                   onChanged={refresh}
-                  readOnly={false}
+                  readOnly={!isLatest}
                   acceptDrop={libraryOpen}
                 />
               </div>
@@ -559,15 +671,8 @@ export default function DevisEditorPage() {
                 </tbody>
               </table>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <Field label="Remise">
-                  <select value={remise.type} onChange={(e) => setRemise({ ...remise, type: e.target.value as 'pct' | 'fixe' })}>
-                    <option value="pct">% du devis</option>
-                    <option value="fixe">Montant fixe</option>
-                  </select>
-                </Field>
-                <Field label="Valeur remise"><input style={{ width: 80 }} value={remise.valeur} onChange={(e) => setRemise({ ...remise, valeur: e.target.value })} /></Field>
                 <Field label="TVA">
-                  <select className="input" style={{ width: 120 }} value={tva} onChange={(e) => setTva(e.target.value)}>
+                  <select className="input" style={{ width: 120 }} value={tva} onChange={(e) => setTva(e.target.value)} disabled={!isLatest}>
                     {prefs.taux_tva.map((t) => (
                       <option key={t} value={String(t)}>
                         {t === 0 ? 'Autoliquidée (0%)' : `${t}%`}
@@ -575,7 +680,7 @@ export default function DevisEditorPage() {
                     ))}
                   </select>
                 </Field>
-                <button className="btn" type="submit" disabled={setSale.isPending}>Appliquer</button>
+                <button className="btn" type="submit" disabled={setSale.isPending || !isLatest}>Appliquer</button>
               </div>
             </form>
           </div>
@@ -585,7 +690,7 @@ export default function DevisEditorPage() {
           <div className="card" style={{ marginTop: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ margin: 0 }}>Frais annexes</h2>
-              <button className="btn" type="button" onClick={() => setFrais([...frais, { designation: '', type: 'pct', valeur: '0' }])}>+ Poste</button>
+              <button className="btn" type="button" disabled={!isLatest} onClick={() => setFrais([...frais, { designation: '', type: 'pct', valeur: '0' }])}>+ Poste</button>
             </div>
             {frais.length === 0 ? (
               <p className="muted">Aucun poste. Ex : compte prorata (% du PV) ou installation de chantier (montant fixe).</p>
@@ -638,7 +743,7 @@ export default function DevisEditorPage() {
                   saleById={saleById}
                   decimals={prefs.nb_decimales}
                   onChanged={refresh}
-                  readOnly={false}
+                  readOnly={!isLatest}
                   acceptDrop={libraryOpen}
                 />
               </div>
@@ -658,108 +763,203 @@ export default function DevisEditorPage() {
           </div>
           )}
 
-          {tab === 'apercu' && (
-          <div className="card" style={{ marginTop: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h2 style={{ margin: 0 }}>Aperçu du devis</h2>
-              <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
-            </div>
-            <p className="muted" style={{ marginTop: 0 }}>Rendu du document tel qu'il sera remis au client (indépendant de l'export PDF).</p>
-            {pdfError && <p className="muted">{pdfError}</p>}
-            {clientLines.length > 0 ? (
-              <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '28px 32px', maxWidth: 820, margin: '0 auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid var(--primary)', paddingBottom: 12, marginBottom: 16 }}>
-                  <div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--primary)' }}>DEVIS</div>
-                    {d?.numero && <div style={{ fontFamily: 'monospace', color: 'var(--accent)', fontWeight: 600 }}>N° {d.numero}</div>}
-                  </div>
-                  <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>
-                    {latest ? <div>Version {latest.version_no}</div> : null}
-                  </div>
-                </div>
-                <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 16 }}>{d?.designation}</div>
-                <table className="grid" style={{ width: '100%' }}>
-                  <thead><tr>
-                    <th style={{ width: 70 }}>N°</th>
-                    <th>Désignation</th>
-                    <th style={{ textAlign: 'right' }}>Qté</th>
-                    <th style={{ textAlign: 'right' }}>PU HT</th>
-                    <th style={{ textAlign: 'right' }}>Total HT</th>
-                  </tr></thead>
-                  <tbody>
-                    {clientLines.map(({ line, depth }) => {
-                      const item = itemById.get(line.id);
-                      if (line.type === 'titre' || line.type === 'sous_titre') {
-                        const sub = line.type === 'titre' ? titrePvByRoot.get(line.id) : undefined;
-                        return (
-                          <tr key={line.id} style={{ background: 'var(--surface)' }}>
-                            <td style={{ fontFamily: 'monospace', color: 'var(--accent)', fontWeight: 600 }}>{line.numero ?? ''}</td>
-                            <td colSpan={3} style={{ paddingLeft: depth * 16, fontWeight: 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', color: line.type === 'titre' ? 'var(--primary)' : undefined }}>
-                              {line.code ? <strong>{line.code} </strong> : null}{line.designation}
-                            </td>
-                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{sub != null ? e(sub) : ''}</td>
-                          </tr>
-                        );
-                      }
-                      if (line.type === 'texte') {
-                        return <tr key={line.id}><td /><td colSpan={4} style={{ paddingLeft: depth * 16, fontStyle: 'italic', color: 'var(--muted)' }}>{line.designation}</td></tr>;
-                      }
-                      const qty = Number(line.quantity) || 0;
-                      const puVente = item && qty ? Number(item.pv) / qty : null;
-                      return (
-                        <tr key={line.id}>
-                          <td style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: 11 }}>{line.numero ?? ''}</td>
-                          <td style={{ paddingLeft: depth * 16 }}>{line.designation}</td>
-                          <td style={{ textAlign: 'right' }}>{line.quantity != null ? cleanNum(line.quantity) : '—'} {line.unit ?? ''}</td>
-                          <td style={{ textAlign: 'right' }}>{puVente != null ? e(puVente) : '—'}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? e(item.pv) : '—'}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-                  <div style={{ width: 300 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">PV brut HT</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.pvDevis)}</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">Remise</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e((Number(sale.data?.pvDevis) || 0) - (Number(sale.data?.totalPvHt) || 0))}</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid var(--border)', fontWeight: 600 }}><span>Total HT</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.totalPvHt)}</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">TVA</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.tva)}</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', marginTop: 4, background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-sm)', fontWeight: 700 }}><span>Total TTC</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.totalTtc)}</span></div>
-                  </div>
-                </div>
+          {tab === 'apercu' && (() => {
+            const hasVariante = apercuTotals.variante > 0.001;
+            const hasOption = apercuTotals.option > 0.001;
+
+            // Totaux base uniquement (variantes/options exclus des totaux officiels).
+            // La remise et la TVA sont redistribuées proportionnellement à la base.
+            const pvDevisN = Number(sale.data?.pvDevis) || 0;
+            const totalPvHtN = Number(sale.data?.totalPvHt) || 0;
+            const tvaTotal = Number(sale.data?.tva) || 0;
+            const remiseFraction = pvDevisN > 0 ? totalPvHtN / pvDevisN : 1;
+            const tvaRate = totalPvHtN > 0 ? tvaTotal / totalPvHtN : 0;
+            const basePvBrut = apercuTotals.base;
+            const baseTotalHt = basePvBrut * remiseFraction;
+            const baseRemise = basePvBrut - baseTotalHt;
+            const baseTva = baseTotalHt * tvaRate;
+            const baseTtc = baseTotalHt + baseTva;
+
+            // Rendu d'une ligne dans le tableau aperçu (toutes sections confondues).
+            const apercuRow = (line: DevisLine, depth: number, sect: 'option' | 'variante' | null) => {
+              const item = itemById.get(line.id);
+              const rowBg = sect === 'variante' ? '#fff8f3' : sect === 'option' ? '#fbf5ff' : undefined;
+              const badge = sect ? (
+                <span style={{ display: 'inline-block', fontSize: 9, fontWeight: 700, lineHeight: '14px',
+                  background: sect === 'variante' ? '#f97316' : '#a855f7', color: '#fff',
+                  borderRadius: 2, padding: '0 4px', marginRight: 5, verticalAlign: 'middle' }}>
+                  {sect === 'variante' ? 'V' : 'O'}
+                </span>
+              ) : null;
+
+              if (line.type === 'titre' || line.type === 'sous_titre') {
+                const sub = line.type === 'titre' ? titrePvByRoot.get(line.id) : undefined;
+                return (
+                  <tr key={line.id} style={{ background: rowBg ?? 'var(--surface)' }}>
+                    <td style={{ fontFamily: 'monospace', color: 'var(--accent)', fontWeight: 600 }}>{line.numero ?? ''}</td>
+                    <td colSpan={3} style={{ paddingLeft: depth * 16, fontWeight: 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', color: line.type === 'titre' ? 'var(--primary)' : undefined }}>
+                      {badge}{line.code ? <strong>{line.code} </strong> : null}{line.designation}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{sub != null ? e(sub) : ''}</td>
+                  </tr>
+                );
+              }
+              if (line.type === 'texte') {
+                return <tr key={line.id} style={{ background: rowBg }}><td /><td colSpan={4} style={{ paddingLeft: depth * 16, fontStyle: 'italic', color: 'var(--muted)' }}>{badge}{line.designation}</td></tr>;
+              }
+              const qty = Number(line.quantity) || 0;
+              const puVente = item && qty ? Number(item.pv) / qty : null;
+              return (
+                <tr key={line.id} style={{ background: rowBg }}>
+                  <td style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: 11 }}>{line.numero ?? ''}</td>
+                  <td style={{ paddingLeft: depth * 16 }}>{badge}{line.designation}</td>
+                  <td style={{ textAlign: 'right' }}>{line.quantity != null ? cleanNum(line.quantity) : '—'} {line.unit ?? ''}</td>
+                  <td style={{ textAlign: 'right' }}>{puVente != null ? e(puVente) : '—'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{item ? e(item.pv) : '—'}</td>
+                </tr>
+              );
+            };
+
+            return (
+            <div className="card" style={{ marginTop: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <h2 style={{ margin: 0 }}>Aperçu du devis</h2>
+                <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
               </div>
-            ) : <p className="muted">Devis vide — construisez-le dans l'onglet Étude de prix.</p>}
-          </div>
-          )}
+              <p className="muted" style={{ marginTop: 0 }}>Rendu du document tel qu&apos;il sera remis au client (indépendant de l&apos;export PDF).</p>
+              {pdfError && <p className="muted">{pdfError}</p>}
+              {clientLines.length > 0 ? (
+                <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '28px 32px', maxWidth: 820, margin: '0 auto' }}>
+                  {/* En-tête document */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid var(--primary)', paddingBottom: 12, marginBottom: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--primary)' }}>DEVIS</div>
+                      {d?.numero && <div style={{ fontFamily: 'monospace', color: 'var(--accent)', fontWeight: 600 }}>N° {d.numero}</div>}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>
+                      {latest ? <div>Version {latest.version_no}</div> : null}
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 16 }}>{d?.designation}</div>
+
+                  {/* Tableau unique — toutes lignes avec badge V/O coloré pour variantes/options */}
+                  <table className="grid" style={{ width: '100%' }}>
+                    <thead><tr>
+                      <th style={{ width: 70 }}>N°</th>
+                      <th>Désignation</th>
+                      <th style={{ textAlign: 'right' }}>Qté</th>
+                      <th style={{ textAlign: 'right' }}>PU HT</th>
+                      <th style={{ textAlign: 'right' }}>Total HT</th>
+                    </tr></thead>
+                    <tbody>
+                      {apercuLinesWithSection.map(({ line, depth, sect }) => apercuRow(line, depth, sect))}
+                    </tbody>
+                  </table>
+
+                  {/* Totaux — base uniquement (variantes/options exclus) */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 28 }}>
+                    <div style={{ width: 340 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">PV brut HT</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(basePvBrut)}</span></div>
+                      {baseRemise > 0.001 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">Remise</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(baseRemise)}</span></div>}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid var(--border)', fontWeight: 600 }}><span>Total HT</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(baseTotalHt)}</span></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">TVA</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(baseTva)}</span></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', marginTop: 4, background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-sm)', fontWeight: 700 }}><span>Total TTC</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(baseTtc)}</span></div>
+
+                      {/* Récapitulatif variantes/options — après le TTC, style DPGF */}
+                      {(hasVariante || hasOption) && (() => {
+                        // Gather sections by type for the recap table.
+                        const sectionRows = (sType: 'variante' | 'option') =>
+                          apercuLinesWithSection
+                            .filter(({ sect }) => sect === sType)
+                            .filter(({ line }) => line.type === 'titre' || line.type === 'sous_titre' || !line.parent_line_id || (() => {
+                              // Only include the topmost tagged line of each section.
+                              const parent = lineById.get(line.parent_line_id!);
+                              let cur = parent;
+                              while (cur) {
+                                if (cur.section_type === sType) return false;
+                                cur = cur.parent_line_id ? lineById.get(cur.parent_line_id) : undefined;
+                              }
+                              return true;
+                            })())
+                            // Deduplicate: only keep root of each section block.
+                            .filter(({ line }) => {
+                              const parent = lineById.get(line.parent_line_id ?? '');
+                              if (!parent) return true;
+                              let cur: DevisLine | undefined = parent;
+                              while (cur) {
+                                if (cur.section_type === sType) return false;
+                                cur = cur.parent_line_id ? lineById.get(cur.parent_line_id) : undefined;
+                              }
+                              return true;
+                            });
+
+                        const RecapSection = ({ sType, color, label }: { sType: 'variante' | 'option'; color: string; label: string }) => {
+                          const rows = sectionRows(sType);
+                          const total = sType === 'variante' ? apercuTotals.variante : apercuTotals.option;
+                          return (
+                            <div style={{ marginTop: 20 }}>
+                              {/* Full-width colored header */}
+                              <div style={{ background: color, color: '#fff', padding: '6px 12px', fontWeight: 700, fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                                {label}
+                              </div>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                <thead>
+                                  <tr style={{ background: '#f8fafc', borderBottom: `2px solid ${color}` }}>
+                                    <th style={{ textAlign: 'left', padding: '4px 8px', width: 60, fontWeight: 600 }}>N°</th>
+                                    <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>Désignation</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>Total H.T.</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {rows.map(({ line }) => {
+                                    const item = itemById.get(line.id);
+                                    const pvVal = item ? Number(item.pv) : (titrePvByRoot.get(line.id) ?? 0);
+                                    return (
+                                      <tr key={line.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                        <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: '#64748b', fontSize: 11 }}>{line.numero ?? ''}</td>
+                                        <td style={{ padding: '4px 8px' }}>{line.designation}</td>
+                                        <td style={{ padding: '4px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{e(pvVal)}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                                <tfoot>
+                                  <tr style={{ background: color, color: '#fff' }}>
+                                    <td colSpan={2} style={{ padding: '5px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                      Total {label} H.T.
+                                    </td>
+                                    <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{e(total)}</td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          );
+                        };
+
+                        return (
+                          <div style={{ marginTop: 24, borderTop: '2px solid var(--border)', paddingTop: 16, width: '100%' }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 4 }}>
+                              Récapitulatif Variantes &amp; Options
+                            </div>
+                            {hasVariante && <RecapSection sType="variante" color="#f97316" label="Variantes" />}
+                            {hasOption && <RecapSection sType="option" color="#a855f7" label="Options" />}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              ) : <p className="muted">Devis vide — construisez-le dans l&apos;onglet Étude de prix.</p>}
+            </div>
+            );
+          })()}
 
             </div>
 
             <aside className="synthese-panel" data-panel="2">
-              {tab === 'client' ? (
-                <>
-                  <div className="form-section-title">Récapitulatif client</div>
-                  <div className="synthese-row"><span className="lbl">PV brut HT</span><span className="val">{e(sale.data?.pvDevis)}</span></div>
-                  <div className="synthese-row">
-                    <span className="lbl">Remise</span>
-                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                      <input style={{ width: 56, textAlign: 'right' }} value={remise.valeur}
-                        onChange={(e) => setRemise({ ...remise, valeur: e.target.value })} />
-                      <button type="button" className="btn-ghost" style={{ fontWeight: 700 }}
-                        onClick={() => setRemise({ ...remise, type: remise.type === 'pct' ? 'fixe' : 'pct' })}>
-                        {remise.type === 'pct' ? '%' : '€'}
-                      </button>
-                      <button type="button" className="btn-secondary" style={{ padding: '4px 8px' }}
-                        onClick={() => { setErr(null); setSale.mutate(); }} disabled={setSale.isPending}>OK</button>
-                    </span>
-                  </div>
-                  <div className="synthese-row"><span className="lbl">Total HT</span><span className="val">{e(sale.data?.totalPvHt)}</span></div>
-                  <div className="synthese-row"><span className="lbl">TVA</span><span className="val">{e(sale.data?.tva)}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--primary)', color: '#fff', margin: '10px -16px 0', padding: '10px 16px' }}>
-                    <span style={{ fontWeight: 600, fontSize: 12 }}>Total TTC</span>
-                    <span style={{ fontWeight: 700, fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.totalTtc)}</span>
-                  </div>
-                </>
-              ) : (
+
+              {/* ── Onglets Étude & Aperçu : récap débours par section ── */}
+              {(tab === 'etude' || tab === 'apercu') && (
                 <>
                   <div className="form-section-title">Récapitulatif débours</div>
                   {titreRecap.map(({ line, total }, i) => (
@@ -784,6 +984,85 @@ export default function DevisEditorPage() {
                 </>
               )}
 
+              {/* ── Onglet Coefficients : schéma calcul + coeff global ── */}
+              {tab === 'coeffs' && (
+                <>
+                  <div className="form-section-title">Calcul du prix de vente</div>
+                  <div className="synthese-row">
+                    <span className="lbl">Débours</span>
+                    <span className="val" style={{ color: 'var(--accent)' }}>{e(sale.data?.totalDebourse)}</span>
+                  </div>
+                  <div className="synthese-row" style={{ color: 'var(--primary)' }}>
+                    <span className="lbl">× FG → Prix de revient</span>
+                    <span className="val">{e(sale.data?.totalRevient)}</span>
+                  </div>
+                  <div className="synthese-row" style={{ color: 'var(--primary)' }}>
+                    <span className="lbl">× Bén. → PV hors frais</span>
+                    <span className="val">{e(sale.data?.pvHorsFrais)}</span>
+                  </div>
+                  {Number(sale.data?.fraisAnnexes) > 0.001 && (
+                    <div className="synthese-row" style={{ color: '#d97706' }}>
+                      <span className="lbl">+ Frais annexes</span>
+                      <span className="val">{e(sale.data?.fraisAnnexes)}</span>
+                    </div>
+                  )}
+                  <div className="synthese-row" style={{ borderTop: '1px solid var(--border)', fontWeight: 700, paddingTop: 6 }}>
+                    <span>PV final</span>
+                    <span className="val">{e(sale.data?.pvDevis)}</span>
+                  </div>
+
+                  {/* Coefficient global — badge */}
+                  <div style={{ background: 'var(--primary)', color: '#fff', borderRadius: 6, textAlign: 'center', padding: '10px 12px', margin: '12px 0' }}>
+                    <div style={{ fontSize: 11, opacity: 0.75, marginBottom: 2 }}>Coefficient global (Deb. → PV)</div>
+                    <div style={{ fontSize: 24, fontWeight: 900, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.5px' }}>
+                      ×{coeffStr(sale.data?.pvHorsFrais, sale.data?.totalDebourse)}
+                    </div>
+                    <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>PV hors frais = Débours × {coeffStr(sale.data?.pvHorsFrais, sale.data?.totalDebourse)}</div>
+                  </div>
+
+                  {/* Coefficients par nature */}
+                  <div className="form-section-title" style={{ marginTop: 8 }}>Coefficients par nature</div>
+                  {(Object.keys(NATURE_LABELS) as Nat[]).map((n) => {
+                    const c = coef[n];
+                    const k = (1 + Number(c.fg) / 100) * (1 + Number(c.ben) / 100);
+                    return (
+                      <div key={n} className="synthese-row">
+                        <span className="lbl" style={{ fontSize: 11 }}>{NATURE_LABELS[n]}</span>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: 'var(--primary)' }}>×{k.toFixed(3)}</span>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* ── Onglet Devis client : totaux client + remise ── */}
+              {tab === 'client' && (
+                <>
+                  <div className="form-section-title">Récapitulatif client</div>
+                  <div className="synthese-row"><span className="lbl">PV brut HT</span><span className="val">{e(sale.data?.pvDevis)}</span></div>
+                  <div className="synthese-row">
+                    <span className="lbl">Remise</span>
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      <input style={{ width: 56, textAlign: 'right' }} value={remise.valeur}
+                        onChange={(ev) => setRemise({ ...remise, valeur: ev.target.value })} />
+                      <button type="button" className="btn-ghost" style={{ fontWeight: 700 }}
+                        onClick={() => setRemise({ ...remise, type: remise.type === 'pct' ? 'fixe' : 'pct' })}>
+                        {remise.type === 'pct' ? '%' : '€'}
+                      </button>
+                      <button type="button" className="btn-secondary" style={{ padding: '4px 8px' }}
+                        onClick={() => { setErr(null); setSale.mutate(); }} disabled={setSale.isPending}>OK</button>
+                    </span>
+                  </div>
+                  <div className="synthese-row"><span className="lbl">Total HT</span><span className="val">{e(sale.data?.totalPvHt)}</span></div>
+                  <div className="synthese-row"><span className="lbl">TVA</span><span className="val">{e(sale.data?.tva)}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--primary)', color: '#fff', margin: '10px -16px 0', padding: '10px 16px' }}>
+                    <span style={{ fontWeight: 600, fontSize: 12 }}>Total TTC</span>
+                    <span style={{ fontWeight: 700, fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{e(sale.data?.totalTtc)}</span>
+                  </div>
+                </>
+              )}
+
+              {/* ── Synthèse financière — visible sur tous les onglets ── */}
               <div className="form-section-title" style={{ marginTop: 18 }}>Synthèse financière</div>
               <div className="synthese-row"><span className="lbl">Déboursé total</span><span className="val">{e(sale.data?.totalDebourse)}</span></div>
               <div className="synthese-row"><span className="lbl">Frais annexes</span><span className="val">{e(sale.data?.fraisAnnexes)}</span></div>

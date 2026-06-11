@@ -17,6 +17,7 @@ export interface RawComponent {
   childOuvrageId?: string | null;
   resourceId?: string | null;
   code?: string | null;
+  codeAnalytique?: string | null;
   designation?: string;
   nature?: Nature;
   unit?: string | null;
@@ -31,6 +32,7 @@ export interface RawOuvrage {
 export interface FlatComponent {
   resourceId: string | null;
   code: string | null;
+  codeAnalytique: string | null;
   designation: string;
   nature: Nature;
   unit: string | null;
@@ -50,6 +52,7 @@ export class CycleDetectedError extends Error {
 interface InternalFlat {
   resourceId: string | null;
   code: string | null;
+  codeAnalytique: string | null;
   designation: string;
   nature: Nature;
   unit: string | null;
@@ -82,6 +85,7 @@ function flattenInternal(
       out.push({
         resourceId: c.resourceId ?? null,
         code: c.code ?? null,
+        codeAnalytique: c.codeAnalytique ?? null,
         designation: c.designation ?? 'Ressource',
         nature: c.nature ?? 'material',
         unit: c.unit ?? null,
@@ -93,7 +97,7 @@ function flattenInternal(
       const qty = new Decimal(c.quantity ?? 0);
       const childFlat = flattenInternal(c.childOuvrageId, byId, new Set(visiting));
       for (const cf of childFlat) {
-        out.push({ ...cf, qtyPerUnit: cf.qtyPerUnit.times(qty) });
+        out.push({ ...cf, codeAnalytique: cf.codeAnalytique ?? null, qtyPerUnit: cf.qtyPerUnit.times(qty) });
         base = base.plus(qty.times(cf.qtyPerUnit).times(cf.unitCost));
       }
     } else if (c.kind === 'percentage') {
@@ -105,6 +109,7 @@ function flattenInternal(
     out.push({
       resourceId: null,
       code: null,
+      codeAnalytique: null,
       designation: `Frais (${rateTotal.times(100).toString()} %)`,
       nature: 'material',
       unit: null,
@@ -124,6 +129,7 @@ export function flattenOuvrageToResources(
   return flattenInternal(rootId, ouvragesById, new Set()).map((f) => ({
     resourceId: f.resourceId,
     code: f.code,
+    codeAnalytique: f.codeAnalytique,
     designation: f.designation,
     nature: f.nature,
     unit: f.unit,

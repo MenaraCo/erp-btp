@@ -105,11 +105,47 @@ export class DevisController {
     return this.devis.getDevis(devisId);
   }
 
+  @Delete('devis/:devisId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  deleteDevis(@Param('devisId') devisId: string) {
+    return this.devis.deleteDevis(devisId);
+  }
+
+  @Post('devis/:devisId/duplicate')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  duplicateDevis(@Param('devisId') devisId: string) {
+    return this.devis.duplicateDevis(devisId);
+  }
+
+  @Put('devis/:devisId/status')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  setDevisStatus(@Param('devisId') devisId: string, @Body() body: { status: string }) {
+    if (!body?.status) throw new BadRequestException('status is required');
+    return this.devis.setDevisStatus(devisId, body.status);
+  }
+
   @Post('devis/:devisId/versions')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')
   createVersion(@Param('devisId') devisId: string, @Body() body: { label?: string }) {
     return this.devis.createVersion(devisId, body?.label);
+  }
+
+  @Delete('versions/:versionId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  deleteVersion(@Param('versionId') versionId: string) {
+    return this.devis.deleteVersion(versionId);
+  }
+
+  @Get('versions/:versionId/changelog')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  getVersionChangelog(@Param('versionId') versionId: string) {
+    return this.devis.getVersionChangelog(versionId);
   }
 
   @Post('versions/:versionId/lines')
@@ -158,6 +194,27 @@ export class DevisController {
   @RequiresPermission('estimating.devis.read')
   appro(@Param('versionId') versionId: string) {
     return this.devis.computeApproForVersion(versionId);
+  }
+
+  @Put('versions/:versionId/lines/reorder')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  reorderLines(
+    @Param('versionId') versionId: string,
+    @Body() body: { parentLineId?: string | null; orderedIds: string[] },
+  ) {
+    if (!Array.isArray(body?.orderedIds)) throw new BadRequestException('orderedIds is required');
+    return this.devis.reorderLines(versionId, body.parentLineId ?? null, body.orderedIds);
+  }
+
+  @Post('lines/:lineId/duplicate')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  duplicateLine(
+    @Param('lineId') lineId: string,
+    @Body() body: { keepCode?: boolean },
+  ) {
+    return this.devis.duplicateLine(lineId, body?.keepCode ?? true);
   }
 
   @Put('lines/:lineId/section')

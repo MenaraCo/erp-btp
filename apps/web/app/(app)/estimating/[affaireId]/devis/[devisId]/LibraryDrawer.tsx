@@ -8,7 +8,7 @@ import type { DragItem } from './Montage';
 
 interface Library { id: string; code: string; name: string }
 interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
-interface Resource { id: string; code: string; label: string; unit: string; unitCost: string; nature: string }
+interface Resource { id: string; code: string; label: string; unit: string; unitCost: string; nature: string; codeAnalytiqueCode?: string | null }
 interface Page<T> { rows: T[]; total: number }
 
 const DRAG_KEY = 'application/json';
@@ -136,7 +136,7 @@ export function LibraryDrawer({ token, onClose }: { token: string | null; onClos
             <div
               key={r.id}
               draggable
-              onDragStart={(e) => setDrag(e, { kind: 'ressource', id: r.id, code: r.code, label: r.label, unit: r.unit, debourse: r.unitCost })}
+              onDragStart={(e) => setDrag(e, { kind: 'ressource', id: r.id, code: r.code, label: r.label, unit: r.unit, debourse: r.unitCost, codeAnalytique: r.codeAnalytiqueCode ?? null })}
               title={`Glisser pour insérer « ${r.label} »`}
               style={{
                 display: 'flex', flexDirection: 'column', gap: 2,

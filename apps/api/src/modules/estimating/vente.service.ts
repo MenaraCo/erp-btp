@@ -237,14 +237,41 @@ export class VenteService {
     );
 
     const byId = new Map(lines.map((l) => [l.id, l]));
+    // Include both ressource AND ouvrage children of ouvrages in sous-détail map.
     const childrenByParent = new Map<string, typeof lines>();
     for (const l of lines) {
-      if (l.type === 'ressource' && l.parent_line_id) {
+      if (!l.parent_line_id) continue;
+      const parent = byId.get(l.parent_line_id);
+      if (parent?.type === 'ouvrage' && (l.type === 'ressource' || l.type === 'ouvrage')) {
         const arr = childrenByParent.get(l.parent_line_id) ?? [];
         arr.push(l);
         childrenByParent.set(l.parent_line_id, arr);
       }
     }
+
+    // Compute unit nature breakdown (debours per 1 unit) for a sub-ouvrage — memoised.
+    const unitBreakdownCache = new Map<string, Partial<Record<Nature, Decimal>>>();
+    const computeUnitBreakdown = (l: (typeof lines)[number]): Partial<Record<Nature, Decimal>> => {
+      const cached = unitBreakdownCache.get(l.id);
+      if (cached) return cached;
+      const result: Partial<Record<Nature, Decimal>> = {};
+      for (const c of childrenByParent.get(l.id) ?? []) {
+        const childFactor = new Decimal(c.quantity ?? 0).times(
+          new Decimal(1).plus(new Decimal(c.perte ?? 0).dividedBy(100)),
+        );
+        if (c.type === 'ressource') {
+          const n: Nature = c.nature ?? c.resource_nature ?? 'material';
+          result[n] = (result[n] ?? new Decimal(0)).plus(new Decimal(c.pu ?? 0).times(childFactor));
+        } else if (c.type === 'ouvrage') {
+          const sub = computeUnitBreakdown(c);
+          for (const n of NATURES) {
+            if (sub[n]) result[n] = (result[n] ?? new Decimal(0)).plus(sub[n]!.times(childFactor));
+          }
+        }
+      }
+      unitBreakdownCache.set(l.id, result);
+      return result;
+    };
 
     // A line's section (option/variante) is inherited from the nearest ancestor that carries one.
     const resolveSection = (start: (typeof lines)[number]): SectionKind => {
@@ -272,9 +299,9 @@ export class VenteService {
 
     const items: VenteItemInput[] = [];
     for (const l of lines) {
-      // Ressource children of an ouvrage are detail (priced via their parent ouvrage), not items.
+      // Children of an ouvrage (ressource or sub-ouvrage) are sous-détail — priced via their parent.
       const parent = l.parent_line_id ? byId.get(l.parent_line_id) : undefined;
-      if (l.type === 'ressource' && parent?.type === 'ouvrage') {
+      if ((l.type === 'ressource' || l.type === 'ouvrage') && parent?.type === 'ouvrage') {
         continue;
       }
       if (l.type !== 'ouvrage' && l.type !== 'ressource') {
@@ -288,8 +315,16 @@ export class VenteService {
         if (children.length > 0) {
           // déboursé agrégé depuis le sous-détail copié & éditable
           for (const c of children) {
-            const nature: Nature = c.nature ?? c.resource_nature ?? 'material';
-            addNature(debourseByNature, nature, new Decimal(c.pu ?? 0).times(effQty(c, qty)));
+            if (c.type === 'ressource') {
+              const nature: Nature = c.nature ?? c.resource_nature ?? 'material';
+              addNature(debourseByNature, nature, new Decimal(c.pu ?? 0).times(effQty(c, qty)));
+            } else if (c.type === 'ouvrage') {
+              // sub-ouvrage : contribution = unit_breakdown × parent_qty × child_qty × (1+perte)
+              const sub = computeUnitBreakdown(c);
+              for (const n of NATURES) {
+                if (sub[n]) addNature(debourseByNature, n, sub[n]!.times(effQty(c, qty)));
+              }
+            }
           }
         } else if (l.source_ouvrage_id) {
           const unit = breakdowns.get(l.source_ouvrage_id) ?? zeroBreakdown();

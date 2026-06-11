@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
+import { ArrowRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
+import { IconBtn } from '@/components/IconBtn';
 
 interface Affaire {
   id: string;
@@ -19,6 +20,12 @@ interface AffairesPage {
   rows: Affaire[];
   total: number;
 }
+
+const AFFAIRE_BADGE: Record<string, string> = {
+  gagnee: 'badge success',
+  perdue: 'badge danger',
+  gagnee_partielle: 'badge info',
+};
 
 export default function EstimatingPage() {
   const { token } = useAuth();
@@ -53,7 +60,6 @@ export default function EstimatingPage() {
       setName('');
       setMoa('');
       setError(null);
-      // ouvre directement le nouveau devis
       router.push(`/estimating/${res.affaire.id}`);
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : 'Échec de la création'),
@@ -98,7 +104,7 @@ export default function EstimatingPage() {
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" type="submit" disabled={create.isPending}>
-                {create.isPending ? 'Création…' : 'Créer le devis'}
+                {create.isPending ? 'Création…' : "Créer l'affaire"}
               </button>
               <button className="link" type="button" onClick={() => { setShowForm(false); setError(null); }}>
                 Annuler
@@ -108,43 +114,50 @@ export default function EstimatingPage() {
         </div>
       )}
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2>Affaires {data ? `(${data.total})` : ''}</h2>
-        {isLoading && <p className="muted">Chargement…</p>}
-        {isError && <p className="muted">Accès non autorisé ou aucune donnée.</p>}
+      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
+        {isLoading && <p className="muted" style={{ padding: 16 }}>Chargement…</p>}
+        {isError && <p className="muted" style={{ padding: 16 }}>Accès non autorisé ou aucune donnée.</p>}
         {data && data.rows.length > 0 && (
-          <table className="grid">
+          <table className="grid" style={{ margin: 0 }}>
             <thead>
               <tr>
                 <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
-                <SortHeader label="Nom" colKey="name" sort={sort} onSort={onSort} />
+                <SortHeader label="Désignation" colKey="name" sort={sort} onSort={onSort} />
                 <SortHeader label="Statut" colKey="status" sort={sort} onSort={onSort} />
-                <th></th>
+                <th style={{ width: 40 }} />
               </tr>
             </thead>
             <tbody>
               {affaireRows.map((a) => (
-                <tr key={a.id}>
+                <tr
+                  key={a.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => router.push(`/estimating/${a.id}`)}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
+                >
+                  <td className="code-cell">{a.code}</td>
+                  <td style={{ fontWeight: 500 }}>{a.name}</td>
                   <td>
-                    <Link href={`/estimating/${a.id}`} className="link">
-                      {a.code}
-                    </Link>
+                    <span className={AFFAIRE_BADGE[a.status] ?? 'badge'}>
+                      {AFFAIRE_STATUS_LABELS[a.status] ?? a.status}
+                    </span>
                   </td>
-                  <td>{a.name}</td>
-                  <td>
-                    <span className="badge">{AFFAIRE_STATUS_LABELS[a.status] ?? a.status}</span>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <Link href={`/estimating/${a.id}`} className="link">
-                      Ouvrir le devis →
-                    </Link>
+                  <td style={{ textAlign: 'right', paddingRight: 8 }}>
+                    <IconBtn
+                      title="Ouvrir l'affaire"
+                      color="var(--muted)"
+                      onClick={(e) => { e.stopPropagation(); router.push(`/estimating/${a.id}`); }}
+                    >
+                      <ArrowRight size={14} />
+                    </IconBtn>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-        {data && data.rows.length === 0 && <p className="muted">Aucune affaire.</p>}
+        {data && data.rows.length === 0 && <p className="muted" style={{ padding: 16 }}>Aucune affaire.</p>}
       </div>
     </div>
   );

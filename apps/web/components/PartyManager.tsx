@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { SortHeader, SortState, nextSort, applySort } from './SortHeader';
+import { IconBtn } from './IconBtn';
 
 interface Party {
   id: string;
@@ -27,10 +29,6 @@ interface FormState {
 }
 const EMPTY: FormState = { code: '', name: '', vatNumber: '', email: '', phone: '' };
 
-/**
- * Generic CRUD screen for a "party" resource (clients or suppliers): list + create/edit form +
- * soft delete. Every action hits the real API and refreshes the list via query invalidation.
- */
 export function PartyManager({
   resource,
   title,
@@ -77,7 +75,7 @@ export function PartyManager({
       qc.invalidateQueries({ queryKey: [resource] });
       reset();
     },
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Échec de l’enregistrement'),
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Échec de l'enregistrement"),
   });
 
   const remove = useMutation({
@@ -166,48 +164,45 @@ export function PartyManager({
         </div>
       )}
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2>Liste {list.data ? `(${list.data.total})` : ''}</h2>
-        {list.isLoading && <p className="muted">Chargement…</p>}
-        {list.isError && <p className="muted">Accès non autorisé ou aucune donnée.</p>}
+      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
+        {list.isLoading && <p className="muted" style={{ padding: 16 }}>Chargement…</p>}
+        {list.isError && <p className="muted" style={{ padding: 16 }}>Accès non autorisé ou aucune donnée.</p>}
         {rows.length > 0 && (
-          <table className="grid">
+          <table className="grid" style={{ margin: 0 }}>
             <thead>
               <tr>
                 <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
                 <SortHeader label="Nom" colKey="name" sort={sort} onSort={onSort} />
                 <SortHeader label="E-mail" colKey="email" sort={sort} onSort={onSort} />
                 <SortHeader label="Téléphone" colKey="phone" sort={sort} onSort={onSort} />
-                <th></th>
+                <th style={{ width: 64 }} />
               </tr>
             </thead>
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id}>
-                  <td>{p.code}</td>
-                  <td>{p.name}</td>
-                  <td>{p.email ?? '—'}</td>
-                  <td>{p.phone ?? '—'}</td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button className="link" onClick={() => startEdit(p)}>
-                      Modifier
-                    </button>
-                    {' · '}
-                    <button
-                      className="link"
-                      onClick={() => {
-                        if (confirm(`Supprimer ${p.name} ?`)) remove.mutate(p.id);
-                      }}
+                  <td className="code-cell">{p.code}</td>
+                  <td style={{ fontWeight: 500 }}>{p.name}</td>
+                  <td className="muted">{p.email ?? '—'}</td>
+                  <td className="muted">{p.phone ?? '—'}</td>
+                  <td style={{ textAlign: 'right', paddingRight: 8 }}>
+                    <IconBtn title={`Modifier ${p.name}`} color="#64748b" onClick={() => startEdit(p)}>
+                      <Pencil size={13} />
+                    </IconBtn>
+                    <IconBtn
+                      title={`Supprimer ${p.name}`}
+                      color="#dc2626"
+                      onClick={() => { if (confirm(`Supprimer ${p.name} ?`)) remove.mutate(p.id); }}
                     >
-                      Supprimer
-                    </button>
+                      <Trash2 size={12} />
+                    </IconBtn>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-        {list.data && rows.length === 0 && <p className="muted">Aucun {singular}.</p>}
+        {list.data && rows.length === 0 && <p className="muted" style={{ padding: 16 }}>Aucun {singular}.</p>}
       </div>
     </div>
   );

@@ -41,6 +41,13 @@ export interface DevisLinePatch {
   perte?: string | number | null;
   nature?: string | null;
   numCustom?: string | null;
+  code?: string | null;
+  codeAnalytique?: string | null;
+  sortOrder?: number | null;
+  /** Déplacer la ligne vers un nouveau parent (null = racine). Recalcule sort_order au bout. */
+  parentLineId?: string | null;
+  /** Propager désignation/pu/perte à toutes les ressources du même devis partageant le même code. */
+  syncByCode?: boolean;
 }
 
 export interface AffairePatch {
@@ -57,6 +64,7 @@ export interface DevisPatch {
   designation?: string;
   numero?: string | null;
   type?: DevisType;
+  affaire_id?: string;
 }
 
 export interface DevisPlanningPatch {
@@ -86,6 +94,7 @@ export interface DevisLineInput {
   type: DevisLineType;
   parentLineId?: string | null;
   code?: string | null;
+  codeAnalytique?: string | null;
   designation: string;
   unit?: string | null;
   quantity?: string | number | null;
@@ -264,19 +273,160 @@ export class DevisService {
   }
 
   /** Lists all devis (across affaires) with their affaire, for the devis list screen. */
-  listDevis() {
+  async listDevis() {
     const tenantId = this.context.requireTenantId();
-    return runInTenant(this.dataSource, tenantId, (em) =>
-      em.query(
-        `SELECT d.id, d.numero, d.designation, d.type, d.status, d.affaire_id,
-                d.responsable, d.priorite,
-                to_char(d.date_debut, 'YYYY-MM-DD') AS date_debut,
-                to_char(d.date_echeance, 'YYYY-MM-DD') AS date_echeance,
-                a.code AS affaire_code, a.name AS affaire_name
-           FROM devis d JOIN affaire a ON a.id = d.affaire_id
-          ORDER BY d.created_at DESC`,
-      ),
+    const rows: Array<Record<string, unknown>> = await runInTenant(
+      this.dataSource,
+      tenantId,
+      (em) =>
+        em.query(
+          `SELECT d.id, d.numero, d.designation, d.type, d.status, d.affaire_id,
+                  d.responsable, d.priorite,
+                  to_char(d.date_debut, 'YYYY-MM-DD') AS date_debut,
+                  to_char(d.date_echeance, 'YYYY-MM-DD') AS date_echeance,
+                  to_char(d.created_at, 'YYYY-MM-DD') AS created_at,
+                  a.code AS affaire_code, a.name AS affaire_name,
+                  COALESCE(
+                    json_agg(
+                      json_build_object(
+                        'id', v.id,
+                        'version_no', v.version_no,
+                        'label', v.label,
+                        'created_at', to_char(v.created_at, 'YYYY-MM-DD')
+                      ) ORDER BY v.version_no
+                    ) FILTER (WHERE v.id IS NOT NULL),
+                    '[]'
+                  ) AS versions,
+                  (SELECT id FROM devis_version
+                    WHERE devis_id = d.id ORDER BY version_no DESC LIMIT 1
+                  ) AS latest_version_id
+             FROM devis d
+             JOIN affaire a ON a.id = d.affaire_id
+             LEFT JOIN devis_version v ON v.devis_id = d.id
+             GROUP BY d.id, a.code, a.name
+             ORDER BY d.created_at DESC`,
+        ),
     );
+
+    const totalsMap = new Map<string, Record<string, string>>();
+    await Promise.all(
+      rows
+        .filter((r) => r.latest_version_id)
+        .map(async (r) => {
+          try {
+            const fv = await this.vente.computeForVersion(r.latest_version_id as string);
+            const pvHt = Number(fv.totalPvHt);
+            const margeNette = Number(fv.margeNette);
+            totalsMap.set(r.id as string, {
+              debourse: fv.totalDebourse,
+              revient: fv.totalRevient,
+              pvHt: fv.totalPvHt,
+              margeNette: fv.margeNette,
+              margeNettePct:
+                pvHt !== 0 ? ((margeNette / pvHt) * 100).toFixed(1) : '0.0',
+            });
+          } catch {
+            /* version sans lignes — totaux à zéro */
+          }
+        }),
+    );
+
+    return rows.map((r) => {
+      const { latest_version_id: _, ...rest } = r;
+      return { ...rest, totals: totalsMap.get(r.id as string) ?? null };
+    });
+  }
+
+  /** Deletes a devis and all its versions/lines (CASCADE). */
+  deleteDevis(devisId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const row = (await em.query(`SELECT id, affaire_id FROM devis WHERE id = $1`, [devisId]))[0];
+      if (!row) throw new NotFoundException(`Unknown devis "${devisId}"`);
+      await em.query(`DELETE FROM devis WHERE id = $1`, [devisId]);
+      await this.recomputeAffaireStatus(em, row.affaire_id);
+      return { deleted: devisId };
+    });
+  }
+
+  /** Sets the devis status directly (status machine enforced on the frontend/business layer). */
+  setDevisStatus(devisId: string, status: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const row = (await em.query(`SELECT id, affaire_id FROM devis WHERE id = $1`, [devisId]))[0];
+      if (!row) throw new NotFoundException(`Unknown devis "${devisId}"`);
+      await em.query(`UPDATE devis SET status = $1, updated_at = now() WHERE id = $2`, [status, devisId]);
+      await this.recomputeAffaireStatus(em, row.affaire_id);
+      return { id: devisId, status };
+    });
+  }
+
+  /** Deep-copies a devis (latest version + all lines) under the same affaire. */
+  async duplicateDevis(devisId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const src = (await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]))[0];
+      if (!src) throw new NotFoundException(`Unknown devis "${devisId}"`);
+
+      const newDevis = (await em.query(
+        `INSERT INTO devis (tenant_id, affaire_id, numero, designation, type, status, sort_order)
+         VALUES ($1, $2, NULL, $3, $4, 'open',
+                 (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM devis WHERE affaire_id = $2))
+         RETURNING id`,
+        [tenantId, src.affaire_id, `${src.designation} (copie)`, src.type],
+      ))[0];
+
+      const latestV = (await em.query(
+        `SELECT * FROM devis_version WHERE devis_id = $1 ORDER BY version_no DESC LIMIT 1`,
+        [devisId],
+      ))[0];
+      if (!latestV) return { id: newDevis.id, affaireId: src.affaire_id };
+
+      const newVersion = (await em.query(
+        `INSERT INTO devis_version (tenant_id, devis_id, version_no, label)
+         VALUES ($1, $2, 1, $3) RETURNING id`,
+        [tenantId, newDevis.id, latestV.label ?? 'v1'],
+      ))[0];
+
+      const lines: Array<{ id: string; parent_line_id: string | null; [k: string]: unknown }> =
+        await em.query(
+          `SELECT * FROM devis_line WHERE devis_version_id = $1 ORDER BY sort_order ASC`,
+          [latestV.id],
+        );
+
+      const idMap = new Map<string, string>();
+      for (const l of lines) {
+        const nl = (await em.query(
+          `INSERT INTO devis_line
+             (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique,
+              designation, unit, quantity, pu, perte, nature,
+              source_ouvrage_id, source_resource_id, sort_order, num_custom,
+              section_type, vendable)
+           VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           RETURNING id`,
+          [
+            tenantId, newVersion.id,
+            l['type'], l['code'], l['code_analytique'],
+            l['designation'], l['unit'], l['quantity'], l['pu'], l['perte'], l['nature'],
+            l['source_ouvrage_id'], l['source_resource_id'],
+            l['sort_order'], l['num_custom'], l['section_type'], l['vendable'] ?? true,
+          ],
+        ))[0];
+        idMap.set(l.id, nl.id);
+      }
+      for (const l of lines) {
+        if (l.parent_line_id) {
+          const newParentId = idMap.get(l.parent_line_id);
+          if (newParentId) {
+            await em.query(`UPDATE devis_line SET parent_line_id = $1 WHERE id = $2`, [
+              newParentId, idMap.get(l.id),
+            ]);
+          }
+        }
+      }
+
+      return { id: newDevis.id, affaireId: src.affaire_id };
+    });
   }
 
   /** Returns a devis with its versions (read-side, for the devis editor). */
@@ -341,19 +491,29 @@ export class DevisService {
   updateDevis(devisId: string, patch: DevisPatch) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const exists = await em.query(`SELECT id FROM devis WHERE id = $1`, [devisId]);
+      const exists = await em.query(`SELECT id, affaire_id FROM devis WHERE id = $1`, [devisId]);
       if (exists.length === 0) {
         throw new NotFoundException(`Unknown devis "${devisId}"`);
       }
+      if (patch.affaire_id) {
+        const affaire = await em.query(`SELECT id FROM affaire WHERE id = $1`, [patch.affaire_id]);
+        if (affaire.length === 0) throw new NotFoundException(`Unknown affaire "${patch.affaire_id}"`);
+      }
       await em.query(
         `UPDATE devis SET
-           designation = COALESCE($2, designation),
-           numero = $3,
-           type = COALESCE($4, type),
-           updated_at = now()
+           designation  = COALESCE($2, designation),
+           numero       = $3,
+           type         = COALESCE($4, type),
+           affaire_id   = COALESCE($5, affaire_id),
+           updated_at   = now()
          WHERE id = $1`,
-        [devisId, patch.designation ?? null, patch.numero ?? null, patch.type ?? null],
+        [devisId, patch.designation ?? null, patch.numero ?? null, patch.type ?? null, patch.affaire_id ?? null],
       );
+      const old_affaire_id = exists[0].affaire_id as string;
+      if (patch.affaire_id && patch.affaire_id !== old_affaire_id) {
+        await this.recomputeAffaireStatus(em, old_affaire_id);
+        await this.recomputeAffaireStatus(em, patch.affaire_id);
+      }
       return (await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]))[0];
     });
   }
@@ -390,26 +550,166 @@ export class DevisService {
     });
   }
 
+  /** Creates a new version by deep-copying all lines from the latest existing version. */
   createVersion(devisId: string, label?: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const devis = await em.query(`SELECT id FROM devis WHERE id = $1`, [devisId]);
-      if (devis.length === 0) {
-        throw new NotFoundException(`Unknown devis "${devisId}"`);
-      }
+      if (devis.length === 0) throw new NotFoundException(`Unknown devis "${devisId}"`);
+
       const next = (
         await em.query(
           `SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM devis_version WHERE devis_id = $1`,
           [devisId],
         )
       )[0].n;
-      return (
+
+      const newVersion = (
         await em.query(
           `INSERT INTO devis_version (tenant_id, devis_id, version_no, label)
            VALUES ($1, $2, $3, $4) RETURNING *`,
           [tenantId, devisId, next, label ?? `v${next}`],
         )
       )[0];
+
+      // Copy all lines from the latest version (next - 1)
+      const srcVersion = (
+        await em.query(
+          `SELECT id FROM devis_version WHERE devis_id = $1 AND version_no = $2`,
+          [devisId, next - 1],
+        )
+      )[0];
+
+      if (srcVersion) {
+        const srcLines: Array<Record<string, unknown>> = await em.query(
+          `SELECT * FROM devis_line WHERE devis_version_id = $1 ORDER BY sort_order ASC`,
+          [srcVersion.id],
+        );
+        const idMap = new Map<string, string>();
+        for (const l of srcLines) {
+          const nl = (await em.query(
+            `INSERT INTO devis_line
+               (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique,
+                designation, unit, quantity, quantity_formula, pu, pu_vente, pu_vente_force,
+                perte, nature, source_ouvrage_id, source_resource_id,
+                sort_order, num_custom, section_type, vendable, base_line_id)
+             VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+             RETURNING id`,
+            [
+              tenantId, newVersion.id,
+              l['type'], l['code'], l['code_analytique'],
+              l['designation'], l['unit'], l['quantity'], l['quantity_formula'],
+              l['pu'], l['pu_vente'], l['pu_vente_force'] ?? false,
+              l['perte'], l['nature'],
+              l['source_ouvrage_id'], l['source_resource_id'],
+              l['sort_order'], l['num_custom'], l['section_type'], l['vendable'] ?? true,
+              l['id'], // base_line_id → tracks lineage to previous version
+            ],
+          ))[0];
+          idMap.set(l['id'] as string, nl.id);
+        }
+        // Second pass: fix parent_line_id references
+        for (const l of srcLines) {
+          if (l['parent_line_id']) {
+            const newParentId = idMap.get(l['parent_line_id'] as string);
+            if (newParentId) {
+              await em.query(`UPDATE devis_line SET parent_line_id = $1 WHERE id = $2`, [
+                newParentId, idMap.get(l['id'] as string),
+              ]);
+            }
+          }
+        }
+      }
+
+      return newVersion;
+    });
+  }
+
+  /** Deletes a specific version (not allowed if it is the only version). */
+  deleteVersion(versionId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const ver = (await em.query(
+        `SELECT id, devis_id FROM devis_version WHERE id = $1`, [versionId],
+      ))[0];
+      if (!ver) throw new NotFoundException(`Unknown version "${versionId}"`);
+
+      const count = (await em.query(
+        `SELECT COUNT(*)::int AS n FROM devis_version WHERE devis_id = $1`, [ver.devis_id],
+      ))[0].n;
+      if (count <= 1) {
+        throw new BadRequestException('Cannot delete the last version of a devis. Delete the devis instead.');
+      }
+
+      await em.query(`DELETE FROM devis_version WHERE id = $1`, [versionId]);
+      return { deleted: versionId };
+    });
+  }
+
+  /** Returns a diff of this version vs the previous version (added / removed / modified lines). */
+  getVersionChangelog(versionId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const ver = (await em.query(
+        `SELECT id, devis_id, version_no FROM devis_version WHERE id = $1`, [versionId],
+      ))[0];
+      if (!ver) throw new NotFoundException(`Unknown version "${versionId}"`);
+
+      const currLines: Array<Record<string, unknown>> = await em.query(
+        `SELECT id, type, designation, quantity, unit, pu, base_line_id, sort_order
+           FROM devis_line WHERE devis_version_id = $1 AND type IN ('titre','sous_titre','ouvrage','ressource')
+           ORDER BY sort_order`,
+        [versionId],
+      );
+
+      if (ver.version_no <= 1) {
+        return {
+          previousVersionNo: null,
+          added: currLines.map((l) => ({ id: l['id'], designation: l['designation'], type: l['type'] })),
+          removed: [],
+          modified: [],
+        };
+      }
+
+      const prevVer = (await em.query(
+        `SELECT id FROM devis_version WHERE devis_id = $1 AND version_no = $2`,
+        [ver.devis_id, ver.version_no - 1],
+      ))[0];
+
+      if (!prevVer) return { previousVersionNo: ver.version_no - 1, added: currLines, removed: [], modified: [] };
+
+      const prevLines: Array<Record<string, unknown>> = await em.query(
+        `SELECT id, type, designation, quantity, unit, pu, sort_order
+           FROM devis_line WHERE devis_version_id = $1 AND type IN ('titre','sous_titre','ouvrage','ressource')
+           ORDER BY sort_order`,
+        [prevVer.id],
+      );
+
+      const prevById = new Map(prevLines.map((l) => [l['id'] as string, l]));
+      const baseLineIds = new Set(
+        currLines.filter((l) => l['base_line_id']).map((l) => l['base_line_id'] as string),
+      );
+
+      const added = currLines.filter((l) => !l['base_line_id']);
+      const removed = prevLines.filter((l) => !baseLineIds.has(l['id'] as string));
+      const modified: Array<Record<string, unknown>> = [];
+
+      for (const curr of currLines) {
+        const baseId = curr['base_line_id'] as string | null;
+        if (!baseId) continue;
+        const prev = prevById.get(baseId);
+        if (!prev) continue;
+        const changes: string[] = [];
+        if (curr['designation'] !== prev['designation']) changes.push(`Désignation : « ${prev['designation']} » → « ${curr['designation']} »`);
+        if (String(curr['quantity'] ?? '') !== String(prev['quantity'] ?? '')) changes.push(`Quantité : ${prev['quantity']} → ${curr['quantity']}`);
+        if (String(curr['pu'] ?? '') !== String(prev['pu'] ?? '')) changes.push(`PU : ${prev['pu']} → ${curr['pu']}`);
+        if ((curr['unit'] ?? '') !== (prev['unit'] ?? '')) changes.push(`Unité : ${prev['unit'] ?? '—'} → ${curr['unit'] ?? '—'}`);
+        if (changes.length > 0) {
+          modified.push({ id: curr['id'], designation: curr['designation'], type: curr['type'], changes });
+        }
+      }
+
+      return { previousVersionNo: ver.version_no - 1, added, removed, modified };
     });
   }
 
@@ -452,16 +752,17 @@ export class DevisService {
       return (
         await em.query(
           `INSERT INTO devis_line
-             (tenant_id, devis_version_id, parent_line_id, type, code, designation, unit,
+             (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique, designation, unit,
               quantity, quantity_formula, pu, source_ouvrage_id, source_resource_id, sort_order,
               vendable, section_type)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
           [
             tenantId,
             versionId,
             input.parentLineId ?? null,
             input.type,
             input.code ?? null,
+            input.codeAnalytique ?? null,
             input.designation,
             input.unit ?? null,
             quantity,
@@ -500,9 +801,11 @@ export class DevisService {
     const components = await em.query(
       `SELECT oc.parent_ouvrage_id, oc.kind, oc.quantity, oc.rate,
               oc.child_ouvrage_id, oc.child_resource_id,
-              r.code, r.label, r.nature, r.unit, r.unit_cost
+              r.code, r.label, r.nature, r.unit, r.unit_cost,
+              ca.code AS code_analytique
          FROM ouvrage_component oc
-         LEFT JOIN resource r ON r.id = oc.child_resource_id`,
+         LEFT JOIN resource r ON r.id = oc.child_resource_id
+         LEFT JOIN analytical_code ca ON ca.id = r.code_analytique_id`,
     );
     const map = new Map<string, RawOuvrage>();
     for (const o of ouvrages) {
@@ -510,9 +813,7 @@ export class DevisService {
     }
     for (const c of components) {
       const parent = map.get(c.parent_ouvrage_id);
-      if (!parent) {
-        continue;
-      }
+      if (!parent) continue;
       parent.components.push({
         kind: c.kind,
         quantity: c.quantity ?? 0,
@@ -520,6 +821,7 @@ export class DevisService {
         childOuvrageId: c.child_ouvrage_id ?? null,
         resourceId: c.child_resource_id ?? null,
         code: c.code ?? null,
+        codeAnalytique: c.code_analytique ?? null,
         designation: c.label ?? 'Ressource',
         nature: c.nature ?? 'material',
         unit: c.unit ?? null,
@@ -584,14 +886,15 @@ export class DevisService {
         const child = (
           await em.query(
             `INSERT INTO devis_line
-               (tenant_id, devis_version_id, parent_line_id, type, code, designation, unit,
-                quantity, pu, perte, nature, source_resource_id, sort_order, vendable)
-             VALUES ($1,$2,$3,'ressource',$4,$5,$6,$7,$8,0,$9,$10,$11,true) RETURNING *`,
+               (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique,
+                designation, unit, quantity, pu, perte, nature, source_resource_id, sort_order, vendable)
+             VALUES ($1,$2,$3,'ressource',$4,$5,$6,$7,$8,$9,0,$10,$11,$12,true) RETURNING *`,
             [
               tenantId,
               versionId,
               ouvrageLine.id,
               f.code,
+              f.codeAnalytique ?? null,
               f.designation,
               f.unit,
               f.qtyPerUnit,
@@ -608,14 +911,28 @@ export class DevisService {
     });
   }
 
-  /** Updates an editable devis line (designation, quantity, unit, pu, perte, nature). */
+  /** Updates an editable devis line. Supports move (parentLineId) and syncByCode propagation. */
   updateLine(lineId: string, patch: DevisLinePatch) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const exists = await em.query(`SELECT id FROM devis_line WHERE id = $1`, [lineId]);
-      if (exists.length === 0) {
-        throw new NotFoundException(`Unknown devis line "${lineId}"`);
+      const [cur] = await em.query(
+        `SELECT id, code, type, devis_version_id FROM devis_line WHERE id = $1`, [lineId],
+      );
+      if (!cur) throw new NotFoundException(`Unknown devis line "${lineId}"`);
+
+      // Move to new parent: set parent_line_id and append at end of destination.
+      if (patch.parentLineId !== undefined) {
+        const [maxRow] = await em.query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM devis_line
+           WHERE parent_line_id IS NOT DISTINCT FROM $1 AND id != $2`,
+          [patch.parentLineId, lineId],
+        );
+        await em.query(
+          `UPDATE devis_line SET parent_line_id = $2, sort_order = $3, updated_at = now() WHERE id = $1`,
+          [lineId, patch.parentLineId, maxRow.n],
+        );
       }
+
       await em.query(
         `UPDATE devis_line SET
            designation = COALESCE($2, designation),
@@ -625,6 +942,9 @@ export class DevisService {
            perte = COALESCE($6, perte),
            nature = COALESCE($7, nature),
            num_custom = CASE WHEN $8 = '__KEEP__' THEN num_custom ELSE NULLIF($8, '') END,
+           code = CASE WHEN $9 = '__KEEP__' THEN code ELSE NULLIF($9, '') END,
+           code_analytique = CASE WHEN $10 = '__KEEP__' THEN code_analytique ELSE NULLIF($10, '') END,
+           sort_order = COALESCE($11, sort_order),
            updated_at = now()
          WHERE id = $1`,
         [
@@ -635,11 +955,86 @@ export class DevisService {
           patch.pu != null ? String(patch.pu) : null,
           patch.perte != null ? String(patch.perte) : null,
           patch.nature ?? null,
-          // sentinelle : undefined → inchangé ; valeur ou '' → écrit (NULLIF vide → NULL)
           patch.numCustom === undefined ? '__KEEP__' : (patch.numCustom ?? ''),
+          patch.code === undefined ? '__KEEP__' : (patch.code ?? ''),
+          patch.codeAnalytique === undefined ? '__KEEP__' : (patch.codeAnalytique ?? ''),
+          patch.sortOrder != null ? patch.sortOrder : null,
         ],
       );
+
+      // Propagate designation/pu/perte to all ressources with same code in this version.
+      const codeToSync = patch.code !== undefined ? patch.code : cur.code;
+      if (patch.syncByCode && codeToSync && cur.type === 'ressource') {
+        const sets: string[] = [];
+        const vals: unknown[] = [codeToSync, cur.devis_version_id, lineId];
+        if (patch.designation !== undefined) { sets.push(`designation = $${vals.length + 1}`); vals.push(patch.designation); }
+        if (patch.pu !== undefined) { sets.push(`pu = $${vals.length + 1}`); vals.push(patch.pu != null ? String(patch.pu) : null); }
+        if (patch.perte !== undefined) { sets.push(`perte = $${vals.length + 1}`); vals.push(patch.perte != null ? String(patch.perte) : null); }
+        if (sets.length > 0) {
+          await em.query(
+            `UPDATE devis_line SET ${sets.join(', ')}, updated_at = now()
+             WHERE code = $1 AND devis_version_id = $2 AND id != $3 AND type = 'ressource'`,
+            vals,
+          );
+        }
+      }
+
       return (await em.query(`SELECT * FROM devis_line WHERE id = $1`, [lineId]))[0];
+    });
+  }
+
+  /** Reorders siblings by assigning sort_order = 0,1,2,… to orderedIds in sequence. */
+  reorderLines(versionId: string, parentLineId: string | null, orderedIds: string[]) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      for (let i = 0; i < orderedIds.length; i++) {
+        await em.query(
+          `UPDATE devis_line SET sort_order = $1, updated_at = now()
+           WHERE id = $2 AND devis_version_id = $3`,
+          [i, orderedIds[i], versionId],
+        );
+      }
+    });
+  }
+
+  /** Duplicates a line and its whole subtree at the same level (sort_order = max+1). */
+  duplicateLine(lineId: string, keepCode: boolean) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const copySubtree = async (srcId: string, destParentId: string | null): Promise<string> => {
+        const [maxRow] = await em.query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM devis_line
+           WHERE parent_line_id IS NOT DISTINCT FROM $1`,
+          [destParentId],
+        );
+        const [newRow] = await em.query(
+          `INSERT INTO devis_line
+             (tenant_id, devis_version_id, parent_line_id, type, designation,
+              code, code_analytique, unit, quantity, quantity_formula, pu, perte, nature,
+              source_ouvrage_id, source_resource_id, sort_order, vendable, section_type)
+           SELECT tenant_id, devis_version_id, $2, type, designation,
+              ${keepCode ? 'code' : 'NULL::varchar(64)'},
+              ${keepCode ? 'code_analytique' : 'NULL::varchar(64)'},
+              unit, quantity, quantity_formula, pu, perte, nature,
+              source_ouvrage_id, source_resource_id, $3, vendable, section_type
+           FROM devis_line WHERE id = $1
+           RETURNING id`,
+          [srcId, destParentId, maxRow.n],
+        );
+        const newId: string = newRow.id;
+        const children: { id: string }[] = await em.query(
+          `SELECT id FROM devis_line WHERE parent_line_id = $1 ORDER BY sort_order`, [srcId],
+        );
+        for (const child of children) await copySubtree(child.id, newId);
+        return newId;
+      };
+
+      const [src] = await em.query(
+        `SELECT parent_line_id FROM devis_line WHERE id = $1`, [lineId],
+      );
+      if (!src) throw new NotFoundException(`Line ${lineId} not found`);
+      const newId = await copySubtree(lineId, src.parent_line_id);
+      return { duplicatedId: newId };
     });
   }
 

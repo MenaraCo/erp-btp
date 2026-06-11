@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { LayoutDashboard } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
+import { IconBtn } from '@/components/IconBtn';
 
 interface Chantier {
   id: string;
@@ -18,6 +20,7 @@ interface Chantier {
 export default function ChantiersPage() {
   const { token } = useAuth();
   const qc = useQueryClient();
+  const router = useRouter();
   const [showForm, setShowForm] = useState(false);
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
@@ -89,43 +92,48 @@ export default function ChantiersPage() {
         </div>
       )}
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2>Suivi de chantiers {data ? `(${data.length})` : ''}</h2>
-        {isLoading && <p className="muted">Chargement…</p>}
+      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
+        {isLoading && <p className="muted" style={{ padding: 16 }}>Chargement…</p>}
         {isError && (
-          <p className="muted">Module « Suivi de chantiers » non actif pour cet utilisateur.</p>
+          <p className="muted" style={{ padding: 16 }}>Module « Suivi de chantiers » non actif pour cet utilisateur.</p>
         )}
         {data && data.length > 0 && (
-          <table className="grid">
+          <table className="grid" style={{ margin: 0 }}>
             <thead>
               <tr>
                 <SortHeader label="Code" colKey="code" sort={sort} onSort={onSort} />
                 <SortHeader label="Nom" colKey="name" sort={sort} onSort={onSort} />
                 <SortHeader label="Budget de vente" colKey="budget_vente_ht" sort={sort} onSort={onSort} />
-                <th></th>
+                <th style={{ width: 40 }} />
               </tr>
             </thead>
             <tbody>
               {chantierRows.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    <Link href={`/chantiers/${c.id}`} className="link">
-                      {c.code}
-                    </Link>
-                  </td>
-                  <td>{c.name ?? '—'}</td>
-                  <td>{euro(c.budget_vente_ht)}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    <Link href={`/chantiers/${c.id}`} className="link">
-                      Tableau de bord →
-                    </Link>
+                <tr
+                  key={c.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => router.push(`/chantiers/${c.id}`)}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
+                >
+                  <td className="code-cell">{c.code}</td>
+                  <td style={{ fontWeight: 500 }}>{c.name ?? '—'}</td>
+                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>{euro(c.budget_vente_ht)}</td>
+                  <td style={{ textAlign: 'right', paddingRight: 8 }}>
+                    <IconBtn
+                      title="Tableau de bord chantier"
+                      color="var(--muted)"
+                      onClick={(e) => { e.stopPropagation(); router.push(`/chantiers/${c.id}`); }}
+                    >
+                      <LayoutDashboard size={13} />
+                    </IconBtn>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-        {data && data.length === 0 && <p className="muted">Aucun chantier.</p>}
+        {data && data.length === 0 && <p className="muted" style={{ padding: 16 }}>Aucun chantier.</p>}
       </div>
     </div>
   );

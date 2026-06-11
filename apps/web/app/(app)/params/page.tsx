@@ -2,9 +2,11 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Pencil, Trash2, Save, ChevronUp } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
+import { IconBtn } from '@/components/IconBtn';
 
 /* ─────────── hook token ─────────── */
 function useApi() {
@@ -570,15 +572,20 @@ function TabUnites({ token }: { token: string }) {
           <tbody>
             {units.map((u, i) => (
               <tr key={u.id}>
-                <td>
-                  <button className="btn-ghost btn" style={{ padding: '0 4px' }}
-                    onClick={() => i > 0 && moveUp.mutate(i)} disabled={i === 0}>↑</button>
+                <td style={{ textAlign: 'center', padding: '0 4px' }}>
+                  <IconBtn title="Monter" color="var(--muted)" onClick={() => i > 0 && moveUp.mutate(i)} disabled={i === 0}>
+                    <ChevronUp size={13} />
+                  </IconBtn>
                 </td>
-                <td><strong>{u.abrev}</strong></td>
+                <td className="code-cell">{u.abrev}</td>
                 <td>{u.label}</td>
-                <td style={{ display: 'flex', gap: 4 }}>
-                  <button className="btn-ghost btn" onClick={() => setEditing(u)}>✎</button>
-                  <button className="btn-danger btn" onClick={() => { if (confirm('Supprimer ?')) del.mutate(u.id); }}>✕</button>
+                <td style={{ textAlign: 'right', paddingRight: 8 }}>
+                  <IconBtn title="Modifier" color="#64748b" onClick={() => setEditing(u)}>
+                    <Pencil size={12} />
+                  </IconBtn>
+                  <IconBtn title="Supprimer" color="#dc2626" onClick={() => { if (confirm('Supprimer ?')) del.mutate(u.id); }}>
+                    <Trash2 size={11} />
+                  </IconBtn>
                 </td>
               </tr>
             ))}
@@ -976,9 +983,13 @@ function RefTable({ rows, headers, onEdit, onDelete, ids, selectedIds, onToggle,
             <tr key={t.origIndex} style={{ background: isSelected ? '#f0f4ff' : undefined }}>
               {selectable && id && <td><input type="checkbox" checked={isSelected} onChange={() => onToggle!(id)} /></td>}
               {t.row.map((cell, j) => <td key={j}>{cell}</td>)}
-              <td style={{ display: 'flex', gap: 4 }}>
-                <button className="btn-ghost btn" onClick={() => onEdit(t.origIndex)}>✎</button>
-                <button className="btn-danger btn" onClick={() => onDelete(t.origIndex)}>✕</button>
+              <td style={{ textAlign: 'right', paddingRight: 8 }}>
+                <IconBtn title="Modifier" color="#64748b" onClick={() => onEdit(t.origIndex)}>
+                  <Pencil size={12} />
+                </IconBtn>
+                <IconBtn title="Supprimer" color="#dc2626" onClick={() => onDelete(t.origIndex)}>
+                  <Trash2 size={11} />
+                </IconBtn>
               </td>
             </tr>
           );
@@ -998,7 +1009,7 @@ function SaveButton({ onSave, isPending, saved }: { onSave: () => void; isPendin
         onClick={onSave}
         disabled={isPending}
       >
-        <span style={{ fontSize: 13 }}>💾</span>
+        <Save size={13} />
         <span>{isPending ? 'Enregistrement…' : 'Enregistrer'}</span>
       </button>
       <span style={{
