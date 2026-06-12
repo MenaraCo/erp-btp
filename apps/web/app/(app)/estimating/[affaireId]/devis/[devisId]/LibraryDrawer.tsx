@@ -33,15 +33,6 @@ export function LibraryDrawer({
     }
   }, [containerId]);
 
-  // Add .lib-open class to the anchor so CSS can add padding-right to the scroll div
-  useEffect(() => {
-    if (!containerId) return;
-    const anchorId = containerId.replace('-library', '-anchor');
-    const anchor = document.getElementById(anchorId);
-    if (!anchor) return;
-    anchor.classList.add('lib-open');
-    return () => { anchor.classList.remove('lib-open'); };
-  }, [containerId]);
 
   const libs = useQuery({
     queryKey: ['libraries'], enabled: Boolean(token),
