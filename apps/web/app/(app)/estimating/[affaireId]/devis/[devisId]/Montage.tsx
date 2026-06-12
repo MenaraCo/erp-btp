@@ -8,9 +8,10 @@ import { fmtEuro, fmtNum, cleanNum } from '@/lib/preferences';
 export interface SaleLineInfo { pv: string; forced: boolean }
 
 export interface DragItem {
-  kind: 'ouvrage' | 'ressource';
+  kind: 'ouvrage' | 'ressource' | 'titre' | 'sous_titre';
   id: string; code: string; label: string; unit: string | null;
   debourse?: string; codeAnalytique?: string | null;
+  sourceOuvrageId?: string | null;
 }
 
 export interface MontageLine {
@@ -174,7 +175,13 @@ export function Montage({
 
   const onDropItem = (parentId: string | null, item: DragItem) => {
     if (item.kind === 'ouvrage') {
-      insertOuvrage.mutate({ ouvrageId: item.id, parentLineId: parentId, quantity: '1' });
+      if (item.sourceOuvrageId) {
+        insertOuvrage.mutate({ ouvrageId: item.sourceOuvrageId, parentLineId: parentId, quantity: '1' });
+      } else {
+        addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: item.label, code: item.code, unit: item.unit ?? '', quantity: '1' });
+      }
+    } else if (item.kind === 'titre' || item.kind === 'sous_titre') {
+      addLine.mutate({ type: item.kind, parentLineId: item.kind === 'sous_titre' ? parentId : null, designation: item.label, sortOrder: 9999 });
     } else {
       addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: item.label, code: item.code, codeAnalytique: item.codeAnalytique ?? null, unit: item.unit ?? '', quantity: '1', pu: item.debourse ?? '0' });
     }
@@ -309,7 +316,7 @@ type VenteCtx = {
   onCopyMove: (line: MontageLine) => void;
 } & LibDragCtx;
 
-function DragHandle({ lineId, dragCtx }: { lineId: string; dragCtx: DragCtx }) {
+function DragHandle({ lineId, dragCtx, crossPanel }: { lineId: string; dragCtx: DragCtx; crossPanel?: DragItem }) {
   return (
     <span
       title="Réorganiser (glisser-déposer)"
@@ -318,6 +325,7 @@ function DragHandle({ lineId, dragCtx }: { lineId: string; dragCtx: DragCtx }) {
         e.dataTransfer.setData('text/x-line-id', lineId);
         e.dataTransfer.effectAllowed = 'move';
         dragCtx.setDragLineId(lineId);
+        if (crossPanel) e.dataTransfer.setData('application/json', JSON.stringify(crossPanel));
       }}
       onDragEnd={() => dragCtx.setDragLineId(null)}
       style={{ cursor: 'grab', fontSize: 14, flexShrink: 0, userSelect: 'none', lineHeight: 1, padding: '0 2px' }}
@@ -376,8 +384,8 @@ function Node({
           opacity: isDragging ? 0.4 : 1,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: ls.bg, color: ls.color, borderRadius: 5 }}>
-          {!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} />}
+        <div className={`title-row title-row-${depth}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: ls.bg, color: ls.color, borderRadius: 5 }}>
+          {!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} crossPanel={{ kind: line.type as 'titre' | 'sous_titre', id: line.id, code: line.code ?? '', label: line.designation, unit: null }} />}
           <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: ls.num, minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {line.numero ?? ''}
           </span>
@@ -454,7 +462,7 @@ function Node({
           opacity: isDragging ? 0.4 : 1,
         }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
-          {!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} />}
+          {!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} crossPanel={{ kind: 'ouvrage', id: line.id, code: line.code ?? '', label: line.designation, unit: line.unit, sourceOuvrageId: line.source_ouvrage_id }} />}
           {!vente && (
             <>
               <TypeBadge type="ouvrage" />

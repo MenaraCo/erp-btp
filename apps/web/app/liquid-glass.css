@@ -283,8 +283,16 @@ body.theme-lg {
 }
 
 /* ── Split Panel B ── */
+/* Le gradient background-attachment:fixed reproduit exactement la même teinte
+   que body.theme-lg, visible même sans backdrop-filter Pierce (overflow:hidden). */
 .theme-lg .split-panel-b {
-  background: rgba(255, 255, 255, 0.48);
+  background: linear-gradient(135deg,
+    rgba(204, 217, 237, 0.80) 0%,
+    rgba(194, 207, 232, 0.80) 20%,
+    rgba(202, 196, 232, 0.80) 45%,
+    rgba(188, 204, 232, 0.80) 70%,
+    rgba(196, 218, 240, 0.80) 100%);
+  background-attachment: fixed;
   backdrop-filter: blur(32px) saturate(2.0);
   -webkit-backdrop-filter: blur(32px) saturate(2.0);
   border-left: 1px solid rgba(255, 255, 255, 0.50);

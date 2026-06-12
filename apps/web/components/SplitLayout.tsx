@@ -95,13 +95,14 @@ export function SplitLayout({ children }: { children: React.ReactNode }) {
 
   // Group devis by affaire for the dropdown (exclude current Panel A devis)
   const filteredDevis = (allDevis.data ?? []).filter((d) => d.id !== panelADevisId);
-  const byAffaire = filteredDevis.reduce<Record<string, { label: string; items: DevisListItem[] }>>((acc, d) => {
+  type ByAffaireGroup = Record<string, { label: string; items: DevisListItem[] }>;
+  const byAffaire: ByAffaireGroup = filteredDevis.reduce((acc: ByAffaireGroup, d) => {
     if (!acc[d.affaire_id]) acc[d.affaire_id] = { label: `${d.affaire_code} — ${d.affaire_name}`, items: [] };
     acc[d.affaire_id].items.push(d);
     return acc;
-  }, {});
+  }, {} as ByAffaireGroup);
 
-  const dirIcon = ws.splitDirection === 'vertical' ? '⇕' : '⇔';
+  const dirIcon = ws.splitDirection === 'vertical' ? '\u21d5' : '\u21d4';
 
   return (
     <main
@@ -204,7 +205,7 @@ export function SplitLayout({ children }: { children: React.ReactNode }) {
         {/* Panel B content */}
         {!isMinimized && (
           <div id="split-panel-b-anchor" style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-            <div id="split-panel-b-scroll" className="split-scroll" style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+            <div id="split-panel-b-scroll" className="split-scroll" style={{ position: 'absolute', inset: 0, overflow: 'auto', paddingTop: 18, paddingLeft: 22, paddingBottom: 18 }}>
               <div className="split-scroll-content">
                 {ws.panel2DevisId && ws.panel2AffaireId ? (
                   <DevisEditorContent

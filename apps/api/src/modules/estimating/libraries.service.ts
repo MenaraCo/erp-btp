@@ -357,4 +357,23 @@ export class LibrariesService {
       return { rows, total, page, pageSize };
     });
   }
+
+  async getResource(libraryId: string, resourceId: string): Promise<Record<string, unknown>> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT r.id, r.code, r.label, r.unit, r.nature,
+                r.unit_cost AS "unitCost", r.prix_public AS "prixPublic",
+                r.unite_achat AS "uniteAchat", r.coeff_conversion AS "coeffConversion",
+                r.code_produit AS "codeProduit", r.code_analytique_id AS "codeAnalytiqueId",
+                r.supplier_id AS "supplierId", r.ref_fournisseur AS "refFournisseur",
+                r.conditionnement
+         FROM resource r
+         WHERE r.id = $1 AND r.library_id = $2`,
+        [resourceId, libraryId],
+      );
+      if (!rows[0]) throw new NotFoundException(`Unknown resource "${resourceId}"`);
+      return rows[0];
+    });
+  }
 }

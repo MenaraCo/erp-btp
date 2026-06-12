@@ -63,6 +63,16 @@ export class LibrariesController {
     return this.libraries.listResources(libraryId, query);
   }
 
+  @Get(':libraryId/resources/:resourceId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  getResource(
+    @Param('libraryId') libraryId: string,
+    @Param('resourceId') resourceId: string,
+  ) {
+    return this.libraries.getResource(libraryId, resourceId);
+  }
+
   @Patch(':libraryId/resources/:resourceId')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')

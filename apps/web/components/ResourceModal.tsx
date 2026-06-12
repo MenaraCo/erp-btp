@@ -174,8 +174,8 @@ export function ResourceModal({ libId, resource, onClose }: {
   const unitOptions = units.data ?? [];
 
   return (
-    <div style={overlay} onClick={onClose}>
-      <div style={panel} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" style={overlay} onClick={onClose}>
+      <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <strong style={{ fontSize: 16 }}>{isEdit ? 'Modifier la ressource' : 'Nouvelle ressource'}</strong>
@@ -328,8 +328,7 @@ const overlay: React.CSSProperties = {
   display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto',
 };
 const panel: React.CSSProperties = {
-  background: '#fff', borderRadius: 12, padding: '24px 28px', width: 620, maxWidth: '100%',
-  boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
+  borderRadius: 12, padding: '24px 28px', width: 620, maxWidth: '100%',
 };
 const infoBox: React.CSSProperties = {
   background: 'var(--bg-alt, #f1f5f9)', border: '1px solid var(--border)', borderRadius: 6,

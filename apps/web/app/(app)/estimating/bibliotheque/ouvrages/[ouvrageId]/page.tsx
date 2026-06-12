@@ -7,11 +7,12 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { usePreferences, fmtEuro, cleanNum } from '@/lib/preferences';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
+import { ResourceModal, FullResource } from '@/components/ResourceModal';
 
 /* ─────────── types ─────────── */
 interface Ouvrage {
   id: string; libraryId: string; code: string; label: string; unit: string; debourse: string;
-  description?: string | null; categorie?: string | null; lotId?: string | null;
+  description?: string | null; lotId?: string | null;
 }
 interface Component {
   id: string; kind: string; quantity: string | null; perte: string | null; rate: string | null;
@@ -69,21 +70,21 @@ export default function OuvrageEditorPage() {
   });
 
   /* Formulaire infos */
-  const [form, setForm] = useState({ code: '', label: '', unit: 'U', description: '', categorie: '', lotId: '' });
+  const [form, setForm] = useState({ code: '', label: '', unit: 'U', description: '', lotId: '' });
   const [initDone, setInitDone] = useState(false);
   useEffect(() => {
     if (ouvrage.data && !initDone) {
       const o = ouvrage.data;
-      setForm({ code: o.code, label: o.label, unit: o.unit, description: o.description ?? '', categorie: o.categorie ?? '', lotId: o.lotId ?? '' });
+      setForm({ code: o.code, label: o.label, unit: o.unit, description: o.description ?? '', lotId: o.lotId ?? '' });
       setInitDone(true);
     }
   }, [ouvrage.data, initDone]);
 
-  const libId = libIdParam || ''; // pour création (depuis quelle bibliothèque)
+  const libId = libIdParam || ouvrage.data?.libraryId || ''; // pour création et fetch ressource
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { code: form.code, label: form.label, unit: form.unit, description: form.description || null, categorie: form.categorie || null, lotId: form.lotId || null };
+      const body = { code: form.code, label: form.label, unit: form.unit, description: form.description || null, lotId: form.lotId || null };
       return isNew
         ? apiFetch<Ouvrage>(`/libraries/${libId}/ouvrages`, { method: 'POST', body, token })
         : apiFetch<Ouvrage>(`/ouvrages/${ouvrageId}`, { method: 'PATCH', body, token });
@@ -96,8 +97,14 @@ export default function OuvrageEditorPage() {
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Enregistrement impossible.'),
   });
 
-  /* Composition : modale picker */
+  /* Composition : modale picker + modale ressource */
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [editResId, setEditResId] = useState<string | null>(null);
+  const editResQuery = useQuery({
+    queryKey: ['resource-edit', libId, editResId],
+    enabled: Boolean(libId && editResId),
+    queryFn: () => apiFetch<FullResource>(`/libraries/${libId}/resources/${editResId}`, { token }),
+  });
 
   const addComp = useMutation({
     mutationFn: (r: ResourcePick) => apiFetch(`/ouvrages/${ouvrageId}/components`, {
@@ -187,15 +194,12 @@ export default function OuvrageEditorPage() {
             </div>
             <Field label="Désignation *"><input className="input" style={{ width: '100%' }} placeholder="Ex: Application deux couches de peinture…" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
             <Field label="Description"><textarea className="input" style={{ width: '100%', minHeight: 60, resize: 'vertical' }} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <Field label="Catégorie"><input className="input" placeholder="Ex: Peinture" value={form.categorie} onChange={(e) => setForm({ ...form, categorie: e.target.value })} /></Field>
-              <Field label="Lot">
-                <select className="input" value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
-                  <option value="">— Aucun —</option>
-                  {(lots.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
-                </select>
-              </Field>
-            </div>
+            <Field label="Lot">
+              <select className="input" value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
+                <option value="">— Aucun —</option>
+                {(lots.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.code} — {l.label}</option>)}
+              </select>
+            </Field>
             <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button className="btn" disabled={!form.code || !form.label || save.isPending} onClick={() => { setErr(null); save.mutate(); }}>
                 {save.isPending ? '…' : isNew ? 'Créer l\'ouvrage' : 'Enregistrer'}
@@ -236,7 +240,8 @@ export default function OuvrageEditorPage() {
                     <ComponentRow key={c.id} c={c} index={i + 1} nbDec={nbDec} cols={orderedCompoCols}
                       onQty={(q) => updateComp.mutate({ cid: c.id, quantity: q })}
                       onPerte={(p) => updateComp.mutate({ cid: c.id, perte: p })}
-                      onDelete={() => delComp.mutate(c.id)} />
+                      onDelete={() => delComp.mutate(c.id)}
+                      onEditResource={c.child_resource_id ? (id) => setEditResId(id) : undefined} />
                   ))}
                 </tbody>
               </table>
@@ -260,20 +265,35 @@ export default function OuvrageEditorPage() {
         </div>
       </div>
 
-      {pickerOpen && (libIdParam || ouvrage.data?.libraryId) && (
-        <ComponentPicker libId={(libIdParam || ouvrage.data!.libraryId)} token={token!} nbDec={nbDec}
+      {pickerOpen && libId && (
+        <ComponentPicker libId={libId} token={token!} nbDec={nbDec}
           currentOuvrageId={ouvrageId}
           onPickResource={(r) => addComp.mutate(r)} onPickOuvrage={(o) => addSubOuvrage.mutate(o)}
           onClose={() => setPickerOpen(false)} isPending={addComp.isPending || addSubOuvrage.isPending} />
+      )}
+      {editResId && (
+        editResQuery.data
+          ? <ResourceModal libId={libId} resource={editResQuery.data} onClose={() => { setEditResId(null); refreshComp(); }} />
+          : (
+            <div className="modal-overlay" style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, background: 'rgba(10,20,40,0.3)' }} onClick={() => setEditResId(null)}>
+              <div className="modal-box" style={{ padding: '28px 36px', minWidth: 260, textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                {editResQuery.isError
+                  ? <><p style={{ color: 'var(--danger)', marginBottom: 12 }}>Impossible de charger la ressource.</p><button className="btn-secondary" onClick={() => setEditResId(null)}>Fermer</button></>
+                  : <p className="muted">Chargement…</p>
+                }
+              </div>
+            </div>
+          )
       )}
     </div>
   );
 }
 
 /* ─────────── ligne de composant (cellules dans l'ordre des colonnes, ratio/perte éditables) ─────────── */
-function ComponentRow({ c, index, nbDec, cols, onQty, onPerte, onDelete }: {
+function ComponentRow({ c, index, nbDec, cols, onQty, onPerte, onDelete, onEditResource }: {
   c: Component; index: number; nbDec: number; cols: CompoCol[];
   onQty: (v: string) => void; onPerte: (v: string) => void; onDelete: () => void;
+  onEditResource?: (resId: string) => void;
 }) {
   // valeurs nettoyées (sans zéros inutiles : 0.3000 → 0.3)
   const [qty, setQty] = useState(cleanNum(c.quantity) || '0');
@@ -287,7 +307,9 @@ function ComponentRow({ c, index, nbDec, cols, onQty, onPerte, onDelete }: {
   const cell = (key: string) => {
     switch (key) {
       case 'type': return <span className="badge" style={{ fontSize: 9 }}>{NAT[c.childNature ?? 'material'] ?? '—'}</span>;
-      case 'code': return c.childCode ?? '—';
+      case 'code': return onEditResource && c.child_resource_id
+        ? <button className="btn-ghost" style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: 11, fontWeight: 600, padding: '1px 4px', cursor: 'pointer' }} onClick={() => onEditResource(c.child_resource_id!)}>{c.childCode ?? '—'}</button>
+        : <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{c.childCode ?? '—'}</span>;
       case 'label': return c.childLabel ?? '—';
       case 'unit': return c.childUnit ?? '—';
       case 'ratio': return <input className="input" inputMode="decimal" style={{ width: 60, textAlign: 'right' }} value={qty}
@@ -375,8 +397,8 @@ function ComponentPicker({ libId, token, nbDec, currentOuvrageId, onPickResource
   const selStyle: React.CSSProperties = { padding: '6px 8px', fontSize: 12 };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 12, padding: '20px 24px', width: 720, maxWidth: '100%', boxShadow: '0 12px 40px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }} onClick={onClose}>
+      <div className="modal-box" style={{ borderRadius: 12, padding: '20px 24px', width: 720, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <strong style={{ fontSize: 15 }}>Ajouter un composant</strong>
           <button className="btn-ghost btn" onClick={onClose} style={{ fontSize: 16 }}>✕</button>
