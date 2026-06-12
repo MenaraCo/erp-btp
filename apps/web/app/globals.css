@@ -1,4 +1,5 @@
 :root {
+  --library-item-hover: #f1f5f9;
   --bg: #f1f5f9;
   --panel: #ffffff;
   --surface: #f8fafc;
@@ -170,6 +171,69 @@ table.grid th {
 .sidebar a:hover svg,
 .sidebar a.active svg {
   opacity: 1;
+}
+
+/* ── Sidebar collapse toggle button ── */
+.sidebar-toggle {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: #94a3b8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.sidebar-toggle:hover {
+  background: #f1f5f9;
+  color: var(--primary);
+}
+
+/* ── Collapsed sidebar ── */
+body.sidebar-collapsed .app-shell {
+  grid-template-columns: 54px 1fr;
+}
+body.sidebar-collapsed .sidebar {
+  padding: 0 8px 8px;
+  align-items: center;
+}
+body.sidebar-collapsed .sidebar .brand {
+  justify-content: center;
+  padding: 14px 0;
+}
+body.sidebar-collapsed .sidebar .brand-text,
+body.sidebar-collapsed .sidebar .nav-section,
+body.sidebar-collapsed .sidebar .nav-sub {
+  display: none;
+}
+body.sidebar-collapsed .sidebar a {
+  justify-content: center;
+  padding: 8px;
+  width: 38px;
+}
+body.sidebar-collapsed .sidebar a .nav-label {
+  display: none;
+}
+body.sidebar-collapsed .sidebar a svg {
+  opacity: 0.75;
+}
+body.sidebar-collapsed .sidebar a:hover svg,
+body.sidebar-collapsed .sidebar a.active svg {
+  opacity: 1;
+}
+body.sidebar-collapsed .sidebar-toggle {
+  justify-content: center;
+  padding: 8px;
+  width: 38px;
+}
+body.sidebar-collapsed .sidebar-toggle .nav-label {
+  display: none;
 }
 
 .topbar {
@@ -570,6 +634,14 @@ table.grid tbody tr:hover {
   }
 }
 
+/* ── Split view actif : synthèse masquée (Panel B a la sienne) ── */
+.editor-grid.split-active {
+  grid-template-columns: 1fr;
+}
+.editor-grid.split-active .synthese-panel {
+  display: none;
+}
+
 /* ── Bibliothèque ouverte : récap masqué, marge droite pour éviter la superposition ── */
 .editor-grid.library-open {
   grid-template-columns: 1fr;
@@ -579,6 +651,17 @@ table.grid tbody tr:hover {
   display: none;
 }
 
+/* En split view : la bibliothèque est absolute (pas fixed), le scroll div gère l'espacement */
+.editor-grid.split-active.library-open {
+  margin-right: 0;
+  min-width: 520px; /* évite que le contenu se réduise à zéro — le scroll div défile horizontalement */
+}
+
+/* ── Split panels: padding de base + ouverture bibliothèque ── */
+.split-scroll { padding-right: 22px; }
+.lib-open .split-scroll { padding-right: 328px; /* 320 bibliothèque + 8 respiration */ }
+.lib-open .split-scroll-content { min-width: 520px; } /* évite que le header/titre se rétracte et wraps */
+
 @media (max-width: 1100px) {
   .editor-grid {
     grid-template-columns: 1fr;
@@ -586,6 +669,113 @@ table.grid tbody tr:hover {
   .synthese-panel {
     position: static;
   }
+}
+
+/* ── Split view flexbox ── */
+/* main passe en flex quand le split est actif */
+.main.main-split {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+/* Panel B : flex enfant du main */
+.split-panel-b {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* ── Barre de fenêtre (Panels A & B) ── */
+.split-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: var(--primary);
+  color: #fff;
+  flex-shrink: 0;
+  min-height: 40px;
+}
+/* Panel A bar is slightly lighter/translucent vs the solid B bar */
+.split-window-bar-a {
+  background: color-mix(in srgb, var(--primary) 78%, transparent);
+  border-bottom: 1px solid rgba(255,255,255,0.15);
+}
+
+.win-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  font-size: 12px;
+  flex-shrink: 0;
+  transition: background 0.12s;
+  padding: 0;
+  line-height: 1;
+}
+.win-btn:hover { background: rgba(255,255,255,0.28); }
+.win-btn.active { background: rgba(255,255,255,0.28); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); }
+.win-btn-close { background: rgba(220,60,60,0.35); }
+.win-btn-close:hover { background: rgba(220,60,60,0.65) !important; }
+
+.win-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.2); margin: 0 2px; flex-shrink: 0; }
+.win-label { font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.7); white-space: nowrap; flex-shrink: 0; }
+
+.win-select {
+  flex: 1; min-width: 0; max-width: 260px;
+  font-size: 11px; padding: 3px 6px;
+  background: rgba(255,255,255,0.12); color: #fff;
+  border: 1px solid rgba(255,255,255,0.22); border-radius: 4px; cursor: pointer;
+}
+.win-select option { background: #1a3a5c; color: #fff; }
+.win-select-v {
+  width: 54px; font-size: 11px; padding: 3px 4px; flex-shrink: 0;
+  background: rgba(255,255,255,0.12); color: #fff;
+  border: 1px solid rgba(255,255,255,0.22); border-radius: 4px; cursor: pointer;
+}
+.win-select-v option { background: #1a3a5c; color: #fff; }
+
+/* ── Onglets dans Panel B ── */
+.split-panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+}
+
+/* ── Séparateur glissable ── */
+.split-divider {
+  flex-shrink: 0;
+  background: var(--border);
+  transition: background 0.12s;
+  user-select: none;
+}
+.main.main-split[style*='column'] .split-divider { width: 100%; height: 4px; }
+.main.main-split[style*='row'] .split-divider,
+.main.main-split:not([style*='column']) .split-divider { width: 4px; height: 100%; }
+.split-divider:hover,
+.split-divider:active { background: var(--primary); }
+
+/* ── Bibliothèque drawer ── */
+.library-drawer {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -4px 0 24px rgba(15, 23, 42, 0.12);
+}
+
+.library-drawer-header {
+  background: var(--primary);
 }
 
 /* ── Container queries (panneaux denses) ── */

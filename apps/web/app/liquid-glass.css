@@ -1,0 +1,348 @@
+/*
+ * Liquid Glass Theme
+ * Pour revenir en arrière : retirer className="theme-lg" dans app/layout.tsx
+ * et supprimer l'import de ce fichier.
+ */
+
+/* ── Fond dégradé visible à travers les surfaces vitrées ── */
+body.theme-lg {
+  background: linear-gradient(135deg,
+    #ccd9ed 0%,
+    #c2cfe8 20%,
+    #cac4e8 45%,
+    #bccce8 70%,
+    #c4daf0 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* ── Utilitaire glass partagé ── */
+.theme-lg .glass {
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(32px) saturate(2.4);
+  -webkit-backdrop-filter: blur(32px) saturate(2.4);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 4px 24px rgba(26, 58, 92, 0.12),
+              inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+
+/* ── Sidebar ── */
+.theme-lg .sidebar {
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(32px) saturate(2.0);
+  -webkit-backdrop-filter: blur(32px) saturate(2.0);
+  border-right: 1px solid rgba(255, 255, 255, 0.52);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.4), 2px 0 24px rgba(26, 58, 92, 0.08);
+}
+
+.theme-lg .sidebar .brand {
+  border-bottom-color: rgba(255, 255, 255, 0.4);
+}
+
+.theme-lg .sidebar a:hover {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.theme-lg .sidebar a.active {
+  background: rgba(26, 58, 92, 0.1);
+  backdrop-filter: blur(4px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* ── Topbar ── */
+.theme-lg .topbar {
+  background: rgba(255, 255, 255, 0.50);
+  backdrop-filter: blur(32px) saturate(2.0);
+  -webkit-backdrop-filter: blur(32px) saturate(2.0);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.52);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45), 0 2px 16px rgba(26, 58, 92, 0.08);
+}
+
+/* ── Cards ── */
+.theme-lg .card {
+  background: rgba(255, 255, 255, 0.50);
+  backdrop-filter: blur(20px) saturate(1.9);
+  -webkit-backdrop-filter: blur(20px) saturate(1.9);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 4px 20px rgba(26, 58, 92, 0.08),
+              inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.theme-lg .card-grid .card:hover {
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 8px 28px rgba(26, 58, 92, 0.12),
+              inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transform: translateY(-1px);
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+
+/* ── Panneau synthèse devis ── */
+.theme-lg .synthese-panel {
+  background: rgba(255, 255, 255, 0.38);
+  backdrop-filter: blur(32px) saturate(2.2);
+  -webkit-backdrop-filter: blur(32px) saturate(2.2);
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  box-shadow: 0 8px 32px rgba(26, 58, 92, 0.12),
+              inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.theme-lg .synthese-row {
+  border-bottom-color: rgba(226, 232, 240, 0.5);
+}
+
+/* ── Boutons primaires ── */
+.theme-lg button.btn,
+.theme-lg .btn {
+  background: rgba(26, 58, 92, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 10px rgba(26, 58, 92, 0.28),
+              inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.theme-lg button.btn:hover:not(:disabled),
+.theme-lg .btn:hover:not(:disabled) {
+  background: rgba(15, 41, 64, 0.9);
+  box-shadow: 0 4px 14px rgba(26, 58, 92, 0.35),
+              inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* ── Boutons secondaires ── */
+.theme-lg button.btn-secondary,
+.theme-lg .btn-secondary {
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 1px 6px rgba(26, 58, 92, 0.07),
+              inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+}
+
+.theme-lg button.btn-secondary:hover:not(:disabled),
+.theme-lg .btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(255, 255, 255, 0.8);
+}
+
+/* ── Boutons ghost ── */
+.theme-lg button.btn-ghost:hover:not(:disabled),
+.theme-lg .btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+/* ── Inputs ── */
+.theme-lg input,
+.theme-lg select,
+.theme-lg textarea,
+.theme-lg .input {
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(203, 213, 225, 0.6);
+  box-shadow: inset 0 1px 3px rgba(26, 58, 92, 0.04);
+}
+
+.theme-lg input:focus,
+.theme-lg select:focus,
+.theme-lg textarea:focus,
+.theme-lg .input:focus {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(26, 58, 92, 0.4);
+  box-shadow: 0 0 0 2px rgba(26, 58, 92, 0.1), inset 0 1px 3px rgba(26, 58, 92, 0.04);
+}
+
+/* ── Tables ── */
+.theme-lg table.grid thead th {
+  background: rgba(241, 245, 249, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.theme-lg table.grid tbody tr:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Badges ── */
+.theme-lg .badge {
+  background: rgba(248, 250, 252, 0.65);
+  backdrop-filter: blur(4px);
+  border-color: rgba(226, 232, 240, 0.5);
+}
+
+.theme-lg .badge.success {
+  background: rgba(220, 252, 231, 0.7);
+}
+.theme-lg .badge.info {
+  background: rgba(219, 234, 254, 0.7);
+}
+.theme-lg .badge.warning {
+  background: rgba(254, 243, 199, 0.7);
+}
+.theme-lg .badge.danger {
+  background: rgba(254, 226, 226, 0.7);
+}
+
+/* ── Page de connexion ── */
+.theme-lg .login-wrap {
+  background: linear-gradient(135deg, #e8f0f9 0%, #dce8f5 35%, #e4dff2 70%, #d8eaf3 100%);
+  background-attachment: fixed;
+}
+
+.theme-lg .login-card {
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(28px) saturate(2);
+  -webkit-backdrop-filter: blur(28px) saturate(2);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 20px 60px rgba(26, 58, 92, 0.14),
+              inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* ── Lignes titre / sous-titre du montage ── */
+/* !important nécessaire pour overrider les inline styles */
+
+.theme-lg .title-row-0 {
+  background: rgba(26, 58, 92, 0.72) !important;
+  backdrop-filter: blur(14px) saturate(1.6);
+  -webkit-backdrop-filter: blur(14px) saturate(1.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
+              0 2px 10px rgba(26, 58, 92, 0.2);
+}
+
+.theme-lg .title-row-1 {
+  background: rgba(220, 230, 242, 0.58) !important;
+  backdrop-filter: blur(10px) saturate(1.5);
+  -webkit-backdrop-filter: blur(10px) saturate(1.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.theme-lg .title-row-2 {
+  background: rgba(232, 238, 247, 0.52) !important;
+  backdrop-filter: blur(8px) saturate(1.4);
+  -webkit-backdrop-filter: blur(8px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.theme-lg .title-row-3 {
+  background: rgba(240, 244, 249, 0.48) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* ── Bibliothèque drawer ── */
+.theme-lg {
+  --library-item-hover: rgba(255, 255, 255, 0.50);
+}
+
+.theme-lg .library-drawer {
+  background: rgba(225, 240, 255, 0.50);
+  backdrop-filter: blur(32px) saturate(2.0);
+  -webkit-backdrop-filter: blur(32px) saturate(2.0);
+  border-left: 1px solid rgba(255, 255, 255, 0.52);
+  box-shadow: -8px 0 40px rgba(26, 58, 92, 0.12),
+              inset 1px 0 0 rgba(255, 255, 255, 0.52);
+}
+
+.theme-lg .library-drawer-header {
+  background: rgba(26, 58, 92, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15) !important;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.1),
+              0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* ── Cards (override inline background) ── */
+.theme-lg .card {
+  background: rgba(255, 255, 255, 0.50) !important;
+  backdrop-filter: blur(20px) saturate(1.9);
+  -webkit-backdrop-filter: blur(20px) saturate(1.9);
+  border-color: rgba(255, 255, 255, 0.55) !important;
+  box-shadow: 0 4px 20px rgba(26, 58, 92, 0.08),
+              inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
+}
+
+/* ── Modals / popups ── */
+.theme-lg .modal-overlay {
+  background: rgba(8, 18, 60, 0.20) !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.theme-lg .modal-box {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(28px) saturate(2);
+  -webkit-backdrop-filter: blur(28px) saturate(2);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 20px 60px rgba(26, 58, 92, 0.14),
+              inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+/* ── Split Panel B ── */
+.theme-lg .split-panel-b {
+  background: rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(32px) saturate(2.0);
+  -webkit-backdrop-filter: blur(32px) saturate(2.0);
+  border-left: 1px solid rgba(255, 255, 255, 0.50);
+  box-shadow: -8px 0 40px rgba(26, 58, 92, 0.10);
+}
+
+.theme-lg .split-panel-b.split-horizontal {
+  border-top: 1px solid rgba(255, 255, 255, 0.42);
+  border-left: none;
+}
+
+.theme-lg .split-window-bar {
+  background: rgba(20, 50, 100, 0.85);
+  backdrop-filter: blur(16px) saturate(1.8);
+  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.theme-lg .win-btn {
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(6px);
+}
+.theme-lg .win-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+.theme-lg .win-btn.active {
+  background: rgba(255, 255, 255, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+.theme-lg .win-btn-close {
+  background: rgba(220, 60, 60, 0.32);
+}
+.theme-lg .win-btn-close:hover {
+  background: rgba(220, 60, 60, 0.60) !important;
+}
+
+.theme-lg .win-select,
+.theme-lg .win-select-v {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.20);
+  color: #fff;
+}
+
+.theme-lg .split-panel-tabs {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.38);
+}
+
+/* ── Scrollbar thème verre ── */
+.theme-lg ::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.4);
+}
+.theme-lg ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+  backdrop-filter: blur(4px);
+}
+.theme-lg ::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.65);
+}

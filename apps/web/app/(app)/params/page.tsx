@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2, Save, ChevronUp } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useTheme, type AppTheme } from '@/lib/theme';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 import { IconBtn } from '@/components/IconBtn';
 
@@ -869,8 +870,90 @@ function TabPreferences({ token }: { token: string }) {
         </div>
       </Card>
 
+      {/* ── Thème de l'interface ── */}
+      <ThemeCard />
+
       <SaveButton onSave={() => save.mutate()} isPending={save.isPending} saved={saved} />
     </div>
+  );
+}
+
+/* ─────────── Thème de l'interface ─────────── */
+
+const THEMES: { value: AppTheme; label: string; desc: string; preview: string }[] = [
+  {
+    value: 'liquid-glass',
+    label: 'Liquid Glass',
+    desc: 'Surfaces translucides avec effet verre et dégradé coloré en fond',
+    preview: 'linear-gradient(135deg, #ccd9ed 0%, #c2cfe8 40%, #cac4e8 100%)',
+  },
+  {
+    value: 'classic',
+    label: 'Classique clair',
+    desc: 'Interface épurée sur fond blanc, sans effet de transparence',
+    preview: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+  },
+];
+
+function ThemeCard() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <Card title="Thème de l'interface">
+      <p className="muted" style={{ margin: '0 0 14px', fontSize: 11 }}>
+        Le thème est appliqué immédiatement et mémorisé dans votre navigateur.
+      </p>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+        {THEMES.map((t) => {
+          const active = theme === t.value;
+          return (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setTheme(t.value)}
+              style={{
+                display: 'flex', flexDirection: 'column', gap: 10, padding: 14,
+                border: `2px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                borderRadius: 10, background: active ? 'rgba(232, 85, 10, 0.04)' : '#fff',
+                cursor: 'pointer', textAlign: 'left', width: 200,
+                boxShadow: active ? '0 0 0 3px rgba(232,85,10,0.12)' : 'none',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+              }}
+            >
+              {/* Mini aperçu */}
+              <div style={{
+                height: 56, borderRadius: 6, background: t.preview,
+                border: '1px solid var(--border)', position: 'relative', overflow: 'hidden',
+              }}>
+                {t.value === 'liquid-glass' && (
+                  <>
+                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 32,
+                      background: 'rgba(255,255,255,0.50)', backdropFilter: 'blur(6px)',
+                      borderRight: '1px solid rgba(255,255,255,0.5)' }} />
+                    <div style={{ position: 'absolute', left: 32, top: 0, right: 0, height: 16,
+                      background: 'rgba(255,255,255,0.45)', backdropFilter: 'blur(6px)',
+                      borderBottom: '1px solid rgba(255,255,255,0.5)' }} />
+                  </>
+                )}
+                {t.value === 'classic' && (
+                  <>
+                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 32,
+                      background: '#f1f5f9', borderRight: '1px solid #e2e8f0' }} />
+                    <div style={{ position: 'absolute', left: 32, top: 0, right: 0, height: 16,
+                      background: '#ffffff', borderBottom: '1px solid #e2e8f0' }} />
+                  </>
+                )}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 12, color: active ? 'var(--accent)' : 'var(--text)', marginBottom: 3 }}>
+                  {active && <span style={{ marginRight: 5 }}>✓</span>}{t.label}
+                </div>
+                <div className="muted" style={{ fontSize: 10, lineHeight: 1.4 }}>{t.desc}</div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 
@@ -931,7 +1014,7 @@ function BulkSelect({ value, onChange, children }: { value: string; onChange: (v
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '16px 20px', background: '#fff' }}>
+    <div className="card" style={{ borderRadius: 8, padding: '16px 20px' }}>
       <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--accent)', marginBottom: 14 }}>
         {title}
       </div>
@@ -1050,8 +1133,8 @@ function ColorPicker({ label, hint, value, onChange }: {
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: '#fff', borderRadius: 10, padding: '24px 28px', minWidth: 380, maxWidth: 520, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="modal-box" style={{ borderRadius: 10, padding: '24px 28px', minWidth: 380, maxWidth: 520 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <strong style={{ fontSize: 14 }}>{title}</strong>
           <button className="btn-ghost btn" onClick={onClose} style={{ fontSize: 16 }}>✕</button>

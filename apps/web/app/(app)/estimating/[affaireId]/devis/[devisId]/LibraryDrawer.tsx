@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtEuro } from '@/lib/preferences';
@@ -18,10 +19,29 @@ function setDrag(e: React.DragEvent, item: DragItem) {
   e.dataTransfer.setData(DRAG_KEY, JSON.stringify(item));
 }
 
-export function LibraryDrawer({ token, onClose }: { token: string | null; onClose: () => void }) {
+export function LibraryDrawer({
+  token, onClose, containerId,
+}: { token: string | null; onClose: () => void; containerId?: string }) {
   const [libId, setLibId] = useState('');
   const [tab, setTab] = useState<'ouvrages' | 'ressources'>('ouvrages');
   const [search, setSearch] = useState('');
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (containerId) {
+      setPortalTarget(document.getElementById(containerId));
+    }
+  }, [containerId]);
+
+  // Add .lib-open class to the anchor so CSS can add padding-right to the scroll div
+  useEffect(() => {
+    if (!containerId) return;
+    const anchorId = containerId.replace('-library', '-anchor');
+    const anchor = document.getElementById(anchorId);
+    if (!anchor) return;
+    anchor.classList.add('lib-open');
+    return () => { anchor.classList.remove('lib-open'); };
+  }, [containerId]);
 
   const libs = useQuery({
     queryKey: ['libraries'], enabled: Boolean(token),
@@ -43,15 +63,14 @@ export function LibraryDrawer({ token, onClose }: { token: string | null; onClos
     !search || r.label.toLowerCase().includes(search.toLowerCase()) || r.code.toLowerCase().includes(search.toLowerCase()),
   );
 
-  return (
-    <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0, width: 320, zIndex: 300,
-      background: '#fff', borderLeft: '1px solid var(--border)',
-      boxShadow: '-4px 0 24px rgba(15,23,42,0.12)',
-      display: 'flex', flexDirection: 'column',
-    }}>
+  const posStyle: React.CSSProperties = containerId
+    ? { position: 'absolute', top: 0, right: 0, bottom: 0, width: 320, zIndex: 10 }
+    : { position: 'fixed', top: 0, right: 0, bottom: 0, width: 320, zIndex: 300 };
+
+  const content = (
+    <div className="library-drawer" style={{ ...posStyle, display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderBottom: '1px solid var(--border)', background: 'var(--primary)', color: '#fff' }}>
+      <div className="library-drawer-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderBottom: '1px solid var(--border)', color: '#fff' }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 13 }}>Bibliothèque</div>
           <div style={{ fontSize: 11, opacity: 0.75 }}>Glisser-déposer dans le devis</div>
@@ -115,7 +134,7 @@ export function LibraryDrawer({ token, onClose }: { token: string | null; onClos
                 cursor: 'grab', userSelect: 'none',
                 transition: 'background 0.12s',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--library-item-hover)')}
               onMouseLeave={(e) => (e.currentTarget.style.background = '')}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -143,7 +162,7 @@ export function LibraryDrawer({ token, onClose }: { token: string | null; onClos
                 padding: '8px 14px', borderBottom: '1px solid var(--border)',
                 cursor: 'grab', userSelect: 'none',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--library-item-hover)')}
               onMouseLeave={(e) => (e.currentTarget.style.background = '')}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -164,4 +183,9 @@ export function LibraryDrawer({ token, onClose }: { token: string | null; onClos
       </div>
     </div>
   );
+
+  if (containerId) {
+    return portalTarget ? createPortal(content, portalTarget) : null;
+  }
+  return content;
 }
