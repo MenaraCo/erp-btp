@@ -28,9 +28,12 @@ export function LibraryDrawer({
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (containerId) {
-      setPortalTarget(document.getElementById(containerId));
-    }
+    if (!containerId) return;
+    setPortalTarget(document.getElementById(containerId));
+    // Add class to scroll container so CSS can extend content width past the overlay
+    const scrollEl = document.getElementById(containerId.replace('-library', '-scroll'));
+    scrollEl?.classList.add('lib-open');
+    return () => scrollEl?.classList.remove('lib-open');
   }, [containerId]);
 
 
