@@ -55,9 +55,6 @@ interface ApproRow {
   fournisseur: string | null; refFournisseur: string | null; prixPublic: string | null;
   qteAppro: string; montant: string;
 }
-interface Library { id: string; code: string; name: string }
-interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
-interface Page<T> { rows: T[] }
 
 function orderTree(lines: DevisLine[]): { line: DevisLine; depth: number }[] {
   const byParent = new Map<string | null, DevisLine[]>();
@@ -126,12 +123,6 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     retry: false,
     queryFn: () => apiFetch<SaleConfig>(`/versions/${versionId}/sale-sheet/config`, { token }),
   });
-  const libs = useQuery({
-    queryKey: ['libraries'],
-    enabled: Boolean(token),
-    queryFn: () => apiFetch<Page<Library>>('/libraries?pageSize=100', { token }),
-  });
-
   const affaireDetail = useQuery<{
     affaire: { id: string; code: string; name: string };
     devis: Array<{ id: string; numero: string | null; designation: string; versions: Version[] }>
@@ -164,34 +155,6 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     qc.invalidateQueries({ queryKey: ['sale-sheet', versionId] });
     qc.invalidateQueries({ queryKey: ['sale-config', versionId] });
   }
-
-  const [pl, setPl] = useState({ parentId: '', type: 'titre', code: '', designation: '', libId: '', ouvrageId: '', unit: '', quantity: '', formula: '' });
-  const ouvragesOfLib = useQuery({
-    queryKey: ['ouvrages', pl.libId],
-    enabled: Boolean(token && pl.libId),
-    queryFn: () => apiFetch<Page<Ouvrage>>(`/libraries/${pl.libId}/ouvrages?pageSize=200`, { token }),
-  });
-
-  const addLine = useMutation({
-    mutationFn: () => {
-      const body: Record<string, unknown> = {
-        type: pl.type, parentLineId: pl.parentId || null,
-        code: pl.code || null, designation: pl.designation,
-      };
-      if (pl.type === 'ouvrage') {
-        body.sourceOuvrageId = pl.ouvrageId;
-        body.unit = pl.unit || null;
-        if (pl.formula) body.quantityFormula = pl.formula;
-        else body.quantity = pl.quantity || '0';
-      }
-      return apiFetch(`/versions/${versionId}/lines`, { method: 'POST', body, token });
-    },
-    onSuccess: () => {
-      refresh();
-      setPl({ ...pl, code: '', designation: '', ouvrageId: '', unit: '', quantity: '', formula: '' });
-    },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
 
   const [coef, setCoef] = useState<Record<Nat, { fg: string; ben: string }>>({
     labor: { fg: '10', ben: '15' }, material: { fg: '8', ben: '10' },

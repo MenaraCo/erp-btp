@@ -400,7 +400,7 @@ function Node({
           <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: ls.color }}>{fmtV(valueOf(line))}</span>
           {!readOnly && (
             <>
-              <SectionActions parentId={line.id} childCount={kids.length} depth={depth} vente={vente} addLine={addLine} headerColor={ls.color} />
+              <SectionActions parentId={line.id} childCount={kids.length} depth={depth} addLine={addLine} headerColor={ls.color} />
               <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, 'rgba(255,255,255,0.5)'), fontSize: 13 }}>⧉</button>
               <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'variante' ? null : 'variante' })} style={togBtn(sect === 'variante', '#f97316')}>V</button>
               <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'option' ? null : 'option' })} style={togBtn(sect === 'option', '#a855f7')}>O</button>
@@ -428,7 +428,6 @@ function Node({
     const info = saleById?.get(line.id);
     const qtyN = Number(line.quantity) || 0;
     const puVente = vente && info && qtyN ? Number(info.pv) / qtyN : null;
-    const puDebours = qtyN ? subtree(line) / qtyN : null;
     const ouvrSect = line.section_type;
     const isLibDrop = libDragActive && libDragOverId === line.id;
     return (
@@ -487,7 +486,7 @@ function Node({
           <span style={{ width: 80, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
           {!readOnly && (
             <>
-              {!vente && <OuvrageAddMenu parentId={line.id} childCount={comps.length} addLine={addLine} insertOuvrage={insertOuvrage} />}
+              {!vente && <OuvrageAddMenu parentId={line.id} childCount={comps.length} addLine={addLine} />}
               <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, '#94a3b8'), fontSize: 13 }}>⧉</button>
               <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'variante' ? null : 'variante' })} style={togBtn(ouvrSect === 'variante', '#f97316')}>V</button>
               <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'option' ? null : 'option' })} style={togBtn(ouvrSect === 'option', '#a855f7')}>O</button>
@@ -601,8 +600,8 @@ function acceptDrop(e: React.DragEvent) {
   return e.dataTransfer.types.includes('application/json');
 }
 
-function SectionActions({ parentId, childCount, depth, vente, addLine, headerColor }: {
-  parentId: string; childCount: number; depth: number; vente: boolean; headerColor: string;
+function SectionActions({ parentId, childCount, depth, addLine, headerColor }: {
+  parentId: string; childCount: number; depth: number; headerColor: string;
 } & Pick<Muts, 'addLine'>) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
@@ -689,9 +688,9 @@ function CodeInput({ value, readOnly, placeholder, title, style, onChange }: {
   );
 }
 
-function OuvrageAddMenu({ parentId, childCount, addLine, insertOuvrage }: {
+function OuvrageAddMenu({ parentId, childCount, addLine }: {
   parentId: string; childCount: number;
-} & Pick<Muts, 'addLine' | 'insertOuvrage'>) {
+} & Pick<Muts, 'addLine'>) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
   return (
