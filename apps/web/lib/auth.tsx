@@ -18,6 +18,8 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   isAuthenticated: boolean;
   login: (tenantSlug: string, email: string, password: string) => Promise<void>;
+  /** Establishes a session from an already-issued token (e.g. right after sign-up). */
+  setSession: (token: string, email: string, tenantSlug: string) => void;
   logout: () => void;
 }
 
@@ -47,13 +49,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const setSession = useCallback(
+    (token: string, email: string, tenantSlug: string) => {
+      setState({ token, email, tenantSlug });
+    },
+    [],
+  );
+
   const logout = useCallback(() => {
     setState({ token: null, email: null, tenantSlug: null });
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, isAuthenticated: Boolean(state.token), login, logout }),
-    [state, login, logout],
+    () => ({ ...state, isAuthenticated: Boolean(state.token), login, setSession, logout }),
+    [state, login, setSession, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

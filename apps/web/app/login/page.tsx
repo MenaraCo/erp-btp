@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { ApiError } from '@/lib/api';
@@ -56,6 +57,9 @@ export default function LoginPage() {
         <button className="btn" type="submit" disabled={loading} style={{ width: '100%' }}>
           {loading ? 'Connexion…' : 'Se connecter'}
         </button>
+        <p className="muted" style={{ textAlign: 'center', marginTop: 16, marginBottom: 0, fontSize: 12 }}>
+          Pas encore de compte ? <Link href="/inscription" className="link">Créer un compte</Link>
+        </p>
       </form>
     </div>
   );

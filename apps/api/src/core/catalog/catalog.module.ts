@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogService } from './catalog.service';
 import { CatalogController } from './catalog.controller';
+import { PublicCatalogController } from './public-catalog.controller';
 import { ModuleEntity } from './entities/module.entity';
 import { CapabilityEntity } from './entities/capability.entity';
 import { ModuleCapabilityEntity } from './entities/module-capability.entity';
@@ -21,7 +22,7 @@ import { QuotaDefinitionEntity } from './entities/quota-definition.entity';
       QuotaDefinitionEntity,
     ]),
   ],
-  controllers: [CatalogController],
+  controllers: [CatalogController, PublicCatalogController],
   providers: [CatalogService],
   exports: [CatalogService],
 })

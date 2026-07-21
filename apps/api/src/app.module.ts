@@ -48,7 +48,16 @@ import { HealthModule } from './health/health.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    // Every route requires a tenant, except the public health check.
-    consumer.apply(TenantMiddleware).exclude('health').forRoutes('*');
+    // Every route requires a tenant, except the public health check and public sign-up
+    // (register creates the tenant, so it cannot be tenant-scoped — cahier §3.3).
+    consumer
+      .apply(TenantMiddleware)
+      .exclude(
+        'health',
+        'auth/register',
+        'public/catalog/modules',
+        'public/catalog/packs',
+      )
+      .forRoutes('*');
   }
 }

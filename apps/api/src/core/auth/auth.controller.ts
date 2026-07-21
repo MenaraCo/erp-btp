@@ -7,6 +7,10 @@ import {
 } from '@nestjs/common';
 import { TenantContext } from '../tenancy/tenant-context';
 import { AuthService } from './auth.service';
+import {
+  RegistrationService,
+  type RegisterInput,
+} from './registration.service';
 
 interface LoginDto {
   email?: string;
@@ -14,12 +18,33 @@ interface LoginDto {
   totp?: string;
 }
 
+type RegisterDto = Partial<RegisterInput>;
+
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
+    private readonly registration: RegistrationService,
     private readonly context: TenantContext,
   ) {}
+
+  /**
+   * Public sign-up (cahier §3.3) — two entry doors. `mode: 'trial'` starts the 30-day trial
+   * (all modules); `mode: 'direct'` creates a paid subscription for the chosen modules. Creates
+   * the tenant + admin user and returns an access token (auto-login). Tenant-less by design —
+   * excluded from the tenant middleware in AppModule.
+   */
+  @Post('register')
+  register(@Body() body: RegisterDto) {
+    return this.registration.register({
+      companyName: body.companyName ?? '',
+      fullName: body.fullName ?? '',
+      email: body.email ?? '',
+      password: body.password ?? '',
+      mode: body.mode === 'direct' ? 'direct' : 'trial',
+      modules: body.modules,
+    });
+  }
 
   /** Tenant is resolved by the middleware (sub-domain / X-Tenant-Id); credentials in the body. */
   @Post('login')
