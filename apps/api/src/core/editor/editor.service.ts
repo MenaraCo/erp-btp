@@ -7,6 +7,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { runInTenant } from '../tenancy/tenant-transaction';
 import { MODULES } from '../catalog/catalog.config';
+import { CatalogService } from '../catalog/catalog.service';
 
 export interface EditorTenantRow {
   tenantId: string;
@@ -37,7 +38,6 @@ export interface EditorOverview {
   conversionRate: number;
 }
 
-const PRICE_BY_MODULE = new Map(MODULES.map((m) => [m.code, m.priceMonthly ?? 0]));
 const MODULE_CODES = new Set(MODULES.map((m) => m.code));
 
 export type SubscriptionStatus =
@@ -61,11 +61,14 @@ const OPEN_STATUSES: SubscriptionStatus[] = ['active', 'trialing'];
  * is RLS-forced, so we read the global `tenant` table (no RLS) then read each tenant's data inside
  * its own tenant context (runInTenant). This reuses the RLS-safe path with no privileged
  * connection; fine at early scale, optimisable with an owner-role read model later. MRR is derived
- * from the config-driven module prices — never hard-coded.
+ * from the module prices stored in the database (editable from this back-office) — never hard-coded.
  */
 @Injectable()
 export class EditorService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly catalog: CatalogService,
+  ) {}
 
   async getTenants(): Promise<EditorTenantRow[]> {
     const tenants: Array<{ id: string; slug: string; name: string; created_at: Date }> =
@@ -73,20 +76,26 @@ export class EditorService {
         `SELECT id, slug, name, created_at FROM tenant ORDER BY created_at DESC`,
       );
 
+    // Load prices once for the whole listing.
+    const prices = await this.catalog.getPriceByModuleCode();
     const rows: EditorTenantRow[] = [];
     for (const t of tenants) {
-      rows.push(await this.readTenantRow(t));
+      rows.push(await this.readTenantRow(t, prices));
     }
     return rows;
   }
 
   /** Reads one tenant's subscription snapshot inside its own tenant context (RLS-scoped). */
-  private async readTenantRow(t: {
-    id: string;
-    slug: string;
-    name: string;
-    created_at: Date;
-  }): Promise<EditorTenantRow> {
+  private async readTenantRow(
+    t: {
+      id: string;
+      slug: string;
+      name: string;
+      created_at: Date;
+    },
+    priceByModule?: Map<string, number>,
+  ): Promise<EditorTenantRow> {
+    const prices = priceByModule ?? (await this.catalog.getPriceByModuleCode());
     const row = await runInTenant(this.dataSource, t.id, async (em) => {
       const subRows = await em.query(
         `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end
@@ -116,7 +125,7 @@ export class EditorService {
           ? modules
               .filter((m) => m.active)
               .reduce(
-                (s, m) => s + Number(m.seats_purchased) * (PRICE_BY_MODULE.get(m.module_code) ?? 0),
+                (s, m) => s + Number(m.seats_purchased) * (prices.get(m.module_code) ?? 0),
                 0,
               )
           : 0;
@@ -323,6 +332,39 @@ export class EditorService {
       );
     });
     return this.readTenantRow(base);
+  }
+
+  /** Commercial catalogue (prices from the database, editable here). */
+  getCatalog() {
+    return this.catalog.getCatalogModules();
+  }
+
+  /**
+   * Editor pricing control (cahier §3.2/§3.7 B): changes a module's price/label/active state.
+   * Takes effect immediately for quotes, the client console and MRR — no redeployment.
+   */
+  async updateCatalogModule(
+    code: string,
+    patch: { priceMonthly?: number | null; label?: string; active?: boolean },
+  ) {
+    if (!MODULE_CODES.has(code)) {
+      throw new BadRequestException(`Module inconnu: ${code}`);
+    }
+    if (patch.priceMonthly !== undefined && patch.priceMonthly !== null) {
+      const p = Number(patch.priceMonthly);
+      if (!Number.isFinite(p) || p < 0) {
+        throw new BadRequestException('Prix invalide (doit être ≥ 0, ou null pour « sur devis »)');
+      }
+      patch.priceMonthly = Math.round(p * 100) / 100;
+    }
+    if (patch.label !== undefined && !patch.label.trim()) {
+      throw new BadRequestException('Le libellé ne peut pas être vide');
+    }
+    const updated = await this.catalog.updateModule(code, patch);
+    if (!updated) {
+      throw new NotFoundException(`Module ${code} introuvable`);
+    }
+    return updated;
   }
 
   /** Opens (active=true) or restricts (active=false, read-only) every module of the tenant. */

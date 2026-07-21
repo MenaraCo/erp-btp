@@ -15,4 +15,11 @@ export class ModuleEntity extends BaseEntity {
 
   @Column({ type: 'boolean', default: true })
   active!: boolean;
+
+  /**
+   * Price €HT per seat and per month — the source of truth, editable from the editor back-office.
+   * `null` = "sur devis", `0` = included in the Socle. pg returns numeric as a string.
+   */
+  @Column({ name: 'price_monthly', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  priceMonthly!: string | null;
 }

@@ -39,6 +39,9 @@ interface CatalogModule {
   code: string;
   label: string;
   priceMonthly: number | null;
+  isAddon: boolean;
+  active: boolean;
+  description?: string | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -224,8 +227,10 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
                 </table>
               )}
             </div>
+            <CatalogEditor token={token} onChanged={refresh} />
+
             <p style={{ color: '#64748b', fontSize: 11, marginTop: 12 }}>
-              Prochainement : édition du catalogue et des prix, codes promo.
+              Prochainement : codes promo.
             </p>
           </>
         ) : (
@@ -242,6 +247,121 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
         />
       )}
     </div>
+  );
+}
+
+/* ─────────── édition du catalogue commercial ─────────── */
+function CatalogEditor({ token, onChanged }: { token: string; onChanged: () => void }) {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [savingCode, setSavingCode] = useState<string | null>(null);
+
+  const catalog = useQuery({
+    queryKey: ['editor-catalog'],
+    queryFn: () => apiFetch<CatalogModule[]>('/editor/catalog', { token }),
+    retry: false,
+  });
+
+  async function savePrice(code: string, raw: string) {
+    setErr(null);
+    setSavingCode(code);
+    try {
+      // champ vide = « sur devis » (null)
+      const trimmed = raw.trim().replace(',', '.');
+      const priceMonthly = trimmed === '' ? null : Number(trimmed);
+      if (priceMonthly !== null && (!Number.isFinite(priceMonthly) || priceMonthly < 0)) {
+        throw new ApiError(400, 'Prix invalide');
+      }
+      await apiFetch(`/editor/catalog/modules/${code}`, {
+        method: 'POST', body: { priceMonthly }, token,
+      });
+      await qc.invalidateQueries({ queryKey: ['editor-catalog'] });
+      await qc.invalidateQueries({ queryKey: ['public-catalog-modules'] });
+      onChanged(); // MRR / abonnés dépendent des prix
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Enregistrement impossible');
+    } finally {
+      setSavingCode(null);
+    }
+  }
+
+  return (
+    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, marginTop: 20 }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #334155' }}>
+        <div style={{ color: '#fff', fontWeight: 600 }}>Catalogue & prix</div>
+        <div style={{ color: '#64748b', fontSize: 11 }}>
+          Prix €HT par siège et par mois. Champ vide = « sur devis ». Effet immédiat sur les devis,
+          la page d’inscription et le MRR — sans redéploiement.
+        </div>
+      </div>
+      {err && <div className="error" style={{ margin: 12 }}>{err}</div>}
+      {catalog.isLoading && <p style={{ color: '#94a3b8', padding: 16 }}>Chargement…</p>}
+      {catalog.data && (
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <Th>Module</Th>
+              <Th>Code</Th>
+              <Th right>Prix /siège/mois</Th>
+              <Th right>Actif</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {catalog.data.map((m) => (
+              <CatalogRow
+                key={m.code}
+                module={m}
+                saving={savingCode === m.code}
+                onSavePrice={(v) => savePrice(m.code, v)}
+              />
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function CatalogRow({
+  module: m, saving, onSavePrice,
+}: {
+  module: CatalogModule; saving: boolean; onSavePrice: (raw: string) => void;
+}) {
+  const initial = m.priceMonthly === null ? '' : String(m.priceMonthly);
+  const [val, setVal] = useState(initial);
+  const dirty = val.trim().replace(',', '.') !== initial;
+
+  return (
+    <tr style={{ borderTop: '1px solid #334155' }}>
+      <Td>
+        <span style={{ color: '#fff' }}>{m.label}</span>
+        {m.isAddon && <span className="badge info" style={{ marginLeft: 6 }}>add-on</span>}
+      </Td>
+      <Td><span style={{ color: '#64748b', fontSize: 11 }}>{m.code}</span></Td>
+      <Td right>
+        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+          <input
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && dirty) onSavePrice(val); }}
+            placeholder="sur devis"
+            aria-label={`Prix ${m.label}`}
+            style={{ ...darkInput, width: 90, textAlign: 'right', padding: '5px 8px' }}
+          />
+          <ActionBtn
+            accent={dirty}
+            title="Enregistrer le prix"
+            disabled={saving || !dirty}
+            onClick={() => onSavePrice(val)}
+          >
+            {saving ? '…' : 'Enregistrer'}
+          </ActionBtn>
+        </div>
+      </Td>
+      <Td right>
+        <span className={`badge ${m.active ? 'success' : 'warning'}`}>{m.active ? 'oui' : 'non'}</span>
+      </Td>
+    </tr>
   );
 }
 

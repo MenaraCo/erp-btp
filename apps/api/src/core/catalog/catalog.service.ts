@@ -49,23 +49,55 @@ export class CatalogService {
   }
 
   /**
-   * Commercial catalogue for the subscription console: DB modules merged with the config-driven
-   * price/description (catalog.config.ts). Pricing is never hard-coded in business logic.
+   * Commercial catalogue for the subscription console. Prices come from the database (editable
+   * from the editor back-office, never hard-coded); the marketing description stays in
+   * catalog.config.ts as static copy.
    */
   async getCatalogModules(): Promise<CatalogModule[]> {
     const dbModules = await this.modules.find({ order: { code: 'ASC' } });
     const byCode = new Map(MODULES.map((m) => [m.code, m]));
-    return dbModules.map((m) => {
-      const cfg = byCode.get(m.code);
-      return {
-        code: m.code,
-        label: m.label,
-        isAddon: m.isAddon,
-        active: m.active,
-        priceMonthly: cfg?.priceMonthly ?? null,
-        description: cfg?.description ?? null,
-      };
-    });
+    return dbModules.map((m) => ({
+      code: m.code,
+      label: m.label,
+      isAddon: m.isAddon,
+      active: m.active,
+      priceMonthly: m.priceMonthly === null ? null : Number(m.priceMonthly),
+      description: byCode.get(m.code)?.description ?? null,
+    }));
+  }
+
+  /** Price €HT per seat/month by module code, from the database. Used for MRR and quotes. */
+  async getPriceByModuleCode(): Promise<Map<string, number>> {
+    const rows = await this.modules.find({ order: { code: 'ASC' } });
+    return new Map(
+      rows.map((m) => [m.code, m.priceMonthly === null ? 0 : Number(m.priceMonthly)]),
+    );
+  }
+
+  /**
+   * Editor back-office: updates a module's commercial attributes. Only the fields provided are
+   * changed. `priceMonthly: null` means "sur devis".
+   */
+  async updateModule(
+    code: string,
+    patch: { priceMonthly?: number | null; label?: string; active?: boolean },
+  ): Promise<CatalogModule | null> {
+    const module = await this.modules.findOne({ where: { code } });
+    if (!module) {
+      return null;
+    }
+    if (patch.priceMonthly !== undefined) {
+      module.priceMonthly = patch.priceMonthly === null ? null : String(patch.priceMonthly);
+    }
+    if (patch.label !== undefined) {
+      module.label = patch.label;
+    }
+    if (patch.active !== undefined) {
+      module.active = patch.active;
+    }
+    await this.modules.save(module);
+    const all = await this.getCatalogModules();
+    return all.find((m) => m.code === code) ?? null;
   }
 
   /** Commercial packs (bundles) with their module composition — config-driven. */

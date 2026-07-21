@@ -52,10 +52,12 @@ export async function seedCatalogue(dataSource: DataSource): Promise<void> {
     ]);
 
     for (const m of MODULES) {
+      // price_monthly is seeded on INSERT only: after the first seed the database owns pricing
+      // (editable from the editor back-office), so a re-seed must never wipe the editor's prices.
       await qr.query(
-        `INSERT INTO module (code, label, is_addon, active) VALUES ($1, $2, $3, true)
+        `INSERT INTO module (code, label, is_addon, active, price_monthly) VALUES ($1, $2, $3, true, $4)
          ON CONFLICT (code) DO UPDATE SET label = EXCLUDED.label, is_addon = EXCLUDED.is_addon, updated_at = now()`,
-        [m.code, m.label, m.isAddon],
+        [m.code, m.label, m.isAddon, m.priceMonthly],
       );
     }
     await qr.query(`DELETE FROM module WHERE code <> ALL($1::text[])`, [

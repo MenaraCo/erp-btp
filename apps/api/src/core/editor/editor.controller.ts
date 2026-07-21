@@ -26,6 +26,11 @@ interface ModuleInput {
   moduleCode?: string;
   seats?: number;
 }
+interface CatalogModuleInput {
+  priceMonthly?: number | null;
+  label?: string;
+  active?: boolean;
+}
 
 /**
  * Editor back-office API (cahier §3.7 B) — reserved to the platform owner via PlatformAdminGuard,
@@ -87,5 +92,20 @@ export class EditorController {
   @Post('tenants/:id/module')
   module(@Param('id') id: string, @Body() body: ModuleInput) {
     return this.editor.setModule(id, body?.moduleCode ?? '', Number(body?.seats ?? 0));
+  }
+
+  /** Commercial catalogue with the prices stored in database. */
+  @Get('catalog')
+  catalog() {
+    return this.editor.getCatalog();
+  }
+
+  /**
+   * Updates a module's commercial attributes (price €HT/siège/mois, libellé, actif).
+   * `priceMonthly: null` = sur devis. Takes effect immediately, no redeployment.
+   */
+  @Post('catalog/modules/:code')
+  updateCatalogModule(@Param('code') code: string, @Body() body: CatalogModuleInput) {
+    return this.editor.updateCatalogModule(code, body ?? {});
   }
 }
