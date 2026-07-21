@@ -17,6 +17,14 @@ export interface ModuleDef {
   isAddon: boolean;
   /** capability keys unlocked by this module (must exist in CAPABILITIES) */
   capabilities: string[];
+  /**
+   * Indicative price €HT per seat and per month (cahier des charges §3.2). `0` = included in
+   * the Socle (never billed separately), `null` = "sur devis" (enterprise). All prices are
+   * config-driven here — never hard-coded in business logic — and can move to a DB column later.
+   */
+  priceMonthly: number | null;
+  /** Short marketing description shown in the subscription console. */
+  description?: string;
 }
 
 export interface PackDef {
@@ -62,39 +70,76 @@ export const MODULES: ModuleDef[] = [
     label: 'Socle',
     isAddon: false,
     capabilities: ['einvoicing.facturx', 'directory'],
+    priceMonthly: 0,
+    description:
+      'Comptes, RBAC, référentiel clients/fournisseurs, e-facturation Factur-X. Inclus dès le premier module.',
   },
   {
     code: 'estimating',
     label: 'Études de prix',
     isAddon: false,
     capabilities: ['estimating.bid', 'estimating.advanced'],
+    priceMonthly: 39,
+    description:
+      'Chiffrage, sous-détails, feuille de vente et coefficients, devis d’appel d’offre, versioning.',
   },
   {
     code: 'invoicing',
     label: 'Facturation',
     isAddon: false,
     capabilities: ['invoicing.situations', 'invoicing.dgd'],
+    priceMonthly: 29,
+    description:
+      'Devis client, factures, situations de travaux, avenants, DGD, retenue de garantie.',
   },
   {
     code: 'site_tracking',
     label: 'Suivi de chantiers',
     isAddon: false,
     capabilities: ['site_tracking.budget', 'site_tracking.timesheet', 'purchasing'],
+    priceMonthly: 49,
+    description:
+      'Budgets chantier, pointages terrain, chaîne des achats, résultats analytiques.',
   },
   {
     code: 'stock_equipment',
     label: 'Stocks & Parc matériel',
     isAddon: true,
     capabilities: ['stock', 'equipment'],
+    priceMonthly: 19,
+    description: 'Valorisation des stocks, mouvements, parc matériel et locations.',
   },
-  { code: 'bim', label: 'BIM / IFC', isAddon: true, capabilities: ['bim'] },
-  { code: 'ai', label: 'Assistance IA', isAddon: true, capabilities: ['ai_assist'] },
-  { code: 'api', label: 'API & connecteurs', isAddon: true, capabilities: ['api_access'] },
+  {
+    code: 'bim',
+    label: 'BIM / IFC',
+    isAddon: true,
+    capabilities: ['bim'],
+    priceMonthly: null,
+    description: 'Import de maquette numérique et métré semi-automatique. Sur devis.',
+  },
+  {
+    code: 'ai',
+    label: 'Assistance IA',
+    isAddon: true,
+    capabilities: ['ai_assist'],
+    priceMonthly: null,
+    description: 'Suggestion de prix, détection d’oublis, pré-remplissage de métré. Sur devis.',
+  },
+  {
+    code: 'api',
+    label: 'API & connecteurs',
+    isAddon: true,
+    capabilities: ['api_access'],
+    priceMonthly: null,
+    description: 'API REST/GraphQL, connecteurs comptabilité/paie, export FEC. Sur devis.',
+  },
   {
     code: 'enterprise',
     label: 'Entreprise (multi-société, SSO)',
     isAddon: true,
     capabilities: ['multi_company', 'sso'],
+    priceMonthly: null,
+    description: 'Multi-société, SSO, SLA. Offre entreprise sur devis.',
   },
   {
     code: 'financial_management',
@@ -106,6 +151,9 @@ export const MODULES: ModuleDef[] = [
       'financial.alerts',
       'financial.portfolio',
     ],
+    priceMonthly: 59,
+    description:
+      'Contrôle de gestion prédictif : budget avancé, écart au stade, EAC, marge prévisionnelle, alertes.',
   },
 ];
 

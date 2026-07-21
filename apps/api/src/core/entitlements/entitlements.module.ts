@@ -5,6 +5,7 @@ import { TenancyModule } from '../tenancy/tenancy.module';
 import { EntitlementsService } from './entitlements.service';
 import { QuotaService } from './quota.service';
 import { CapabilityGuard } from './capability.guard';
+import { SeatController } from './seat.controller';
 
 /**
  * Entitlements core: the capability guard (registered globally), seat (jeton) management
@@ -12,6 +13,7 @@ import { CapabilityGuard } from './capability.guard';
  */
 @Module({
   imports: [CatalogModule, TenancyModule],
+  controllers: [SeatController],
   providers: [
     EntitlementsService,
     QuotaService,

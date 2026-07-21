@@ -86,6 +86,77 @@ export class EntitlementsService {
     }
   }
 
+  /** Users of the tenant (for the seat-assignment console). */
+  listUsers(
+    tenantId: string,
+  ): Promise<Array<{ id: string; email: string; fullName: string | null }>> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT id, email, full_name FROM user_account
+          WHERE status = 'active' AND deleted_at IS NULL
+          ORDER BY full_name NULLS LAST, email`,
+      );
+      return rows.map(
+        (r: { id: string; email: string; full_name: string | null }) => ({
+          id: r.id,
+          email: r.email,
+          fullName: r.full_name,
+        }),
+      );
+    });
+  }
+
+  /** All seat (jeton) assignments for the tenant, with the user identity, optionally by module. */
+  listSeatAssignments(
+    tenantId: string,
+    moduleCode?: string,
+  ): Promise<
+    Array<{
+      id: string;
+      moduleCode: string;
+      userId: string;
+      email: string;
+      fullName: string | null;
+      assignedAt: Date;
+    }>
+  > {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT sa.id, sa.module_code, sa.user_id, sa.assigned_at,
+                u.email, u.full_name
+           FROM seat_assignment sa
+           JOIN user_account u ON u.id = sa.user_id
+          WHERE ($1::varchar IS NULL OR sa.module_code = $1)
+          ORDER BY sa.module_code, u.full_name NULLS LAST, u.email`,
+        [moduleCode ?? null],
+      );
+      return rows.map(
+        (r: {
+          id: string;
+          module_code: string;
+          user_id: string;
+          assigned_at: Date;
+          email: string;
+          full_name: string | null;
+        }) => ({
+          id: r.id,
+          moduleCode: r.module_code,
+          userId: r.user_id,
+          email: r.email,
+          fullName: r.full_name,
+          assignedAt: r.assigned_at,
+        }),
+      );
+    });
+  }
+
+  /** Removes a seat assignment (frees a jeton). No-op if it does not exist. */
+  unassignSeat(tenantId: string, assignmentId: string): Promise<void> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await em.query(`DELETE FROM seat_assignment WHERE id = $1`, [assignmentId]);
+    });
+  }
+
   /**
    * Assigns a module seat (jeton) to a user, enforcing assigned <= purchased.
    * Locks the tenant_module row to serialise concurrent assignments.

@@ -6,6 +6,23 @@ import { CapabilityEntity } from './entities/capability.entity';
 import { ModuleCapabilityEntity } from './entities/module-capability.entity';
 import { PackEntity } from './entities/pack.entity';
 import { PackModuleEntity } from './entities/pack-module.entity';
+import { MODULES, PACKS } from './catalog.config';
+
+export interface CatalogModule {
+  code: string;
+  label: string;
+  isAddon: boolean;
+  active: boolean;
+  priceMonthly: number | null;
+  description: string | null;
+}
+
+export interface CatalogPack {
+  code: string;
+  label: string;
+  discountPct: number;
+  modules: string[];
+}
 
 /**
  * Read access to the global commercial catalogue. This is the data the capability guard
@@ -29,6 +46,36 @@ export class CatalogService {
 
   listModules(): Promise<ModuleEntity[]> {
     return this.modules.find({ order: { code: 'ASC' } });
+  }
+
+  /**
+   * Commercial catalogue for the subscription console: DB modules merged with the config-driven
+   * price/description (catalog.config.ts). Pricing is never hard-coded in business logic.
+   */
+  async getCatalogModules(): Promise<CatalogModule[]> {
+    const dbModules = await this.modules.find({ order: { code: 'ASC' } });
+    const byCode = new Map(MODULES.map((m) => [m.code, m]));
+    return dbModules.map((m) => {
+      const cfg = byCode.get(m.code);
+      return {
+        code: m.code,
+        label: m.label,
+        isAddon: m.isAddon,
+        active: m.active,
+        priceMonthly: cfg?.priceMonthly ?? null,
+        description: cfg?.description ?? null,
+      };
+    });
+  }
+
+  /** Commercial packs (bundles) with their module composition — config-driven. */
+  getCatalogPacks(): CatalogPack[] {
+    return PACKS.map((p) => ({
+      code: p.code,
+      label: p.label,
+      discountPct: p.discountPct,
+      modules: [...p.modules],
+    }));
   }
 
   listCapabilities(): Promise<CapabilityEntity[]> {

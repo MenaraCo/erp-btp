@@ -7,6 +7,15 @@ interface DirectInput {
   modules?: Array<{ moduleCode: string; seats: number }>;
 }
 
+interface ModuleInput {
+  moduleCode?: string;
+  seats?: number;
+}
+
+interface CancelInput {
+  cancel?: boolean;
+}
+
 /**
  * Subscription management — two independent entry doors (cahier §3.3):
  * POST /subscription/trial (Porte 1, trialing) and POST /subscription/direct (Porte 2, active).
@@ -42,5 +51,39 @@ export class SubscriptionController {
     const tenantId = this.context.requireTenantId();
     await this.subscriptions.subscribeDirect(tenantId, body.modules);
     return this.subscriptions.getSubscription(tenantId);
+  }
+
+  /** Subscribed modules with seats purchased vs. assigned (jetons) — feeds the console. */
+  @Get('modules')
+  @RequiresPermission('subscription.manage')
+  modules() {
+    return this.subscriptions.getSubscribedModules(this.context.requireTenantId());
+  }
+
+  /** Add or adjust a paid module (immediate effect, §3.4). */
+  @Post('module')
+  @RequiresPermission('subscription.manage')
+  async subscribeModule(@Body() body: ModuleInput) {
+    if (!body?.moduleCode) {
+      throw new BadRequestException('moduleCode is required');
+    }
+    const seats = Number(body.seats);
+    if (!Number.isInteger(seats) || seats < 0) {
+      throw new BadRequestException('seats must be a non-negative integer');
+    }
+    const tenantId = this.context.requireTenantId();
+    await this.subscriptions.subscribeModule(tenantId, body.moduleCode, seats);
+    return this.subscriptions.getSubscribedModules(tenantId);
+  }
+
+  /** Résiliation à la fin de période (§3.4). Body `{ cancel: false }` revokes it. */
+  @Post('cancel')
+  @RequiresPermission('subscription.manage')
+  cancel(@Body() body: CancelInput) {
+    const cancel = body?.cancel ?? true;
+    return this.subscriptions.setCancelAtPeriodEnd(
+      this.context.requireTenantId(),
+      cancel,
+    );
   }
 }
