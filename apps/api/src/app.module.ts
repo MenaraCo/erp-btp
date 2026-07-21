@@ -8,6 +8,7 @@ import { TenantMiddleware } from './core/tenancy/tenant.middleware';
 import { CatalogModule } from './core/catalog/catalog.module';
 import { EntitlementsModule } from './core/entitlements/entitlements.module';
 import { SubscriptionsModule } from './core/subscriptions/subscriptions.module';
+import { CompanyLookupModule } from './core/company-lookup/company-lookup.module';
 import { RbacModule } from './core/rbac/rbac.module';
 import { AuthModule } from './core/auth/auth.module';
 import { DirectoryModule } from './modules/directory/directory.module';
@@ -32,6 +33,7 @@ import { HealthModule } from './health/health.module';
     CatalogModule,
     EntitlementsModule,
     SubscriptionsModule,
+    CompanyLookupModule,
     RbacModule,
     AuthModule,
     DirectoryModule,
@@ -57,6 +59,7 @@ export class AppModule implements NestModule {
         'auth/register',
         'public/catalog/modules',
         'public/catalog/packs',
+        'public/company-search',
       )
       .forRoutes('*');
   }

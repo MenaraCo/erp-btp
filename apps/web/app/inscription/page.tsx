@@ -7,6 +7,7 @@ import { Check, Gift, CreditCard, ArrowLeft, ShieldCheck } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
+import { CompanySearch } from '@/components/CompanySearch';
 
 /* ─────────── types ─────────── */
 interface CatalogModule {
@@ -173,6 +174,12 @@ export default function InscriptionPage() {
                 : <span className="badge success">Abonnement direct</span>}
             </div>
 
+            <div className="field">
+              <CompanySearch
+                label="Rechercher votre entreprise (annuaire officiel)"
+                onSelect={(c) => setCompanyName(c.name)}
+              />
+            </div>
             <div className="field">
               <label>Société</label>
               <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Ma société BTP" autoFocus />

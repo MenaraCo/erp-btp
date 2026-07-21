@@ -27,3 +27,15 @@ export function vatRateByCode(code: string): VatRate | undefined {
 export function isValidVatPercent(percent: number): boolean {
   return VAT_RATES_FR.some((r) => r.percent === percent);
 }
+
+/**
+ * French intra-community VAT number from a SIREN (fiscal rule, isolated here — never inline).
+ * Format: `FR` + 2-digit key + 9-digit SIREN, where key = (12 + 3 × (SIREN mod 97)) mod 97.
+ * Returns null if the SIREN is not exactly 9 digits.
+ */
+export function frenchVatNumberFromSiren(siren: string): string | null {
+  const digits = (siren ?? '').replace(/\D/g, '');
+  if (digits.length !== 9) return null;
+  const key = (12 + 3 * (Number(digits) % 97)) % 97;
+  return `FR${String(key).padStart(2, '0')}${digits}`;
+}

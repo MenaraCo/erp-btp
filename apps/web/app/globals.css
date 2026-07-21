@@ -801,3 +801,7 @@ table.grid tbody tr:hover {
     font-size: 10px !important;
   }
 }
+
+/* Spinner (company lookup, async buttons) */
+@keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+.spin { animation: spin 0.8s linear infinite; }

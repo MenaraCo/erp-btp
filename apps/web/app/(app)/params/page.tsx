@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { useTheme, type AppTheme } from '@/lib/theme';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 import { IconBtn } from '@/components/IconBtn';
+import { CompanySearch } from '@/components/CompanySearch';
 
 /* ─────────── hook token ─────────── */
 function useApi() {
@@ -148,6 +149,23 @@ function TabEntreprise({ token }: { token: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <Card title="Votre entreprise">
+        <div style={{ marginBottom: 8, maxWidth: 460 }}>
+          <CompanySearch
+            onSelect={(c) => setForm((prev) => ({
+              ...prev,
+              name: c.name,
+              legal_form: c.legalForm ?? prev.legal_form,
+              address: c.address ?? prev.address,
+              postal_code: c.postalCode ?? prev.postal_code,
+              city: c.city ?? prev.city,
+              siret: c.siret ?? prev.siret,
+              vat_intra: c.vatIntra ?? prev.vat_intra,
+            }))}
+          />
+          <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+            Sélectionnez votre entreprise pour préremplir les champs ci-dessous, puis enregistrez.
+          </p>
+        </div>
 
         <Row>
           <Field label="Nom de l'entreprise *"><input className="input" style={{ width: 280 }} value={f('name')} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>

@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { SortHeader, SortState, nextSort, applySort } from './SortHeader';
 import { IconBtn } from './IconBtn';
+import { CompanySearch } from './CompanySearch';
 
 interface Party {
   id: string;
@@ -132,6 +133,17 @@ export function PartyManager({
               save.mutate();
             }}
           >
+            <div className="field">
+              <CompanySearch
+                label={`Rechercher le ${singular} (annuaire officiel)`}
+                onSelect={(c) => setForm((prev) => ({
+                  ...prev,
+                  name: c.name,
+                  vatNumber: c.vatIntra ?? prev.vatNumber,
+                  code: prev.code || c.siren,
+                }))}
+              />
+            </div>
             <div className="field">
               <label>Code *</label>
               <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
