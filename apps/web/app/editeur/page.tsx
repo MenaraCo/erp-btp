@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { LayoutDashboard, LogOut, ShieldAlert } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { LayoutDashboard, LogOut, ShieldAlert, CalendarPlus, Zap } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
@@ -105,6 +105,7 @@ function EditorLogin() {
 
 /* ─────────── console ─────────── */
 function EditorConsole({ token, onLogout }: { token: string; onLogout: () => void }) {
+  const qc = useQueryClient();
   const overview = useQuery({
     queryKey: ['editor-overview'],
     queryFn: () => apiFetch<Overview>('/editor/overview', { token }),
@@ -116,6 +117,25 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
     retry: false,
     enabled: !overview.isError,
   });
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['editor-tenants'] });
+    qc.invalidateQueries({ queryKey: ['editor-overview'] });
+  };
+  const extendTrial = useMutation({
+    mutationFn: (tenantId: string) =>
+      apiFetch(`/editor/tenants/${tenantId}/extend-trial`, { method: 'POST', body: { days: 30 }, token }),
+    onSuccess: refresh,
+  });
+  const activate = useMutation({
+    mutationFn: (tenantId: string) =>
+      apiFetch(`/editor/tenants/${tenantId}/activate`, { method: 'POST', token }),
+    onSuccess: refresh,
+  });
+  const pendingId =
+    (extendTrial.isPending && extendTrial.variables) ||
+    (activate.isPending && activate.variables) ||
+    null;
 
   const forbidden =
     (overview.error instanceof ApiError && overview.error.status === 403);
@@ -174,6 +194,7 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
                       <Th>Jetons</Th>
                       <Th right>Échéance</Th>
                       <Th right>MRR</Th>
+                      <Th right>Actions</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -199,6 +220,29 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
                               : '—'}
                         </Td>
                         <Td right><span style={{ color: t.mrr > 0 ? '#4ade80' : '#64748b', fontVariantNumeric: 'tabular-nums' }}>{euro(t.mrr)}</span></Td>
+                        <Td right>
+                          <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                            {t.status === 'trialing' && (
+                              <ActionBtn
+                                title="Prolonger l’essai de 30 jours"
+                                disabled={pendingId === t.tenantId}
+                                onClick={() => extendTrial.mutate(t.tenantId)}
+                              >
+                                <CalendarPlus size={13} /> +30 j
+                              </ActionBtn>
+                            )}
+                            {t.status !== 'active' && (
+                              <ActionBtn
+                                title="Activer (paiement hors-ligne / geste commercial)"
+                                accent
+                                disabled={pendingId === t.tenantId}
+                                onClick={() => activate.mutate(t.tenantId)}
+                              >
+                                <Zap size={13} /> Activer
+                              </ActionBtn>
+                            )}
+                          </div>
+                        </Td>
                       </tr>
                     ))}
                   </tbody>
@@ -236,6 +280,29 @@ function Kpi({ label, value, accent, danger }: { label: string; value: string; a
       <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: danger ? '#f87171' : accent ? '#fb923c' : '#fff' }}>{value}</div>
     </div>
+  );
+}
+function ActionBtn({
+  children, onClick, title, accent, disabled,
+}: {
+  children: React.ReactNode; onClick: () => void; title: string; accent?: boolean; disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap',
+        padding: '4px 8px', borderRadius: 6, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1,
+        border: `1px solid ${accent ? '#f97316' : '#475569'}`,
+        background: accent ? '#f97316' : 'transparent',
+        color: accent ? '#fff' : '#cbd5e1',
+      }}
+    >
+      {children}
+    </button>
   );
 }
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {

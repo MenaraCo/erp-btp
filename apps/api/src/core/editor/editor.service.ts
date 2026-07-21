@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { runInTenant } from '../tenancy/tenant-transaction';
@@ -53,61 +57,148 @@ export class EditorService {
 
     const rows: EditorTenantRow[] = [];
     for (const t of tenants) {
-      const row = await runInTenant(this.dataSource, t.id, async (em) => {
-        const subRows = await em.query(
-          `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end
-             FROM subscription WHERE tenant_id = $1`,
-          [t.id],
-        );
-        const sub = subRows[0] ?? null;
-
-        const modules: Array<{
-          module_code: string;
-          seats_purchased: number;
-          active: boolean;
-        }> = await em.query(
-          `SELECT module_code, seats_purchased, active FROM tenant_module`,
-        );
-        const assigned = await em.query(
-          `SELECT count(*)::int AS n FROM seat_assignment`,
-        );
-
-        const activeModules = modules.filter((m) => m.active).map((m) => m.module_code);
-        const seatsPurchased = modules
-          .filter((m) => m.active)
-          .reduce((s, m) => s + Number(m.seats_purchased), 0);
-        // MRR: only paying (active) subscriptions contribute; trials count as 0.
-        const mrr =
-          sub?.status === 'active'
-            ? modules
-                .filter((m) => m.active)
-                .reduce(
-                  (s, m) => s + Number(m.seats_purchased) * (PRICE_BY_MODULE.get(m.module_code) ?? 0),
-                  0,
-                )
-            : 0;
-
-        return {
-          status: sub?.status ?? null,
-          trialEndsAt: sub?.trial_ends_at ?? null,
-          currentPeriodEnd: sub?.current_period_end ?? null,
-          cancelAtPeriodEnd: sub?.cancel_at_period_end ?? false,
-          activeModules,
-          seatsPurchased,
-          seatsAssigned: Number(assigned[0]?.n ?? 0),
-          mrr,
-        };
-      });
-
-      rows.push({
-        tenantId: t.id,
-        slug: t.slug,
-        name: t.name,
-        createdAt: t.created_at,
-        ...row,
-      });
+      rows.push(await this.readTenantRow(t));
     }
     return rows;
+  }
+
+  /** Reads one tenant's subscription snapshot inside its own tenant context (RLS-scoped). */
+  private async readTenantRow(t: {
+    id: string;
+    slug: string;
+    name: string;
+    created_at: Date;
+  }): Promise<EditorTenantRow> {
+    const row = await runInTenant(this.dataSource, t.id, async (em) => {
+      const subRows = await em.query(
+        `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end
+           FROM subscription WHERE tenant_id = $1`,
+        [t.id],
+      );
+      const sub = subRows[0] ?? null;
+
+      const modules: Array<{
+        module_code: string;
+        seats_purchased: number;
+        active: boolean;
+      }> = await em.query(
+        `SELECT module_code, seats_purchased, active FROM tenant_module`,
+      );
+      const assigned = await em.query(
+        `SELECT count(*)::int AS n FROM seat_assignment`,
+      );
+
+      const activeModules = modules.filter((m) => m.active).map((m) => m.module_code);
+      const seatsPurchased = modules
+        .filter((m) => m.active)
+        .reduce((s, m) => s + Number(m.seats_purchased), 0);
+      // MRR: only paying (active) subscriptions contribute; trials count as 0.
+      const mrr =
+        sub?.status === 'active'
+          ? modules
+              .filter((m) => m.active)
+              .reduce(
+                (s, m) => s + Number(m.seats_purchased) * (PRICE_BY_MODULE.get(m.module_code) ?? 0),
+                0,
+              )
+          : 0;
+
+      return {
+        status: sub?.status ?? null,
+        trialEndsAt: sub?.trial_ends_at ?? null,
+        currentPeriodEnd: sub?.current_period_end ?? null,
+        cancelAtPeriodEnd: sub?.cancel_at_period_end ?? false,
+        activeModules,
+        seatsPurchased,
+        seatsAssigned: Number(assigned[0]?.n ?? 0),
+        mrr,
+      };
+    });
+
+    return {
+      tenantId: t.id,
+      slug: t.slug,
+      name: t.name,
+      createdAt: t.created_at,
+      ...row,
+    };
+  }
+
+  private async tenantBase(tenantId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT id, slug, name, created_at FROM tenant WHERE id = $1`,
+      [tenantId],
+    );
+    if (rows.length === 0) {
+      throw new NotFoundException('Tenant introuvable');
+    }
+    return rows[0] as { id: string; slug: string; name: string; created_at: Date };
+  }
+
+  /**
+   * Support action (cahier §3.7 B): extends a tenant's trial by `days`. Puts the subscription back
+   * to `trialing`, pushes trial_ends_at from max(now, current), and re-opens modules that expiry
+   * may have set read-only. Never deletes data.
+   */
+  async extendTrial(tenantId: string, days: number): Promise<EditorTenantRow> {
+    const d = Math.trunc(days);
+    if (!Number.isFinite(d) || d <= 0 || d > 365) {
+      throw new BadRequestException('days doit être un entier entre 1 et 365');
+    }
+    const base = await this.tenantBase(tenantId);
+    await runInTenant(this.dataSource, tenantId, async (em) => {
+      const updated = await em.query(
+        `UPDATE subscription
+            SET status = 'trialing',
+                trial_ends_at = GREATEST(COALESCE(trial_ends_at, now()), now()) + ($2 || ' days')::interval,
+                updated_at = now()
+          WHERE tenant_id = $1
+          RETURNING id`,
+        [tenantId, String(d)],
+      );
+      if (updated.length === 0) {
+        throw new BadRequestException('Aucune souscription pour ce tenant');
+      }
+      await em.query(
+        `UPDATE tenant_module SET active = true, read_only = false, updated_at = now() WHERE tenant_id = $1`,
+        [tenantId],
+      );
+      await em.query(
+        `UPDATE module_subscription SET read_only = false, updated_at = now() WHERE tenant_id = $1`,
+        [tenantId],
+      );
+    });
+    return this.readTenantRow(base);
+  }
+
+  /**
+   * Support action (cahier §3.7 B): forces a subscription to `active` (offline payment / commercial
+   * gesture), clears any pending cancellation, and re-opens all modules. No payment is taken here —
+   * this is an editor override, tracked by the status change.
+   */
+  async forceActivate(tenantId: string): Promise<EditorTenantRow> {
+    const base = await this.tenantBase(tenantId);
+    await runInTenant(this.dataSource, tenantId, async (em) => {
+      const updated = await em.query(
+        `UPDATE subscription
+            SET status = 'active', cancel_at_period_end = false, updated_at = now()
+          WHERE tenant_id = $1
+          RETURNING id`,
+        [tenantId],
+      );
+      if (updated.length === 0) {
+        throw new BadRequestException('Aucune souscription pour ce tenant');
+      }
+      await em.query(
+        `UPDATE tenant_module SET active = true, read_only = false, updated_at = now() WHERE tenant_id = $1`,
+        [tenantId],
+      );
+      await em.query(
+        `UPDATE module_subscription SET read_only = false, updated_at = now() WHERE tenant_id = $1`,
+        [tenantId],
+      );
+    });
+    return this.readTenantRow(base);
   }
 
   async getOverview(): Promise<EditorOverview> {
