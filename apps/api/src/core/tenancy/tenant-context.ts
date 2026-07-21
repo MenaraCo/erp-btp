@@ -5,6 +5,8 @@ export interface TenantStore {
   tenantId: string;
   /** Current user, when known. Set by the middleware; full auth lands in phase 0.7. */
   userId?: string;
+  /** Current user's email, from the access token — used by the editor back-office guard. */
+  email?: string;
 }
 
 /**
@@ -25,6 +27,10 @@ export class TenantContext {
 
   getUserId(): string | undefined {
     return this.als.getStore()?.userId;
+  }
+
+  getEmail(): string | undefined {
+    return this.als.getStore()?.email;
   }
 
   requireTenantId(): string {

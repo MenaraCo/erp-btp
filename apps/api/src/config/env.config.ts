@@ -24,6 +24,12 @@ export interface AppConfig {
   jwtSecret: string;
   /** Access-token lifetime in seconds. */
   accessTokenTtlSec: number;
+  /**
+   * Emails allowed into the editor back-office (cahier §3.7 B) — the platform owner's console,
+   * strictly separate from client tenants. Set via env PLATFORM_ADMIN_EMAILS (comma-separated).
+   * Defaults to the demo admin in dev so the console is testable out of the box.
+   */
+  platformAdminEmails: string[];
   database: DatabaseConfig;
 }
 
@@ -40,6 +46,13 @@ export function loadAppConfig(): AppConfig {
         ? ''
         : 'dev-insecure-jwt-secret-change-me'),
     accessTokenTtlSec: Number(process.env.ACCESS_TOKEN_TTL_SEC ?? 3600),
+    platformAdminEmails: (
+      process.env.PLATFORM_ADMIN_EMAILS ??
+      ((process.env.NODE_ENV ?? 'development') === 'production' ? '' : 'admin@demo.test')
+    )
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean),
     database: {
       host: process.env.DATABASE_HOST ?? 'localhost',
       port: Number(process.env.DATABASE_PORT ?? 5432),

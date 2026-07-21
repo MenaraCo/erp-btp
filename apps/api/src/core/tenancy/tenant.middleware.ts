@@ -32,7 +32,11 @@ export class TenantMiddleware implements NestMiddleware {
         throw new UnauthorizedException('Invalid or expired access token');
       }
       this.context.run(
-        { tenantId: resolved.tenantId, userId: resolved.userId },
+        {
+          tenantId: resolved.tenantId,
+          userId: resolved.userId,
+          email: resolved.email,
+        },
         () => next(),
       );
       return;
