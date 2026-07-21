@@ -18,6 +18,7 @@ export interface EditorTenantRow {
   currentPeriodEnd: Date | null;
   cancelAtPeriodEnd: boolean;
   activeModules: string[];
+  moduleDetails: Array<{ code: string; seats: number; active: boolean }>;
   seatsPurchased: number;
   seatsAssigned: number;
   mrr: number;
@@ -37,6 +38,23 @@ export interface EditorOverview {
 }
 
 const PRICE_BY_MODULE = new Map(MODULES.map((m) => [m.code, m.priceMonthly ?? 0]));
+const MODULE_CODES = new Set(MODULES.map((m) => m.code));
+
+export type SubscriptionStatus =
+  | 'trialing'
+  | 'active'
+  | 'past_due'
+  | 'paused'
+  | 'canceled';
+const ALL_STATUSES: SubscriptionStatus[] = [
+  'trialing',
+  'active',
+  'past_due',
+  'paused',
+  'canceled',
+];
+/** Statuses that grant module access; the rest close modules to read-only. */
+const OPEN_STATUSES: SubscriptionStatus[] = ['active', 'trialing'];
 
 /**
  * Editor back-office data (cahier §3.7 B): a cross-tenant view of every subscriber. The app role
@@ -109,6 +127,9 @@ export class EditorService {
         currentPeriodEnd: sub?.current_period_end ?? null,
         cancelAtPeriodEnd: sub?.cancel_at_period_end ?? false,
         activeModules,
+        moduleDetails: modules
+          .map((m) => ({ code: m.module_code, seats: Number(m.seats_purchased), active: m.active }))
+          .sort((a, b) => a.code.localeCompare(b.code)),
         seatsPurchased,
         seatsAssigned: Number(assigned[0]?.n ?? 0),
         mrr,
@@ -171,34 +192,153 @@ export class EditorService {
     return this.readTenantRow(base);
   }
 
+  /** Force a subscription to `active` (offline payment / commercial gesture). Thin wrapper. */
+  forceActivate(tenantId: string): Promise<EditorTenantRow> {
+    return this.setStatus(tenantId, 'active');
+  }
+
   /**
-   * Support action (cahier §3.7 B): forces a subscription to `active` (offline payment / commercial
-   * gesture), clears any pending cancellation, and re-opens all modules. No payment is taken here —
-   * this is an editor override, tracked by the status change.
+   * Support action (cahier §3.7 B): moves a subscription to any lifecycle status and projects the
+   * matching access onto the enforcement tables. Opening statuses (active/trialing) re-open the
+   * modules; restricting statuses (paused/past_due/canceled) close them to read-only — data is
+   * never deleted. `trialDays` (re)sets the trial window when moving to `trialing`.
    */
-  async forceActivate(tenantId: string): Promise<EditorTenantRow> {
+  async setStatus(
+    tenantId: string,
+    status: SubscriptionStatus,
+    trialDays?: number,
+  ): Promise<EditorTenantRow> {
+    if (!ALL_STATUSES.includes(status)) {
+      throw new BadRequestException(`Statut invalide: ${status}`);
+    }
     const base = await this.tenantBase(tenantId);
+    const open = OPEN_STATUSES.includes(status);
     await runInTenant(this.dataSource, tenantId, async (em) => {
+      const setTrial =
+        status === 'trialing' && trialDays && trialDays > 0
+          ? `, trial_ends_at = GREATEST(COALESCE(trial_ends_at, now()), now()) + ('${Math.trunc(
+              trialDays,
+            )} days')::interval`
+          : '';
+      const clearCancel = status === 'active' ? ', cancel_at_period_end = false' : '';
       const updated = await em.query(
         `UPDATE subscription
-            SET status = 'active', cancel_at_period_end = false, updated_at = now()
+            SET status = $2, updated_at = now()${clearCancel}${setTrial}
           WHERE tenant_id = $1
           RETURNING id`,
-        [tenantId],
+        [tenantId, status],
       );
       if (updated.length === 0) {
         throw new BadRequestException('Aucune souscription pour ce tenant');
       }
-      await em.query(
-        `UPDATE tenant_module SET active = true, read_only = false, updated_at = now() WHERE tenant_id = $1`,
+      await this.applyModuleAccess(em, tenantId, open);
+    });
+    return this.readTenantRow(base);
+  }
+
+  /** Programs (or revokes) cancellation at the end of the current period. */
+  async setCancelAtPeriodEnd(tenantId: string, cancel: boolean): Promise<EditorTenantRow> {
+    const base = await this.tenantBase(tenantId);
+    await runInTenant(this.dataSource, tenantId, async (em) => {
+      const updated = await em.query(
+        `UPDATE subscription SET cancel_at_period_end = $2, updated_at = now()
+          WHERE tenant_id = $1 RETURNING id`,
+        [tenantId, cancel],
+      );
+      if (updated.length === 0) {
+        throw new BadRequestException('Aucune souscription pour ce tenant');
+      }
+    });
+    return this.readTenantRow(base);
+  }
+
+  /** Sets the end of the current billing period (échéance). Pass an ISO date string. */
+  async setPeriodEnd(tenantId: string, dateIso: string): Promise<EditorTenantRow> {
+    const d = new Date(dateIso);
+    if (Number.isNaN(d.getTime())) {
+      throw new BadRequestException('Date invalide');
+    }
+    const base = await this.tenantBase(tenantId);
+    await runInTenant(this.dataSource, tenantId, async (em) => {
+      const updated = await em.query(
+        `UPDATE subscription SET current_period_end = $2, updated_at = now()
+          WHERE tenant_id = $1 RETURNING id`,
+        [tenantId, d.toISOString()],
+      );
+      if (updated.length === 0) {
+        throw new BadRequestException('Aucune souscription pour ce tenant');
+      }
+    });
+    return this.readTenantRow(base);
+  }
+
+  /**
+   * Adds/adjusts a module for the tenant (seats > 0 → active with that many seats) or deactivates
+   * it (seats = 0 → read-only, never removed). Core (Socle) cannot be deactivated. Projects onto
+   * both the source (module_subscription) and the enforcement table (tenant_module).
+   */
+  async setModule(
+    tenantId: string,
+    moduleCode: string,
+    seats: number,
+  ): Promise<EditorTenantRow> {
+    if (!MODULE_CODES.has(moduleCode)) {
+      throw new BadRequestException(`Module inconnu: ${moduleCode}`);
+    }
+    const s = Math.trunc(Number(seats));
+    if (!Number.isFinite(s) || s < 0) {
+      throw new BadRequestException('Nombre de jetons invalide');
+    }
+    if (moduleCode === 'core' && s === 0) {
+      throw new BadRequestException('Le Socle ne peut pas être désactivé');
+    }
+    const base = await this.tenantBase(tenantId);
+    await runInTenant(this.dataSource, tenantId, async (em) => {
+      const subRows = await em.query(
+        `SELECT id FROM subscription WHERE tenant_id = $1`,
         [tenantId],
       );
+      if (subRows.length === 0) {
+        throw new BadRequestException('Aucune souscription pour ce tenant');
+      }
+      const subscriptionId = subRows[0].id;
+      const active = s > 0;
+
       await em.query(
-        `UPDATE module_subscription SET read_only = false, updated_at = now() WHERE tenant_id = $1`,
-        [tenantId],
+        `INSERT INTO tenant_module (tenant_id, module_code, seats_purchased, active, read_only)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (tenant_id, module_code)
+         DO UPDATE SET seats_purchased = EXCLUDED.seats_purchased, active = EXCLUDED.active,
+                       read_only = EXCLUDED.read_only, updated_at = now()`,
+        [tenantId, moduleCode, s, active, !active],
+      );
+      await em.query(
+        `INSERT INTO module_subscription
+           (tenant_id, subscription_id, module_code, seats_purchased, billing_period, read_only)
+         VALUES ($1, $2, $3, $4, 'monthly', $5)
+         ON CONFLICT (subscription_id, module_code)
+         DO UPDATE SET seats_purchased = EXCLUDED.seats_purchased, read_only = EXCLUDED.read_only,
+                       updated_at = now()`,
+        [tenantId, subscriptionId, moduleCode, s, !active],
       );
     });
     return this.readTenantRow(base);
+  }
+
+  /** Opens (active=true) or restricts (active=false, read-only) every module of the tenant. */
+  private async applyModuleAccess(
+    em: import('typeorm').EntityManager,
+    tenantId: string,
+    open: boolean,
+  ): Promise<void> {
+    await em.query(
+      `UPDATE tenant_module SET active = $2, read_only = $3, updated_at = now() WHERE tenant_id = $1`,
+      [tenantId, open, !open],
+    );
+    await em.query(
+      `UPDATE module_subscription SET read_only = $2, updated_at = now() WHERE tenant_id = $1`,
+      [tenantId, !open],
+    );
   }
 
   async getOverview(): Promise<EditorOverview> {

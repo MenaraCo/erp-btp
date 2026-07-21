@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { LayoutDashboard, LogOut, ShieldAlert, CalendarPlus, Zap } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldAlert, Settings2, X } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
@@ -30,9 +30,15 @@ interface TenantRow {
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
   activeModules: string[];
+  moduleDetails: { code: string; seats: number; active: boolean }[];
   seatsPurchased: number;
   seatsAssigned: number;
   mrr: number;
+}
+interface CatalogModule {
+  code: string;
+  label: string;
+  priceMonthly: number | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -106,6 +112,7 @@ function EditorLogin() {
 /* ─────────── console ─────────── */
 function EditorConsole({ token, onLogout }: { token: string; onLogout: () => void }) {
   const qc = useQueryClient();
+  const [managing, setManaging] = useState<TenantRow | null>(null);
   const overview = useQuery({
     queryKey: ['editor-overview'],
     queryFn: () => apiFetch<Overview>('/editor/overview', { token }),
@@ -122,20 +129,6 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
     qc.invalidateQueries({ queryKey: ['editor-tenants'] });
     qc.invalidateQueries({ queryKey: ['editor-overview'] });
   };
-  const extendTrial = useMutation({
-    mutationFn: (tenantId: string) =>
-      apiFetch(`/editor/tenants/${tenantId}/extend-trial`, { method: 'POST', body: { days: 30 }, token }),
-    onSuccess: refresh,
-  });
-  const activate = useMutation({
-    mutationFn: (tenantId: string) =>
-      apiFetch(`/editor/tenants/${tenantId}/activate`, { method: 'POST', token }),
-    onSuccess: refresh,
-  });
-  const pendingId =
-    (extendTrial.isPending && extendTrial.variables) ||
-    (activate.isPending && activate.variables) ||
-    null;
 
   const forbidden =
     (overview.error instanceof ApiError && overview.error.status === 403);
@@ -221,27 +214,9 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
                         </Td>
                         <Td right><span style={{ color: t.mrr > 0 ? '#4ade80' : '#64748b', fontVariantNumeric: 'tabular-nums' }}>{euro(t.mrr)}</span></Td>
                         <Td right>
-                          <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
-                            {t.status === 'trialing' && (
-                              <ActionBtn
-                                title="Prolonger l’essai de 30 jours"
-                                disabled={pendingId === t.tenantId}
-                                onClick={() => extendTrial.mutate(t.tenantId)}
-                              >
-                                <CalendarPlus size={13} /> +30 j
-                              </ActionBtn>
-                            )}
-                            {t.status !== 'active' && (
-                              <ActionBtn
-                                title="Activer (paiement hors-ligne / geste commercial)"
-                                accent
-                                disabled={pendingId === t.tenantId}
-                                onClick={() => activate.mutate(t.tenantId)}
-                              >
-                                <Zap size={13} /> Activer
-                              </ActionBtn>
-                            )}
-                          </div>
+                          <ActionBtn title="Gérer l’abonnement" accent onClick={() => setManaging(t)}>
+                            <Settings2 size={13} /> Gérer
+                          </ActionBtn>
                         </Td>
                       </tr>
                     ))}
@@ -250,13 +225,185 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
               )}
             </div>
             <p style={{ color: '#64748b', fontSize: 11, marginTop: 12 }}>
-              Prochainement : édition du catalogue et des prix, codes promo, actions support (prolonger un essai, ajuster une souscription).
+              Prochainement : édition du catalogue et des prix, codes promo.
             </p>
           </>
         ) : (
           <p style={{ color: '#94a3b8' }}>Impossible de charger les données.</p>
         )}
       </div>
+
+      {managing && (
+        <TenantManager
+          token={token}
+          tenant={managing}
+          onClose={() => setManaging(null)}
+          onChanged={refresh}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ─────────── panneau de gestion d'un abonné ─────────── */
+function TenantManager({
+  token, tenant, onClose, onChanged,
+}: {
+  token: string; tenant: TenantRow; onClose: () => void; onChanged: () => void;
+}) {
+  const [t, setT] = useState<TenantRow>(tenant);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [trialDays, setTrialDays] = useState('30');
+  const [periodDate, setPeriodDate] = useState(t.currentPeriodEnd ? t.currentPeriodEnd.slice(0, 10) : '');
+  const [newModule, setNewModule] = useState('');
+  const [newSeats, setNewSeats] = useState('1');
+
+  const catalogModules = useQuery({
+    queryKey: ['public-catalog-modules'],
+    queryFn: () => apiFetch<CatalogModule[]>('/public/catalog/modules'),
+  });
+
+  const labelByCode = new Map((catalogModules.data ?? []).map((m) => [m.code, m.label]));
+
+  async function run(path: string, body?: unknown) {
+    setErr(null);
+    setBusy(true);
+    try {
+      const updated = await apiFetch<TenantRow>(`/editor/tenants/${t.tenantId}/${path}`, {
+        method: 'POST', body, token,
+      });
+      setT(updated);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Action impossible');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const notSubscribed = (catalogModules.data ?? []).filter(
+    (m) => !t.moduleDetails.some((d) => d.code === m.code),
+  );
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.72)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '40px 16px', zIndex: 50, overflowY: 'auto' }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: 560, maxWidth: '100%', background: '#1e293b', border: '1px solid #334155', borderRadius: 14, color: '#e2e8f0' }}
+      >
+        {/* header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #334155' }}>
+          <div>
+            <div style={{ color: '#fff', fontWeight: 600 }}>{t.name}</div>
+            <div style={{ color: '#64748b', fontSize: 12 }}>
+              {t.slug} · <span className={`badge ${STATUS_BADGE[t.status ?? ''] ?? 'info'}`}>{STATUS_LABELS[t.status ?? ''] ?? t.status ?? '—'}</span>
+              {t.cancelAtPeriodEnd && <span className="badge warning" style={{ marginLeft: 6 }}>résil.</span>}
+            </div>
+          </div>
+          <button onClick={onClose} className="btn-ghost" style={{ color: '#94a3b8' }}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {err && <div className="error">{err}</div>}
+
+          {/* Statut */}
+          <Section title="Statut">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <ActionBtn accent title="Forcer l’abonnement actif" disabled={busy} onClick={() => run('status', { status: 'active' })}>Activer</ActionBtn>
+              <ActionBtn title="Suspendre (accès fermé, données conservées)" disabled={busy} onClick={() => run('status', { status: 'paused' })}>Suspendre</ActionBtn>
+              <ActionBtn title="Marquer comme impayé" disabled={busy} onClick={() => run('status', { status: 'past_due' })}>Impayé</ActionBtn>
+              <ActionBtn title="Résilier immédiatement (accès fermé)" disabled={busy} onClick={() => run('status', { status: 'canceled' })}>Résilier maintenant</ActionBtn>
+            </div>
+          </Section>
+
+          {/* Essai */}
+          <Section title="Essai">
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input type="number" min={1} value={trialDays} onChange={(e) => setTrialDays(e.target.value)} style={{ ...darkInput, width: 70 }} />
+              <span style={{ color: '#94a3b8', fontSize: 12 }}>jours</span>
+              <ActionBtn title="Repasser en essai pour N jours" disabled={busy} onClick={() => run('status', { status: 'trialing', trialDays: Number(trialDays) })}>Repasser en essai</ActionBtn>
+              <ActionBtn title="Prolonger l’essai en cours de N jours" disabled={busy} onClick={() => run('extend-trial', { days: Number(trialDays) })}>Prolonger (+{trialDays} j)</ActionBtn>
+            </div>
+          </Section>
+
+          {/* Résiliation fin de période */}
+          <Section title="Résiliation en fin de période">
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <ActionBtn title="Programmer la résiliation" disabled={busy || t.cancelAtPeriodEnd} onClick={() => run('cancel', { cancel: true })}>Programmer</ActionBtn>
+              <ActionBtn title="Annuler la résiliation programmée" disabled={busy || !t.cancelAtPeriodEnd} onClick={() => run('cancel', { cancel: false })}>Annuler la résiliation</ActionBtn>
+            </div>
+          </Section>
+
+          {/* Échéance */}
+          <Section title="Échéance (fin de période)">
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="date" value={periodDate} onChange={(e) => setPeriodDate(e.target.value)} style={{ ...darkInput, width: 160 }} />
+              <ActionBtn title="Définir la date d’échéance" disabled={busy || !periodDate} onClick={() => run('period-end', { date: periodDate })}>Définir</ActionBtn>
+            </div>
+          </Section>
+
+          {/* Modules & jetons */}
+          <Section title="Modules & jetons">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {t.moduleDetails.map((m) => (
+                <ModuleRow
+                  key={m.code}
+                  label={labelByCode.get(m.code) ?? m.code}
+                  code={m.code}
+                  seats={m.seats}
+                  active={m.active}
+                  busy={busy}
+                  onApply={(seats) => run('module', { moduleCode: m.code, seats })}
+                />
+              ))}
+            </div>
+            {notSubscribed.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 10 }}>
+                <select value={newModule} onChange={(e) => setNewModule(e.target.value)} style={{ ...darkInput, width: 200 }}>
+                  <option value="">— Ajouter un module —</option>
+                  {notSubscribed.map((m) => <option key={m.code} value={m.code}>{m.label}</option>)}
+                </select>
+                <input type="number" min={1} value={newSeats} onChange={(e) => setNewSeats(e.target.value)} style={{ ...darkInput, width: 64 }} />
+                <ActionBtn accent title="Ajouter le module" disabled={busy || !newModule} onClick={() => { run('module', { moduleCode: newModule, seats: Number(newSeats) }); setNewModule(''); }}>Ajouter</ActionBtn>
+              </div>
+            )}
+          </Section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModuleRow({
+  label, code, seats, active, busy, onApply,
+}: {
+  label: string; code: string; seats: number; active: boolean; busy: boolean; onApply: (seats: number) => void;
+}) {
+  const [val, setVal] = useState(String(seats));
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: '1px solid #334155', borderRadius: 8, opacity: active ? 1 : 0.55 }}>
+      <div style={{ flex: 1 }}>
+        <span style={{ color: '#fff', fontSize: 13 }}>{label}</span>
+        {!active && <span className="badge warning" style={{ marginLeft: 6 }}>désactivé</span>}
+      </div>
+      <input type="number" min={0} value={val} onChange={(e) => setVal(e.target.value)} style={{ ...darkInput, width: 60 }} />
+      <ActionBtn title="Appliquer le nombre de jetons" disabled={busy} onClick={() => onApply(Number(val))}>Appliquer</ActionBtn>
+      {active && code !== 'core' && (
+        <ActionBtn title="Désactiver le module" disabled={busy} onClick={() => onApply(0)}>Désactiver</ActionBtn>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>{title}</div>
+      {children}
     </div>
   );
 }

@@ -12,6 +12,20 @@ import { PlatformAdminGuard } from './platform-admin.guard';
 interface ExtendTrialInput {
   days?: number;
 }
+interface StatusInput {
+  status?: string;
+  trialDays?: number;
+}
+interface CancelInput {
+  cancel?: boolean;
+}
+interface PeriodEndInput {
+  date?: string;
+}
+interface ModuleInput {
+  moduleCode?: string;
+  seats?: number;
+}
 
 /**
  * Editor back-office API (cahier §3.7 B) — reserved to the platform owner via PlatformAdminGuard,
@@ -45,5 +59,33 @@ export class EditorController {
   @Post('tenants/:id/activate')
   activate(@Param('id') id: string) {
     return this.editor.forceActivate(id);
+  }
+
+  /** Move the subscription to any lifecycle status (active/trialing/paused/past_due/canceled). */
+  @Post('tenants/:id/status')
+  setStatus(@Param('id') id: string, @Body() body: StatusInput) {
+    return this.editor.setStatus(
+      id,
+      (body?.status ?? '') as never,
+      body?.trialDays ? Number(body.trialDays) : undefined,
+    );
+  }
+
+  /** Program or revoke cancellation at the end of the current period. */
+  @Post('tenants/:id/cancel')
+  cancel(@Param('id') id: string, @Body() body: CancelInput) {
+    return this.editor.setCancelAtPeriodEnd(id, body?.cancel ?? true);
+  }
+
+  /** Set the end of the current billing period (échéance). */
+  @Post('tenants/:id/period-end')
+  periodEnd(@Param('id') id: string, @Body() body: PeriodEndInput) {
+    return this.editor.setPeriodEnd(id, body?.date ?? '');
+  }
+
+  /** Add/adjust a module (seats>0) or deactivate it (seats=0). */
+  @Post('tenants/:id/module')
+  module(@Param('id') id: string, @Body() body: ModuleInput) {
+    return this.editor.setModule(id, body?.moduleCode ?? '', Number(body?.seats ?? 0));
   }
 }
