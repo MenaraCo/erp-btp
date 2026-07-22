@@ -8,6 +8,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { returningRows } from '../../core/database/returning.util';
 import {
   CalcComponent,
   CalcOuvrage,
@@ -391,10 +392,12 @@ export class ChantierService {
       if (rows[0].contre_etude_status !== 'validated') {
         throw new ConflictException('Validate the contre-étude before adjusting the prévisionnel.');
       }
-      const upd = await em.query(
-        `UPDATE execution_line_budget SET montant_previsionnel = $1
+      const upd = returningRows<{ id: string }>(
+        await em.query(
+          `UPDATE execution_line_budget SET montant_previsionnel = $1
           WHERE execution_line_id = $2 AND nature = $3 RETURNING id`,
-        [String(montant), lineId, nature],
+          [String(montant), lineId, nature],
+        ),
       );
       if (upd.length === 0) {
         throw new NotFoundException(`No budget line for nature "${nature}"`);

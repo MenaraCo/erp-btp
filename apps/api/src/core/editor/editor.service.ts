@@ -6,8 +6,14 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { runInTenant } from '../tenancy/tenant-transaction';
+import { returningRows } from '../database/returning.util';
 import { MODULES } from '../catalog/catalog.config';
 import { CatalogService } from '../catalog/catalog.service';
+import {
+  PromoCodeService,
+  type PromoCode,
+  type PromoCodeInput,
+} from '../promo/promo-code.service';
 
 export interface EditorTenantRow {
   tenantId: string;
@@ -22,7 +28,11 @@ export interface EditorTenantRow {
   moduleDetails: Array<{ code: string; seats: number; active: boolean }>;
   seatsPurchased: number;
   seatsAssigned: number;
+  /** MRR after the promo discount (what is actually billed). */
   mrr: number;
+  /** MRR before any promo discount. */
+  mrrGross: number;
+  promoCode: { code: string; discountType: string; discountValue: number } | null;
 }
 
 export interface EditorOverview {
@@ -68,6 +78,7 @@ export class EditorService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly catalog: CatalogService,
+    private readonly promos: PromoCodeService,
   ) {}
 
   async getTenants(): Promise<EditorTenantRow[]> {
@@ -98,11 +109,14 @@ export class EditorService {
     const prices = priceByModule ?? (await this.catalog.getPriceByModuleCode());
     const row = await runInTenant(this.dataSource, t.id, async (em) => {
       const subRows = await em.query(
-        `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end
+        `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end, promo_code_id
            FROM subscription WHERE tenant_id = $1`,
         [t.id],
       );
       const sub = subRows[0] ?? null;
+      const promo = sub?.promo_code_id
+        ? await this.promos.findById(sub.promo_code_id)
+        : null;
 
       const modules: Array<{
         module_code: string;
@@ -120,7 +134,7 @@ export class EditorService {
         .filter((m) => m.active)
         .reduce((s, m) => s + Number(m.seats_purchased), 0);
       // MRR: only paying (active) subscriptions contribute; trials count as 0.
-      const mrr =
+      const mrrGross =
         sub?.status === 'active'
           ? modules
               .filter((m) => m.active)
@@ -129,6 +143,8 @@ export class EditorService {
                 0,
               )
           : 0;
+      // The promo discount is what actually gets billed.
+      const mrr = PromoCodeService.applyDiscount(mrrGross, promo);
 
       return {
         status: sub?.status ?? null,
@@ -142,6 +158,14 @@ export class EditorService {
         seatsPurchased,
         seatsAssigned: Number(assigned[0]?.n ?? 0),
         mrr,
+        mrrGross,
+        promoCode: promo
+          ? {
+              code: promo.code,
+              discountType: promo.discountType,
+              discountValue: promo.discountValue,
+            }
+          : null,
       };
     });
 
@@ -177,7 +201,8 @@ export class EditorService {
     }
     const base = await this.tenantBase(tenantId);
     await runInTenant(this.dataSource, tenantId, async (em) => {
-      const updated = await em.query(
+      const updated = returningRows<{ id: string }>(
+        await em.query(
         `UPDATE subscription
             SET status = 'trialing',
                 trial_ends_at = GREATEST(COALESCE(trial_ends_at, now()), now()) + ($2 || ' days')::interval,
@@ -185,6 +210,7 @@ export class EditorService {
           WHERE tenant_id = $1
           RETURNING id`,
         [tenantId, String(d)],
+      ),
       );
       if (updated.length === 0) {
         throw new BadRequestException('Aucune souscription pour ce tenant');
@@ -230,12 +256,14 @@ export class EditorService {
             )} days')::interval`
           : '';
       const clearCancel = status === 'active' ? ', cancel_at_period_end = false' : '';
-      const updated = await em.query(
+      const updated = returningRows<{ id: string }>(
+        await em.query(
         `UPDATE subscription
             SET status = $2, updated_at = now()${clearCancel}${setTrial}
           WHERE tenant_id = $1
           RETURNING id`,
         [tenantId, status],
+      ),
       );
       if (updated.length === 0) {
         throw new BadRequestException('Aucune souscription pour ce tenant');
@@ -249,10 +277,12 @@ export class EditorService {
   async setCancelAtPeriodEnd(tenantId: string, cancel: boolean): Promise<EditorTenantRow> {
     const base = await this.tenantBase(tenantId);
     await runInTenant(this.dataSource, tenantId, async (em) => {
-      const updated = await em.query(
+      const updated = returningRows<{ id: string }>(
+        await em.query(
         `UPDATE subscription SET cancel_at_period_end = $2, updated_at = now()
           WHERE tenant_id = $1 RETURNING id`,
         [tenantId, cancel],
+      ),
       );
       if (updated.length === 0) {
         throw new BadRequestException('Aucune souscription pour ce tenant');
@@ -269,10 +299,12 @@ export class EditorService {
     }
     const base = await this.tenantBase(tenantId);
     await runInTenant(this.dataSource, tenantId, async (em) => {
-      const updated = await em.query(
+      const updated = returningRows<{ id: string }>(
+        await em.query(
         `UPDATE subscription SET current_period_end = $2, updated_at = now()
           WHERE tenant_id = $1 RETURNING id`,
         [tenantId, d.toISOString()],
+      ),
       );
       if (updated.length === 0) {
         throw new BadRequestException('Aucune souscription pour ce tenant');
@@ -365,6 +397,62 @@ export class EditorService {
       throw new NotFoundException(`Module ${code} introuvable`);
     }
     return updated;
+  }
+
+  /* ── Codes promo (cahier §3.7 B) ── */
+
+  listPromoCodes(): Promise<PromoCode[]> {
+    return this.promos.list();
+  }
+
+  createPromoCode(input: PromoCodeInput): Promise<PromoCode> {
+    return this.promos.create(input);
+  }
+
+  updatePromoCode(id: string, input: PromoCodeInput): Promise<PromoCode> {
+    return this.promos.update(id, input);
+  }
+
+  async deletePromoCode(id: string): Promise<{ deleted: boolean }> {
+    const deleted = await this.promos.remove(id);
+    if (!deleted) {
+      throw new NotFoundException('Code promo introuvable');
+    }
+    return { deleted };
+  }
+
+  /**
+   * Applies a promo code to a subscriber (or removes it with `code = null`). Validates usability
+   * and counts a redemption only when a *new* code is attached, so re-applying the same code or
+   * detaching it never inflates the counter.
+   */
+  async setTenantPromoCode(
+    tenantId: string,
+    code: string | null,
+  ): Promise<EditorTenantRow> {
+    const base = await this.tenantBase(tenantId);
+    const promo = code ? await this.promos.requireUsable(code) : null;
+
+    const attached = await runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT promo_code_id FROM subscription WHERE tenant_id = $1`,
+        [tenantId],
+      );
+      if (rows.length === 0) {
+        throw new BadRequestException('Aucune souscription pour ce tenant');
+      }
+      const previous: string | null = rows[0].promo_code_id;
+      await em.query(
+        `UPDATE subscription SET promo_code_id = $2, updated_at = now() WHERE tenant_id = $1`,
+        [tenantId, promo?.id ?? null],
+      );
+      return promo && promo.id !== previous;
+    });
+
+    if (attached && promo) {
+      await this.promos.countRedemption(promo.id);
+    }
+    return this.readTenantRow(base);
   }
 
   /** Opens (active=true) or restricts (active=false, read-only) every module of the tenant. */

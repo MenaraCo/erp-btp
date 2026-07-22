@@ -6,6 +6,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { runInTenant } from '../tenancy/tenant-transaction';
+import { returningRows } from '../database/returning.util';
 import {
   TRIAL_DAYS,
   TRIAL_QUOTAS,
@@ -109,11 +110,19 @@ export class SubscriptionService {
     cancel: boolean,
   ): Promise<SubscriptionRow | null> {
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const updated = await em.query(
-        `UPDATE subscription SET cancel_at_period_end = $1, updated_at = now()
+      const updated = returningRows<{
+        id: string;
+        status: SubscriptionStatus;
+        trial_ends_at: Date | null;
+        current_period_end: Date | null;
+        cancel_at_period_end: boolean;
+      }>(
+        await em.query(
+          `UPDATE subscription SET cancel_at_period_end = $1, updated_at = now()
           WHERE tenant_id = $2
           RETURNING id, status, trial_ends_at, current_period_end, cancel_at_period_end`,
-        [cancel, tenantId],
+          [cancel, tenantId],
+        ),
       );
       if (updated.length === 0) {
         throw new BadRequestException('No subscription for this tenant');

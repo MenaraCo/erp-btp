@@ -4,6 +4,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { returningRows } from '../../core/database/returning.util';
 import {
   CalcComponent,
   CalcOuvrage,
@@ -117,11 +118,13 @@ export class VenteService {
   setLinePv(lineId: string, puVente: number | string | null, force: boolean) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const rows = await em.query(
-        `UPDATE devis_line
+      const rows = returningRows<{ id: string }>(
+        await em.query(
+          `UPDATE devis_line
             SET pu_vente = $1, pu_vente_force = $2, updated_at = now()
           WHERE id = $3 RETURNING id`,
-        [puVente != null ? String(puVente) : null, force, lineId],
+          [puVente != null ? String(puVente) : null, force, lineId],
+        ),
       );
       if (rows.length === 0) {
         throw new NotFoundException(`Unknown devis line "${lineId}"`);
