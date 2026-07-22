@@ -33,7 +33,11 @@ interface TenantRow {
   moduleDetails: { code: string; seats: number; active: boolean }[];
   seatsPurchased: number;
   seatsAssigned: number;
+  /** MRR après remise promo (facturé). */
   mrr: number;
+  /** MRR avant remise. */
+  mrrGross: number;
+  promoCode: { code: string; discountType: 'percent' | 'fixed'; discountValue: number } | null;
 }
 interface CatalogModule {
   code: string;
@@ -42,6 +46,19 @@ interface CatalogModule {
   isAddon: boolean;
   active: boolean;
   description?: string | null;
+}
+interface PromoCodeRow {
+  id: string;
+  code: string;
+  label: string | null;
+  discountType: 'percent' | 'fixed';
+  discountValue: number;
+  active: boolean;
+  validFrom: string | null;
+  validUntil: string | null;
+  maxRedemptions: number | null;
+  redemptions: number;
+  usable: boolean;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -228,10 +245,7 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
               )}
             </div>
             <CatalogEditor token={token} onChanged={refresh} />
-
-            <p style={{ color: '#64748b', fontSize: 11, marginTop: 12 }}>
-              Prochainement : codes promo.
-            </p>
+            <PromoCodesEditor token={token} onChanged={refresh} />
           </>
         ) : (
           <p style={{ color: '#94a3b8' }}>Impossible de charger les données.</p>
@@ -365,6 +379,170 @@ function CatalogRow({
   );
 }
 
+/* ─────────── codes promo ─────────── */
+function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () => void }) {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [code, setCode] = useState('');
+  const [label, setLabel] = useState('');
+  const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent');
+  const [discountValue, setDiscountValue] = useState('10');
+  const [validUntil, setValidUntil] = useState('');
+  const [maxRedemptions, setMaxRedemptions] = useState('');
+
+  const promos = useQuery({
+    queryKey: ['editor-promo-codes'],
+    queryFn: () => apiFetch<PromoCodeRow[]>('/editor/promo-codes', { token }),
+    retry: false,
+  });
+
+  async function run(fn: () => Promise<unknown>) {
+    setErr(null);
+    setBusy(true);
+    try {
+      await fn();
+      await qc.invalidateQueries({ queryKey: ['editor-promo-codes'] });
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Action impossible');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const create = () =>
+    run(async () => {
+      await apiFetch('/editor/promo-codes', {
+        method: 'POST',
+        token,
+        body: {
+          code,
+          label: label || null,
+          discountType,
+          discountValue: Number(discountValue.replace(',', '.')),
+          validUntil: validUntil || null,
+          maxRedemptions: maxRedemptions === '' ? null : Number(maxRedemptions),
+        },
+      });
+      setCode(''); setLabel(''); setValidUntil(''); setMaxRedemptions('');
+    });
+
+  const toggle = (p: PromoCodeRow) =>
+    run(() => apiFetch(`/editor/promo-codes/${p.id}`, {
+      method: 'POST', token, body: { active: !p.active },
+    }));
+
+  const remove = (p: PromoCodeRow) =>
+    run(() => apiFetch(`/editor/promo-codes/${p.id}`, { method: 'DELETE', token }));
+
+  const fmtDiscount = (p: PromoCodeRow) =>
+    p.discountType === 'percent' ? `−${p.discountValue} %` : `−${euro(p.discountValue)}`;
+
+  return (
+    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, marginTop: 20 }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #334155' }}>
+        <div style={{ color: '#fff', fontWeight: 600 }}>Codes promo</div>
+        <div style={{ color: '#64748b', fontSize: 11 }}>
+          Remise en pourcentage ou en montant fixe, appliquée au MRR de l’abonné.
+          Un code s’applique depuis « Gérer » sur la ligne d’un abonné.
+        </div>
+      </div>
+      {err && <div className="error" style={{ margin: 12 }}>{err}</div>}
+
+      {/* création */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-end', padding: 12, borderBottom: '1px solid #334155' }}>
+        <FieldSm label="Code">
+          <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="BTP2026" style={{ ...darkInput, width: 120 }} />
+        </FieldSm>
+        <FieldSm label="Libellé">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Offre de lancement" style={{ ...darkInput, width: 170 }} />
+        </FieldSm>
+        <FieldSm label="Type">
+          <select value={discountType} onChange={(e) => setDiscountType(e.target.value as 'percent' | 'fixed')} style={{ ...darkInput, width: 100 }}>
+            <option value="percent">%</option>
+            <option value="fixed">€ fixe</option>
+          </select>
+        </FieldSm>
+        <FieldSm label="Remise">
+          <input value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} style={{ ...darkInput, width: 70, textAlign: 'right' }} />
+        </FieldSm>
+        <FieldSm label="Valide jusqu’au">
+          <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} style={{ ...darkInput, width: 140 }} />
+        </FieldSm>
+        <FieldSm label="Quota">
+          <input value={maxRedemptions} onChange={(e) => setMaxRedemptions(e.target.value)} placeholder="illimité" style={{ ...darkInput, width: 80, textAlign: 'right' }} />
+        </FieldSm>
+        <ActionBtn accent title="Créer le code promo" disabled={busy || !code.trim()} onClick={create}>
+          Créer
+        </ActionBtn>
+      </div>
+
+      {promos.isLoading && <p style={{ color: '#94a3b8', padding: 16 }}>Chargement…</p>}
+      {promos.data && promos.data.length === 0 && (
+        <p style={{ color: '#94a3b8', padding: 16, margin: 0 }}>Aucun code promo.</p>
+      )}
+      {promos.data && promos.data.length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <Th>Code</Th>
+              <Th>Remise</Th>
+              <Th>Validité</Th>
+              <Th right>Utilisations</Th>
+              <Th right>État</Th>
+              <Th right>Actions</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {promos.data.map((p) => (
+              <tr key={p.id} style={{ borderTop: '1px solid #334155' }}>
+                <Td>
+                  <div style={{ color: '#fff', fontWeight: 600 }}>{p.code}</div>
+                  {p.label && <div style={{ color: '#64748b', fontSize: 11 }}>{p.label}</div>}
+                </Td>
+                <Td><span style={{ color: '#fff' }}>{fmtDiscount(p)}</span></Td>
+                <Td>
+                  <span style={{ color: '#94a3b8', fontSize: 11 }}>
+                    {p.validUntil ? `jusqu’au ${new Date(p.validUntil).toLocaleDateString('fr-FR')}` : 'sans limite'}
+                  </span>
+                </Td>
+                <Td right>
+                  {p.redemptions}{p.maxRedemptions !== null ? ` / ${p.maxRedemptions}` : ''}
+                </Td>
+                <Td right>
+                  <span className={`badge ${p.usable ? 'success' : 'warning'}`}>
+                    {p.usable ? 'utilisable' : p.active ? 'hors période/quota' : 'inactif'}
+                  </span>
+                </Td>
+                <Td right>
+                  <div style={{ display: 'inline-flex', gap: 6 }}>
+                    <ActionBtn title={p.active ? 'Désactiver' : 'Activer'} disabled={busy} onClick={() => toggle(p)}>
+                      {p.active ? 'Désactiver' : 'Activer'}
+                    </ActionBtn>
+                    <ActionBtn title="Supprimer le code" disabled={busy} onClick={() => remove(p)}>
+                      Supprimer
+                    </ActionBtn>
+                  </div>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function FieldSm({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <label style={{ fontSize: 10, color: '#94a3b8' }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
 /* ─────────── panneau de gestion d'un abonné ─────────── */
 function TenantManager({
   token, tenant, onClose, onChanged,
@@ -378,6 +556,7 @@ function TenantManager({
   const [periodDate, setPeriodDate] = useState(t.currentPeriodEnd ? t.currentPeriodEnd.slice(0, 10) : '');
   const [newModule, setNewModule] = useState('');
   const [newSeats, setNewSeats] = useState('1');
+  const [promoInput, setPromoInput] = useState('');
 
   const catalogModules = useQuery({
     queryKey: ['public-catalog-modules'],
@@ -464,6 +643,41 @@ function TenantManager({
               <input type="date" value={periodDate} onChange={(e) => setPeriodDate(e.target.value)} style={{ ...darkInput, width: 160 }} />
               <ActionBtn title="Définir la date d’échéance" disabled={busy || !periodDate} onClick={() => run('period-end', { date: periodDate })}>Définir</ActionBtn>
             </div>
+          </Section>
+
+          {/* Code promo */}
+          <Section title="Code promo">
+            {t.promoCode ? (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="badge success">{t.promoCode.code}</span>
+                <span style={{ color: '#94a3b8', fontSize: 12 }}>
+                  {t.promoCode.discountType === 'percent'
+                    ? `−${t.promoCode.discountValue} %`
+                    : `−${euro(t.promoCode.discountValue)}`}
+                  {' · '}MRR {euro(t.mrrGross)} → <strong style={{ color: '#4ade80' }}>{euro(t.mrr)}</strong>
+                </span>
+                <ActionBtn title="Retirer le code promo" disabled={busy} onClick={() => run('promo', { code: null })}>
+                  Retirer
+                </ActionBtn>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  value={promoInput}
+                  onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                  placeholder="CODE"
+                  style={{ ...darkInput, width: 140 }}
+                />
+                <ActionBtn
+                  accent
+                  title="Appliquer le code promo"
+                  disabled={busy || !promoInput.trim()}
+                  onClick={() => { run('promo', { code: promoInput.trim() }); setPromoInput(''); }}
+                >
+                  Appliquer
+                </ActionBtn>
+              </div>
+            )}
           </Section>
 
           {/* Modules & jetons */}
