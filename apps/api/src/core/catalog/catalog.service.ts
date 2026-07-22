@@ -15,13 +15,20 @@ export interface CatalogModule {
   active: boolean;
   priceMonthly: number | null;
   description: string | null;
+  /** Add-ons : palier minimum requis pour le souscrire (null = aucune contrainte). */
+  minTierLevel: number | null;
 }
 
 export interface CatalogPack {
   code: string;
   label: string;
+  /** Rang du palier : 1 = entrée de gamme. */
+  tierLevel: number;
+  /** Prix €HT par siège et par mois (base de données — éditable par l'éditeur). */
+  priceMonthly: number | null;
   discountPct: number;
   modules: string[];
+  description: string | null;
 }
 
 /**
@@ -63,6 +70,7 @@ export class CatalogService {
       active: m.active,
       priceMonthly: m.priceMonthly === null ? null : Number(m.priceMonthly),
       description: byCode.get(m.code)?.description ?? null,
+      minTierLevel: m.minTierLevel === null ? null : Number(m.minTierLevel),
     }));
   }
 
@@ -100,13 +108,37 @@ export class CatalogService {
     return all.find((m) => m.code === code) ?? null;
   }
 
-  /** Commercial packs (bundles) with their module composition — config-driven. */
-  getCatalogPacks(): CatalogPack[] {
-    return PACKS.map((p) => ({
-      code: p.code,
-      label: p.label,
-      discountPct: p.discountPct,
-      modules: [...p.modules],
+  /**
+   * Paliers commerciaux, du plus simple au plus complet. Prix et rang viennent de la base
+   * (éditables) ; le descriptif marketing reste en configuration.
+   */
+  async getCatalogPacks(): Promise<CatalogPack[]> {
+    const rows: Array<{
+      code: string;
+      label: string;
+      tier_level: number;
+      price_monthly: string | null;
+      discount_pct: string;
+      modules: string[];
+    }> = await this.packs.query(
+      `SELECT p.code, p.label, p.tier_level, p.price_monthly, p.discount_pct,
+              COALESCE(array_agg(m.code ORDER BY m.code) FILTER (WHERE m.code IS NOT NULL), '{}') AS modules
+         FROM pack p
+         LEFT JOIN pack_module pm ON pm.pack_id = p.id
+         LEFT JOIN module m ON m.id = pm.module_id
+        WHERE p.active = true
+        GROUP BY p.code, p.label, p.tier_level, p.price_monthly, p.discount_pct
+        ORDER BY p.tier_level`,
+    );
+    const byCode = new Map(PACKS.map((p) => [p.code, p]));
+    return rows.map((r) => ({
+      code: r.code,
+      label: r.label,
+      tierLevel: Number(r.tier_level),
+      priceMonthly: r.price_monthly === null ? null : Number(r.price_monthly),
+      discountPct: Number(r.discount_pct),
+      modules: r.modules,
+      description: byCode.get(r.code)?.description ?? null,
     }));
   }
 

@@ -16,6 +16,15 @@ interface CatalogModule {
   isAddon: boolean;
   priceMonthly: number | null;
   description: string | null;
+  minTierLevel: number | null;
+}
+interface CatalogPack {
+  code: string;
+  label: string;
+  tierLevel: number;
+  priceMonthly: number | null;
+  modules: string[];
+  description: string | null;
 }
 interface RegisterResult {
   accessToken: string;
@@ -39,8 +48,11 @@ export default function InscriptionPage() {
   const [password, setPassword] = useState('');
 
   const [modules, setModules] = useState<CatalogModule[]>([]);
-  // moduleCode -> seats (0 / undefined = not selected)
-  const [seats, setSeats] = useState<Record<string, number>>({});
+  const [packs, setPacks] = useState<CatalogPack[]>([]);
+  /** Palier choisi, ses jetons, et les options retenues (code → jetons). */
+  const [packCode, setPackCode] = useState<string>('');
+  const [packSeats, setPackSeats] = useState(1);
+  const [addonSeats, setAddonSeats] = useState<Record<string, number>>({});
 
   // Formule : engagement (mensuel sans engagement / annuel 12 mois) et rythme de facturation.
   const [billingTerm, setBillingTerm] = useState<'monthly' | 'annual'>('monthly');
@@ -56,26 +68,51 @@ export default function InscriptionPage() {
     apiFetch<CatalogModule[]>('/public/catalog/modules')
       .then(setModules)
       .catch(() => setModules([]));
+    apiFetch<CatalogPack[]>('/public/catalog/packs')
+      .then((p) => {
+        setPacks(p);
+        // Présélection du palier d'entrée pour que l'écran ne soit jamais vide.
+        setPackCode((cur) => cur || p[0]?.code || '');
+      })
+      .catch(() => setPacks([]));
     apiFetch<{ annualDiscountPct: number }>('/public/catalog/pricing')
       .then((p) => setAnnualDiscountPct(p.annualDiscountPct))
       .catch(() => undefined);
   }, []);
 
-  const billableModules = useMemo(
-    () => modules.filter((m) => m.code !== 'core' && m.priceMonthly !== null),
+  /** Options du catalogue (add-ons), avec leur palier minimum. */
+  const addonCatalogue = useMemo(() => modules.filter((m) => m.isAddon), [modules]);
+
+  const moduleLabels = useMemo(
+    () => new Map(modules.map((m) => [m.code, m.label])),
     [modules],
   );
 
-  const selected = useMemo(
-    () => billableModules.filter((m) => (seats[m.code] ?? 0) > 0),
-    [billableModules, seats],
+  const selectedPack = useMemo(
+    () => packs.find((p) => p.code === packCode) ?? null,
+    [packs, packCode],
+  );
+  const selectedTier = selectedPack?.tierLevel ?? 0;
+
+  /** Options retenues, filtrées par l'éligibilité au palier choisi. */
+  const selectedAddons = useMemo(
+    () =>
+      addonCatalogue.filter((a) => {
+        const eligible = a.minTierLevel === null || selectedTier >= a.minTierLevel;
+        return eligible && (addonSeats[a.code] ?? 0) > 0;
+      }),
+    [addonCatalogue, addonSeats, selectedTier],
   );
 
-  const monthlyTotal = useMemo(
-    () =>
-      selected.reduce((sum, m) => sum + (m.priceMonthly ?? 0) * (seats[m.code] ?? 0), 0),
-    [selected, seats],
-  );
+  /** Prix catalogue mensuel : palier × jetons + options × leurs jetons. */
+  const monthlyTotal = useMemo(() => {
+    const pack = (selectedPack?.priceMonthly ?? 0) * packSeats;
+    const addons = selectedAddons.reduce(
+      (sum, a) => sum + (a.priceMonthly ?? 0) * (addonSeats[a.code] ?? 0),
+      0,
+    );
+    return Math.round((pack + addons) * 100) / 100;
+  }, [selectedPack, packSeats, selectedAddons, addonSeats]);
 
   /** Mensuel après remise d'engagement (le code promo est validé/appliqué côté serveur). */
   const monthlyAfterTerm = useMemo(() => {
@@ -120,7 +157,9 @@ export default function InscriptionPage() {
               email,
               password,
               mode: 'direct' as const,
-              modules: selected.map((m) => ({ moduleCode: m.code, seats: seats[m.code] })),
+              packCode,
+              packSeats,
+              addons: selectedAddons.map((a) => ({ moduleCode: a.code, seats: addonSeats[a.code] })),
               billingTerm,
               billingInterval,
               promoCode: promoCode.trim() || null,
@@ -141,7 +180,7 @@ export default function InscriptionPage() {
     if (door === 'trial') {
       submitRegister();
     } else {
-      if (selected.length === 0) { setError('Choisissez au moins un module métier'); return; }
+      if (!packCode) { setError('Choisissez une formule'); return; }
       setError(null);
       setStep('payment');
     }
@@ -227,34 +266,88 @@ export default function InscriptionPage() {
 
             {door === 'direct' && (
               <div style={{ marginTop: 8, marginBottom: 8 }}>
-                <div className="label" style={{ marginBottom: 6 }}>Modules & jetons</div>
+                <div className="label" style={{ marginBottom: 6 }}>Votre formule</div>
                 <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>
-                  Le Socle (comptes, référentiels, e-facturation) est inclus. Choisissez vos modules métier.
+                  Chaque palier ajoute un maillon : chiffrer → facturer → suivre le chantier → piloter la marge.
                 </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {billableModules.map((m) => {
-                    const on = (seats[m.code] ?? 0) > 0;
-                    return (
-                      <div key={m.code} style={{
-                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-                        border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 8,
-                      }}>
-                        <input type="checkbox" checked={on}
-                          onChange={(e) => setSeats((s) => ({ ...s, [m.code]: e.target.checked ? (s[m.code] || 1) : 0 }))} />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, fontSize: 13 }}>{m.label}</div>
-                          <div className="muted" style={{ fontSize: 11 }}>{euro(m.priceMonthly)} /siège/mois</div>
-                        </div>
-                        {on && (
-                          <input type="number" min={1} value={seats[m.code] ?? 1} aria-label={`Jetons ${m.label}`}
-                            onChange={(e) => setSeats((s) => ({ ...s, [m.code]: Math.max(1, Number(e.target.value) || 1) }))}
-                            style={{ width: 54, textAlign: 'right' }} />
-                        )}
-                      </div>
-                    );
-                  })}
+                  {packs.map((p) => (
+                    <PackCard
+                      key={p.code}
+                      pack={p}
+                      selected={packCode === p.code}
+                      moduleLabels={moduleLabels}
+                      onClick={() => setPackCode(p.code)}
+                    />
+                  ))}
                 </div>
-                {selected.length > 0 && (
+
+                <div className="field" style={{ marginTop: 10, marginBottom: 0 }}>
+                  <label>Nombre d’utilisateurs (jetons)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={packSeats}
+                    aria-label="Jetons du palier"
+                    onChange={(e) => setPackSeats(Math.max(1, Number(e.target.value) || 1))}
+                    style={{ width: 80, textAlign: 'right' }}
+                  />
+                </div>
+
+                {/* Options à la carte, conditionnées au palier choisi */}
+                {addonCatalogue.length > 0 && (
+                  <>
+                    <div className="label" style={{ marginTop: 14, marginBottom: 6 }}>
+                      Options (facultatives)
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {addonCatalogue.map((a) => {
+                        const eligible = a.minTierLevel === null || selectedTier >= a.minTierLevel;
+                        const on = (addonSeats[a.code] ?? 0) > 0;
+                        const requiredPack = packs.find((p) => p.tierLevel === a.minTierLevel);
+                        return (
+                          <div key={a.code} style={{
+                            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                            border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+                            borderRadius: 8, opacity: eligible ? 1 : 0.55,
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              disabled={!eligible}
+                              aria-label={`Option ${a.label}`}
+                              onChange={(e) =>
+                                setAddonSeats((s) => ({ ...s, [a.code]: e.target.checked ? (s[a.code] || 1) : 0 }))
+                              }
+                            />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13 }}>{a.label}</div>
+                              <div className="muted" style={{ fontSize: 11 }}>
+                                {eligible
+                                  ? a.priceMonthly === null
+                                    ? 'Sur devis'
+                                    : `${euro(a.priceMonthly)} /siège/mois`
+                                  : `Nécessite au minimum le palier ${requiredPack?.label ?? a.minTierLevel}`}
+                              </div>
+                            </div>
+                            {on && eligible && a.priceMonthly !== null && (
+                              <input
+                                type="number" min={1} value={addonSeats[a.code] ?? 1}
+                                aria-label={`Jetons ${a.label}`}
+                                onChange={(e) =>
+                                  setAddonSeats((s) => ({ ...s, [a.code]: Math.max(1, Number(e.target.value) || 1) }))
+                                }
+                                style={{ width: 54, textAlign: 'right' }}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {monthlyTotal > 0 && (
                   <div style={{ marginTop: 10, textAlign: 'right', fontWeight: 700 }}>
                     Total : {euro(monthlyTotal)} <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>/mois HT</span>
                   </div>
@@ -329,14 +422,22 @@ export default function InscriptionPage() {
             <h2 style={{ marginTop: 0 }}>Récapitulatif</h2>
             <table className="grid" style={{ marginBottom: 12 }}>
               <tbody>
-                <tr>
-                  <td>Socle</td>
-                  <td className="muted" style={{ textAlign: 'right' }}>Inclus</td>
-                </tr>
-                {selected.map((m) => (
-                  <tr key={m.code}>
-                    <td>{m.label} <span className="muted">× {seats[m.code]}</span></td>
-                    <td style={{ textAlign: 'right' }}>{euro((m.priceMonthly ?? 0) * (seats[m.code] ?? 0))}</td>
+                {selectedPack && (
+                  <tr>
+                    <td>
+                      <strong>{selectedPack.label}</strong> <span className="muted">× {packSeats}</span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {euro((selectedPack.priceMonthly ?? 0) * packSeats)}
+                    </td>
+                  </tr>
+                )}
+                {selectedAddons.map((a) => (
+                  <tr key={a.code}>
+                    <td>{a.label} <span className="muted">× {addonSeats[a.code]}</span></td>
+                    <td style={{ textAlign: 'right' }}>
+                      {a.priceMonthly === null ? 'Sur devis' : euro(a.priceMonthly * (addonSeats[a.code] ?? 0))}
+                    </td>
                   </tr>
                 ))}
                 <tr>
@@ -399,6 +500,54 @@ export default function InscriptionPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+/* ─────────── carte de palier ─────────── */
+function PackCard({
+  pack, selected, moduleLabels, onClick,
+}: {
+  pack: CatalogPack;
+  selected: boolean;
+  moduleLabels: Map<string, string>;
+  onClick: () => void;
+}) {
+  // Le Socle est le tronc commun : on ne le liste pas, on le mentionne.
+  const shown = pack.modules.filter((c) => c !== 'core');
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 10, textAlign: 'left', width: '100%',
+        padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: 'transparent',
+        border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+        boxShadow: selected ? '0 0 0 1px var(--accent) inset' : 'none',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 14, height: 14, borderRadius: '50%', flexShrink: 0, marginTop: 3,
+          border: `2px solid ${selected ? 'var(--accent)' : 'var(--border-strong, #cbd5e1)'}`,
+          background: selected ? 'var(--accent)' : 'transparent',
+        }}
+      />
+      <span style={{ flex: 1 }}>
+        <span style={{ display: 'block', fontWeight: 600, fontSize: 13 }}>{pack.label}</span>
+        {pack.description && (
+          <span className="muted" style={{ fontSize: 11, display: 'block' }}>{pack.description}</span>
+        )}
+        <span className="muted" style={{ fontSize: 11, display: 'block', marginTop: 2 }}>
+          Socle inclus{shown.length > 0 ? ' + ' : ''}
+          {shown.map((c) => moduleLabels.get(c) ?? c).join(' + ')}
+        </span>
+      </span>
+      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
+        {euro(pack.priceMonthly)}
+        <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> /siège</span>
+      </span>
+    </button>
   );
 }
 

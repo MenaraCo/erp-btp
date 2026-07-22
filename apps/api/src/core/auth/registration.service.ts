@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { TenantContext } from '../tenancy/tenant-context';
 import { runInTenant } from '../tenancy/tenant-transaction';
 import { SubscriptionService } from '../subscriptions/subscription.service';
+import { PackSubscriptionService } from '../subscriptions/pack-subscription.service';
 import { RbacService } from '../rbac/rbac.service';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { AuthService } from './auth.service';
@@ -25,6 +26,11 @@ export interface RegisterInput {
   mode: RegisterMode;
   /** Porte 2 (direct): modules chosen with their seat counts. `core` is always added. */
   modules?: Array<{ moduleCode: string; seats: number }>;
+  /** Porte 2 : palier souscrit (offre par paliers) et son nombre de jetons. */
+  packCode?: string;
+  packSeats?: number;
+  /** Porte 2 : options à la carte, souscrites par-dessus le palier. */
+  addons?: Array<{ moduleCode: string; seats: number }>;
   /** Porte 2 : engagement (`monthly` sans engagement, `annual` 12 mois remisés). */
   billingTerm?: BillingTerm;
   /** Porte 2 : rythme de facturation (`monthly` mensualisé, `yearly` payé en une fois). */
@@ -63,6 +69,7 @@ export class RegistrationService {
     private readonly entitlements: EntitlementsService,
     private readonly pricing: PricingService,
     private readonly promos: PromoCodeService,
+    private readonly packs: PackSubscriptionService,
   ) {}
 
   async register(input: RegisterInput): Promise<RegisterResult> {
@@ -79,9 +86,12 @@ export class RegistrationService {
       throw new BadRequestException('Password must be at least 8 characters');
     }
 
-    // Porte 2: normalise the chosen modules (core is always active — Socle obligatoire).
+    // Porte 2 : l'offre se vend en paliers. `packCode` est la voie normale ; la liste de modules
+    // reste acceptée pour compatibilité avec les intégrations antérieures au repackaging.
+    const packCode = (input.packCode ?? '').trim();
+    const usePack = mode === 'direct' && packCode !== '';
     let directModules: Array<{ moduleCode: string; seats: number }> = [];
-    if (mode === 'direct') {
+    if (mode === 'direct' && !usePack) {
       const chosen = (input.modules ?? []).filter(
         (m) => m && m.moduleCode && Number(m.seats) > 0,
       );
@@ -90,7 +100,7 @@ export class RegistrationService {
       directModules = [...byCode.entries()].map(([moduleCode, seats]) => ({ moduleCode, seats }));
       if (directModules.length <= 1) {
         throw new BadRequestException(
-          'Choisissez au moins un module métier pour un abonnement direct',
+          'Choisissez un palier (packCode) ou au moins un module métier',
         );
       }
     }
@@ -108,6 +118,9 @@ export class RegistrationService {
     const userId = await this.context.run({ tenantId }, async () => {
       if (mode === 'trial') {
         await this.subscriptions.startTrial(tenantId);
+      } else if (usePack) {
+        // Une souscription vide sert de support au palier, posé juste après.
+        await this.subscriptions.subscribeDirect(tenantId, [{ moduleCode: 'core', seats: 1 }]);
       } else {
         await this.subscriptions.subscribeDirect(tenantId, directModules);
       }
@@ -124,6 +137,20 @@ export class RegistrationService {
       await this.auth.setPassword(tenantId, uid, password);
       await this.rbac.provisionSystemRoles(tenantId);
       await this.rbac.assignRole(tenantId, uid, 'admin');
+
+      // Porte 2 : palier souscrit, puis options à la carte (refusées si le palier est trop bas).
+      if (usePack) {
+        await this.packs.subscribeToPack(
+          tenantId,
+          packCode,
+          Math.max(1, Math.trunc(Number(input.packSeats ?? 1))),
+        );
+        for (const a of input.addons ?? []) {
+          if (a?.moduleCode && Number(a.seats) > 0) {
+            await this.packs.setAddon(tenantId, a.moduleCode, Math.trunc(Number(a.seats)));
+          }
+        }
+      }
 
       // Porte 2 : formule choisie (engagement + rythme) et code promo éventuel.
       if (mode === 'direct') {
