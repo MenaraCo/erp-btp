@@ -4,6 +4,8 @@ import { AuthTokenModule } from './auth-token.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { RbacModule } from '../rbac/rbac.module';
 import { EntitlementsModule } from '../entitlements/entitlements.module';
+import { PricingModule } from '../pricing/pricing.module';
+import { PromoModule } from '../promo/promo.module';
 import { AuthService } from './auth.service';
 import { RegistrationService } from './registration.service';
 import { AuthController } from './auth.controller';
@@ -16,6 +18,8 @@ import { AuthController } from './auth.controller';
     SubscriptionsModule,
     RbacModule,
     EntitlementsModule,
+    PricingModule,
+    PromoModule,
   ],
   providers: [AuthService, RegistrationService],
   controllers: [AuthController],

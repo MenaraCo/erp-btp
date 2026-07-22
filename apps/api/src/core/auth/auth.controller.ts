@@ -43,6 +43,9 @@ export class AuthController {
       password: body.password ?? '',
       mode: body.mode === 'direct' ? 'direct' : 'trial',
       modules: body.modules,
+      billingTerm: body.billingTerm === 'annual' ? 'annual' : 'monthly',
+      billingInterval: body.billingInterval === 'yearly' ? 'yearly' : 'monthly',
+      promoCode: body.promoCode ?? null,
     });
   }
 

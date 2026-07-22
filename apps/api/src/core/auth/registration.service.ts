@@ -11,6 +11,9 @@ import { RbacService } from '../rbac/rbac.service';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { AuthService } from './auth.service';
 import { AuthTokenService } from './auth-token.service';
+import { PricingService } from '../pricing/pricing.service';
+import { PromoCodeService } from '../promo/promo-code.service';
+import type { BillingInterval, BillingTerm } from '../pricing/pricing.calc';
 
 export type RegisterMode = 'trial' | 'direct';
 
@@ -22,6 +25,12 @@ export interface RegisterInput {
   mode: RegisterMode;
   /** Porte 2 (direct): modules chosen with their seat counts. `core` is always added. */
   modules?: Array<{ moduleCode: string; seats: number }>;
+  /** Porte 2 : engagement (`monthly` sans engagement, `annual` 12 mois remisés). */
+  billingTerm?: BillingTerm;
+  /** Porte 2 : rythme de facturation (`monthly` mensualisé, `yearly` payé en une fois). */
+  billingInterval?: BillingInterval;
+  /** Code promo saisi à l'inscription (optionnel). */
+  promoCode?: string | null;
 }
 
 export interface RegisterResult {
@@ -52,6 +61,8 @@ export class RegistrationService {
     private readonly tokens: AuthTokenService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
+    private readonly pricing: PricingService,
+    private readonly promos: PromoCodeService,
   ) {}
 
   async register(input: RegisterInput): Promise<RegisterResult> {
@@ -113,6 +124,26 @@ export class RegistrationService {
       await this.auth.setPassword(tenantId, uid, password);
       await this.rbac.provisionSystemRoles(tenantId);
       await this.rbac.assignRole(tenantId, uid, 'admin');
+
+      // Porte 2 : formule choisie (engagement + rythme) et code promo éventuel.
+      if (mode === 'direct') {
+        await this.pricing.setBillingFormula(
+          tenantId,
+          input.billingTerm === 'annual' ? 'annual' : 'monthly',
+          input.billingInterval === 'yearly' ? 'yearly' : 'monthly',
+        );
+        const code = (input.promoCode ?? '').trim();
+        if (code) {
+          const promo = await this.promos.requireUsable(code);
+          await runInTenant(this.dataSource, tenantId, (em) =>
+            em.query(`UPDATE subscription SET promo_code_id = $2 WHERE tenant_id = $1`, [
+              tenantId,
+              promo.id,
+            ]),
+          );
+          await this.promos.countRedemption(promo.id);
+        }
+      }
 
       // Give the admin a jeton on every active module so the account is usable right away.
       const activeModules = await this.entitlements.getActiveModuleCodes(tenantId);

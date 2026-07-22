@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { PromoModule } from '../promo/promo.module';
+import { PricingModule } from '../pricing/pricing.module';
 import { EditorService } from './editor.service';
 import { EditorController } from './editor.controller';
 import { PlatformAdminGuard } from './platform-admin.guard';
@@ -11,7 +12,7 @@ import { PlatformAdminGuard } from './platform-admin.guard';
  * separate from the client app and guarded by PlatformAdminGuard.
  */
 @Module({
-  imports: [TenancyModule, CatalogModule, PromoModule],
+  imports: [TenancyModule, CatalogModule, PromoModule, PricingModule],
   providers: [EditorService, PlatformAdminGuard],
   controllers: [EditorController],
 })

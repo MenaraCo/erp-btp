@@ -36,6 +36,13 @@ interface CatalogModuleInput {
 interface TenantPromoInput {
   code?: string | null;
 }
+interface BillingFormulaInput {
+  billingTerm?: string;
+  billingInterval?: string;
+}
+interface AnnualDiscountInput {
+  annualDiscountPct?: number;
+}
 
 /**
  * Editor back-office API (cahier §3.7 B) — reserved to the platform owner via PlatformAdminGuard,
@@ -141,5 +148,27 @@ export class EditorController {
   setTenantPromo(@Param('id') id: string, @Body() body: TenantPromoInput) {
     const code = body?.code ?? null;
     return this.editor.setTenantPromoCode(id, code ? String(code) : null);
+  }
+
+  /** Change la formule d'un abonné : engagement mensuel/annuel et rythme mensualisé/annuel. */
+  @Post('tenants/:id/billing-formula')
+  setBillingFormula(@Param('id') id: string, @Body() body: BillingFormulaInput) {
+    return this.editor.setBillingFormula(
+      id,
+      body?.billingTerm ?? 'monthly',
+      body?.billingInterval ?? 'monthly',
+    );
+  }
+
+  /* ── Réglages tarifaires ── */
+
+  @Get('pricing-settings')
+  pricingSettings() {
+    return this.editor.getPricingSettings();
+  }
+
+  @Post('pricing-settings')
+  setPricingSettings(@Body() body: AnnualDiscountInput) {
+    return this.editor.setAnnualDiscountPct(Number(body?.annualDiscountPct));
   }
 }

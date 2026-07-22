@@ -14,6 +14,12 @@ import {
   type PromoCode,
   type PromoCodeInput,
 } from '../promo/promo-code.service';
+import { PricingService } from '../pricing/pricing.service';
+import {
+  computePricing,
+  type BillingInterval,
+  type BillingTerm,
+} from '../pricing/pricing.calc';
 
 export interface EditorTenantRow {
   tenantId: string;
@@ -28,11 +34,18 @@ export interface EditorTenantRow {
   moduleDetails: Array<{ code: string; seats: number; active: boolean }>;
   seatsPurchased: number;
   seatsAssigned: number;
-  /** MRR after the promo discount (what is actually billed). */
+  /** MRR après remises (engagement puis promo) — ce qui est réellement facturé. */
   mrr: number;
-  /** MRR before any promo discount. */
+  /** MRR au tarif catalogue, avant toute remise. */
   mrrGross: number;
   promoCode: { code: string; discountType: string; discountValue: number } | null;
+  /** Formule : engagement et rythme de facturation. */
+  billingTerm: BillingTerm;
+  billingInterval: BillingInterval;
+  commitmentEndsAt: Date | null;
+  /** Remise d'engagement appliquée (%) et montant de chaque facture. */
+  termDiscountPct: number;
+  amountPerInvoice: number;
 }
 
 export interface EditorOverview {
@@ -79,6 +92,7 @@ export class EditorService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly catalog: CatalogService,
     private readonly promos: PromoCodeService,
+    private readonly pricing: PricingService,
   ) {}
 
   async getTenants(): Promise<EditorTenantRow[]> {
@@ -87,11 +101,12 @@ export class EditorService {
         `SELECT id, slug, name, created_at FROM tenant ORDER BY created_at DESC`,
       );
 
-    // Load prices once for the whole listing.
+    // Prix et taux de remise chargés une seule fois pour tout le listing.
     const prices = await this.catalog.getPriceByModuleCode();
+    const annualDiscountPct = await this.pricing.getAnnualDiscountPct();
     const rows: EditorTenantRow[] = [];
     for (const t of tenants) {
-      rows.push(await this.readTenantRow(t, prices));
+      rows.push(await this.readTenantRow(t, prices, annualDiscountPct));
     }
     return rows;
   }
@@ -105,11 +120,15 @@ export class EditorService {
       created_at: Date;
     },
     priceByModule?: Map<string, number>,
+    annualDiscountPctArg?: number,
   ): Promise<EditorTenantRow> {
     const prices = priceByModule ?? (await this.catalog.getPriceByModuleCode());
+    const annualDiscountPct =
+      annualDiscountPctArg ?? (await this.pricing.getAnnualDiscountPct());
     const row = await runInTenant(this.dataSource, t.id, async (em) => {
       const subRows = await em.query(
-        `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end, promo_code_id
+        `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end, promo_code_id,
+                billing_term, billing_interval, commitment_ends_at
            FROM subscription WHERE tenant_id = $1`,
         [t.id],
       );
@@ -133,18 +152,27 @@ export class EditorService {
       const seatsPurchased = modules
         .filter((m) => m.active)
         .reduce((s, m) => s + Number(m.seats_purchased), 0);
-      // MRR: only paying (active) subscriptions contribute; trials count as 0.
-      const mrrGross =
-        sub?.status === 'active'
+      // Seules les souscriptions payantes (active) contribuent ; les essais comptent 0.
+      const billable = sub?.status === 'active';
+      const billingTerm: BillingTerm = sub?.billing_term === 'annual' ? 'annual' : 'monthly';
+      const billingInterval: BillingInterval =
+        sub?.billing_interval === 'yearly' ? 'yearly' : 'monthly';
+
+      // Cascade complète : catalogue → remise d'engagement → code promo.
+      const pricing = computePricing({
+        lines: billable
           ? modules
               .filter((m) => m.active)
-              .reduce(
-                (s, m) => s + Number(m.seats_purchased) * (prices.get(m.module_code) ?? 0),
-                0,
-              )
-          : 0;
-      // The promo discount is what actually gets billed.
-      const mrr = PromoCodeService.applyDiscount(mrrGross, promo);
+              .map((m) => ({
+                seats: Number(m.seats_purchased),
+                unitPrice: prices.get(m.module_code) ?? 0,
+              }))
+          : [],
+        billingTerm,
+        billingInterval,
+        annualDiscountPct,
+        promo,
+      });
 
       return {
         status: sub?.status ?? null,
@@ -157,8 +185,8 @@ export class EditorService {
           .sort((a, b) => a.code.localeCompare(b.code)),
         seatsPurchased,
         seatsAssigned: Number(assigned[0]?.n ?? 0),
-        mrr,
-        mrrGross,
+        mrr: pricing.mrr,
+        mrrGross: pricing.monthlyBase,
         promoCode: promo
           ? {
               code: promo.code,
@@ -166,6 +194,11 @@ export class EditorService {
               discountValue: promo.discountValue,
             }
           : null,
+        billingTerm,
+        billingInterval,
+        commitmentEndsAt: sub?.commitment_ends_at ?? null,
+        termDiscountPct: pricing.termDiscountPct,
+        amountPerInvoice: pricing.amountPerInvoice,
       };
     });
 
@@ -397,6 +430,35 @@ export class EditorService {
       throw new NotFoundException(`Module ${code} introuvable`);
     }
     return updated;
+  }
+
+  /* ── Formule d'abonnement et réglages tarifaires ── */
+
+  /**
+   * Change la formule d'un abonné : engagement (mensuel / annuel 12 mois) et rythme de
+   * facturation (mensualisé / payé en une fois). L'annuel ouvre droit à la remise d'engagement.
+   */
+  async setBillingFormula(
+    tenantId: string,
+    term: string,
+    interval: string,
+  ): Promise<EditorTenantRow> {
+    const base = await this.tenantBase(tenantId);
+    await this.pricing.setBillingFormula(
+      tenantId,
+      term === 'annual' ? 'annual' : 'monthly',
+      interval === 'yearly' ? 'yearly' : 'monthly',
+    );
+    return this.readTenantRow(base);
+  }
+
+  /** Réglages tarifaires globaux (dont la remise d'engagement annuel). */
+  async getPricingSettings(): Promise<{ annualDiscountPct: number }> {
+    return { annualDiscountPct: await this.pricing.getAnnualDiscountPct() };
+  }
+
+  async setAnnualDiscountPct(pct: number): Promise<{ annualDiscountPct: number }> {
+    return { annualDiscountPct: await this.pricing.setAnnualDiscountPct(pct) };
   }
 
   /* ── Codes promo (cahier §3.7 B) ── */
