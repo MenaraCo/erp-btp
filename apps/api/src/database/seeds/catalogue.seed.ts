@@ -54,10 +54,13 @@ export async function seedCatalogue(dataSource: DataSource): Promise<void> {
     for (const m of MODULES) {
       // price_monthly is seeded on INSERT only: after the first seed the database owns pricing
       // (editable from the editor back-office), so a re-seed must never wipe the editor's prices.
+      // min_tier_level relève en revanche de la structure de l'offre : réconcilié à chaque seed.
       await qr.query(
-        `INSERT INTO module (code, label, is_addon, active, price_monthly) VALUES ($1, $2, $3, true, $4)
-         ON CONFLICT (code) DO UPDATE SET label = EXCLUDED.label, is_addon = EXCLUDED.is_addon, updated_at = now()`,
-        [m.code, m.label, m.isAddon, m.priceMonthly],
+        `INSERT INTO module (code, label, is_addon, active, price_monthly, min_tier_level)
+         VALUES ($1, $2, $3, true, $4, $5)
+         ON CONFLICT (code) DO UPDATE SET label = EXCLUDED.label, is_addon = EXCLUDED.is_addon,
+                                          min_tier_level = EXCLUDED.min_tier_level, updated_at = now()`,
+        [m.code, m.label, m.isAddon, m.priceMonthly, m.minTierLevel ?? null],
       );
     }
     await qr.query(`DELETE FROM module WHERE code <> ALL($1::text[])`, [
@@ -65,10 +68,14 @@ export async function seedCatalogue(dataSource: DataSource): Promise<void> {
     ]);
 
     for (const p of PACKS) {
+      // Comme pour les modules : le prix n'est posé qu'à l'INSERT (la base fait foi ensuite,
+      // l'éditeur l'ajuste depuis le back-office) ; le rang du palier suit la configuration.
       await qr.query(
-        `INSERT INTO pack (code, label, discount_pct, active) VALUES ($1, $2, $3, true)
-         ON CONFLICT (code) DO UPDATE SET label = EXCLUDED.label, discount_pct = EXCLUDED.discount_pct, updated_at = now()`,
-        [p.code, p.label, p.discountPct],
+        `INSERT INTO pack (code, label, discount_pct, active, price_monthly, tier_level)
+         VALUES ($1, $2, $3, true, $4, $5)
+         ON CONFLICT (code) DO UPDATE SET label = EXCLUDED.label, discount_pct = EXCLUDED.discount_pct,
+                                          tier_level = EXCLUDED.tier_level, updated_at = now()`,
+        [p.code, p.label, p.discountPct, p.priceMonthly, p.tierLevel],
       );
     }
     await qr.query(`DELETE FROM pack WHERE code <> ALL($1::text[])`, [

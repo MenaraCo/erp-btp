@@ -46,6 +46,9 @@ export interface EditorTenantRow {
   /** Remise d'engagement appliquée (%) et montant de chaque facture. */
   termDiscountPct: number;
   amountPerInvoice: number;
+  /** Palier souscrit et ses jetons (offre par paliers). */
+  packCode: string | null;
+  packSeats: number;
 }
 
 export interface EditorOverview {
@@ -128,7 +131,7 @@ export class EditorService {
     const row = await runInTenant(this.dataSource, t.id, async (em) => {
       const subRows = await em.query(
         `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end, promo_code_id,
-                billing_term, billing_interval, commitment_ends_at
+                billing_term, billing_interval, commitment_ends_at, pack_code, pack_seats
            FROM subscription WHERE tenant_id = $1`,
         [t.id],
       );
@@ -136,6 +139,24 @@ export class EditorService {
       const promo = sub?.promo_code_id
         ? await this.promos.findById(sub.promo_code_id)
         : null;
+
+      // Tarification par paliers : le prix est celui du pack (× jetons du pack), auquel s'ajoutent
+      // les options à la carte (× leurs propres jetons). On ne somme plus les modules du pack :
+      // ils sont couverts par le palier.
+      const packRow = sub?.pack_code
+        ? (
+            await em.query(`SELECT price_monthly FROM pack WHERE code = $1`, [sub.pack_code])
+          )[0]
+        : null;
+      const paidAddons: Array<{ module_code: string; seats_purchased: number }> =
+        await em.query(
+          `SELECT ms.module_code, ms.seats_purchased
+             FROM module_subscription ms
+             JOIN module m ON m.code = ms.module_code
+             JOIN tenant_module tm ON tm.module_code = ms.module_code AND tm.tenant_id = ms.tenant_id
+            WHERE m.is_addon = true AND ms.seats_purchased > 0
+              AND ms.billing_period <> 'trial' AND tm.active = true`,
+        );
 
       const modules: Array<{
         module_code: string;
@@ -158,16 +179,20 @@ export class EditorService {
       const billingInterval: BillingInterval =
         sub?.billing_interval === 'yearly' ? 'yearly' : 'monthly';
 
-      // Cascade complète : catalogue → remise d'engagement → code promo.
+      // Cascade complète : palier + options → remise d'engagement → code promo.
+      const packSeats = Number(sub?.pack_seats ?? 0);
+      const packPrice = packRow?.price_monthly == null ? 0 : Number(packRow.price_monthly);
+      const lines = billable
+        ? [
+            ...(sub?.pack_code ? [{ seats: packSeats, unitPrice: packPrice }] : []),
+            ...paidAddons.map((a) => ({
+              seats: Number(a.seats_purchased),
+              unitPrice: prices.get(a.module_code) ?? 0,
+            })),
+          ]
+        : [];
       const pricing = computePricing({
-        lines: billable
-          ? modules
-              .filter((m) => m.active)
-              .map((m) => ({
-                seats: Number(m.seats_purchased),
-                unitPrice: prices.get(m.module_code) ?? 0,
-              }))
-          : [],
+        lines,
         billingTerm,
         billingInterval,
         annualDiscountPct,
@@ -199,6 +224,8 @@ export class EditorService {
         commitmentEndsAt: sub?.commitment_ends_at ?? null,
         termDiscountPct: pricing.termDiscountPct,
         amountPerInvoice: pricing.amountPerInvoice,
+        packCode: sub?.pack_code ?? null,
+        packSeats,
       };
     });
 

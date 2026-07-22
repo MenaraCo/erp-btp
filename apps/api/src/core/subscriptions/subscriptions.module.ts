@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { SubscriptionService } from './subscription.service';
+import { PackSubscriptionService } from './pack-subscription.service';
 import { SubscriptionController } from './subscription.controller';
 
 /**
@@ -9,8 +10,8 @@ import { SubscriptionController } from './subscription.controller';
  */
 @Module({
   imports: [TenancyModule],
-  providers: [SubscriptionService],
+  providers: [SubscriptionService, PackSubscriptionService],
   controllers: [SubscriptionController],
-  exports: [SubscriptionService],
+  exports: [SubscriptionService, PackSubscriptionService],
 })
 export class SubscriptionsModule {}

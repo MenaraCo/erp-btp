@@ -15,4 +15,12 @@ export class PackEntity extends BaseEntity {
 
   @Column({ type: 'boolean', default: true })
   active!: boolean;
+
+  /** Prix €HT par siège et par mois du palier. La base fait foi (éditable par l'éditeur). */
+  @Column({ name: 'price_monthly', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  priceMonthly!: string | null;
+
+  /** Rang du palier : 1 = entrée de gamme. Sert à l'éligibilité des add-ons. */
+  @Column({ name: 'tier_level', type: 'int', default: 1 })
+  tierLevel!: number;
 }

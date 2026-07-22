@@ -42,7 +42,8 @@ describe('CatalogService — résolution des capacités', () => {
   });
 
   it('résout les modules d’un pack', async () => {
-    const codes = await service.getModuleCodesForPack('pack_travaux');
-    expect(codes).toEqual(['core', 'invoicing', 'site_tracking']);
+    // L'offre est vendue en paliers : Pro Chantier = Socle + Études + Facturation + Suivi.
+    const codes = await service.getModuleCodesForPack('pro_chantier');
+    expect(codes).toEqual(['core', 'estimating', 'invoicing', 'site_tracking']);
   });
 });

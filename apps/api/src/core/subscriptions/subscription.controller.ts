@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common
 import { RequiresPermission } from '../rbac/requires-permission.decorator';
 import { TenantContext } from '../tenancy/tenant-context';
 import { SubscriptionService } from './subscription.service';
+import { PackSubscriptionService } from './pack-subscription.service';
 
 interface DirectInput {
   modules?: Array<{ moduleCode: string; seats: number }>;
@@ -15,6 +16,14 @@ interface ModuleInput {
 interface CancelInput {
   cancel?: boolean;
 }
+interface PackInput {
+  packCode?: string;
+  seats?: number;
+}
+interface AddonInput {
+  moduleCode?: string;
+  seats?: number;
+}
 
 /**
  * Subscription management — two independent entry doors (cahier §3.3):
@@ -25,6 +34,7 @@ interface CancelInput {
 export class SubscriptionController {
   constructor(
     private readonly subscriptions: SubscriptionService,
+    private readonly packSubscriptions: PackSubscriptionService,
     private readonly context: TenantContext,
   ) {}
 
@@ -84,6 +94,57 @@ export class SubscriptionController {
     return this.subscriptions.setCancelAtPeriodEnd(
       this.context.requireTenantId(),
       cancel,
+    );
+  }
+
+  /* ── Offre par paliers ── */
+
+  /** Catalogue des paliers (Essentiel → Pro Max) avec leur contenu et leur prix. */
+  @Get('packs')
+  @RequiresPermission('subscription.manage')
+  packs() {
+    return this.packSubscriptions.listPacks();
+  }
+
+  /** Palier et options actuellement souscrits. */
+  @Get('pack')
+  @RequiresPermission('subscription.manage')
+  packState() {
+    return this.packSubscriptions.getState(this.context.requireTenantId());
+  }
+
+  /** Options du catalogue, avec leur éligibilité au palier courant. */
+  @Get('addons')
+  @RequiresPermission('subscription.manage')
+  addons() {
+    return this.packSubscriptions.listAddons(this.context.requireTenantId());
+  }
+
+  /** Souscrit ou change de palier (les options non couvertes passent en lecture seule). */
+  @Post('pack')
+  @RequiresPermission('subscription.manage')
+  subscribePack(@Body() body: PackInput) {
+    if (!body?.packCode) {
+      throw new BadRequestException('packCode est requis');
+    }
+    return this.packSubscriptions.subscribeToPack(
+      this.context.requireTenantId(),
+      body.packCode,
+      Number(body.seats ?? 1),
+    );
+  }
+
+  /** Ajoute/ajuste une option (jetons > 0) ou la retire (jetons = 0). */
+  @Post('addon')
+  @RequiresPermission('subscription.manage')
+  setAddon(@Body() body: AddonInput) {
+    if (!body?.moduleCode) {
+      throw new BadRequestException('moduleCode est requis');
+    }
+    return this.packSubscriptions.setAddon(
+      this.context.requireTenantId(),
+      body.moduleCode,
+      Number(body.seats ?? 0),
     );
   }
 }

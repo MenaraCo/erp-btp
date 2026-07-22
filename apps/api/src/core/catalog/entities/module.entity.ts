@@ -22,4 +22,11 @@ export class ModuleEntity extends BaseEntity {
    */
   @Column({ name: 'price_monthly', type: 'numeric', precision: 10, scale: 2, nullable: true })
   priceMonthly!: string | null;
+
+  /**
+   * Add-ons : palier minimum requis pour pouvoir le souscrire (1 = Essentiel … 4 = Pro Max).
+   * `null` = aucune contrainte. Ex. l'Assistance IA exige au moins Pro Chantier.
+   */
+  @Column({ name: 'min_tier_level', type: 'int', nullable: true })
+  minTierLevel!: number | null;
 }
