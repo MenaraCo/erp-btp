@@ -47,6 +47,13 @@ interface CatalogModule {
   active: boolean;
   description?: string | null;
 }
+interface PackRow {
+  code: string;
+  label: string;
+  tierLevel: number;
+  priceMonthly: number | null;
+  modules: string[];
+}
 interface PromoCodeRow {
   id: string;
   code: string;
@@ -244,6 +251,7 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
                 </table>
               )}
             </div>
+            <PackEditor token={token} onChanged={refresh} />
             <CatalogEditor token={token} onChanged={refresh} />
             <PromoCodesEditor token={token} onChanged={refresh} />
           </>
@@ -261,6 +269,120 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
         />
       )}
     </div>
+  );
+}
+
+/* ─────────── édition des paliers ─────────── */
+function PackEditor({ token, onChanged }: { token: string; onChanged: () => void }) {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const packs = useQuery({
+    queryKey: ['editor-packs'],
+    queryFn: () => apiFetch<PackRow[]>('/editor/packs', { token }),
+    retry: false,
+  });
+  const catalog = useQuery({
+    queryKey: ['editor-catalog'],
+    queryFn: () => apiFetch<CatalogModule[]>('/editor/catalog', { token }),
+    retry: false,
+  });
+  const labels = new Map((catalog.data ?? []).map((m) => [m.code, m.label]));
+
+  async function savePrice(code: string, raw: string) {
+    setErr(null);
+    setSaving(code);
+    try {
+      const t = raw.trim().replace(',', '.');
+      const priceMonthly = t === '' ? null : Number(t);
+      if (priceMonthly !== null && (!Number.isFinite(priceMonthly) || priceMonthly < 0)) {
+        throw new ApiError(400, 'Prix invalide');
+      }
+      await apiFetch(`/editor/packs/${code}`, { method: 'POST', body: { priceMonthly }, token });
+      await qc.invalidateQueries({ queryKey: ['editor-packs'] });
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Enregistrement impossible');
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, marginTop: 20 }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #334155' }}>
+        <div style={{ color: '#fff', fontWeight: 600 }}>Paliers & prix</div>
+        <div style={{ color: '#64748b', fontSize: 11 }}>
+          Prix €HT par siège et par mois de chaque palier. Effet immédiat sur l’inscription,
+          les abonnements et le MRR — sans redéploiement.
+        </div>
+      </div>
+      {err && <div className="error" style={{ margin: 12 }}>{err}</div>}
+      {packs.isLoading && <p style={{ color: '#94a3b8', padding: 16 }}>Chargement…</p>}
+      {packs.data && (
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <Th>Palier</Th>
+              <Th>Contenu</Th>
+              <Th right>Prix /siège/mois</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {packs.data.map((p) => (
+              <PackRowEditor
+                key={p.code}
+                pack={p}
+                labels={labels}
+                saving={saving === p.code}
+                onSave={(v) => savePrice(p.code, v)}
+              />
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function PackRowEditor({
+  pack, labels, saving, onSave,
+}: {
+  pack: PackRow; labels: Map<string, string>; saving: boolean; onSave: (raw: string) => void;
+}) {
+  const initial = pack.priceMonthly === null ? '' : String(pack.priceMonthly);
+  const [val, setVal] = useState(initial);
+  const dirty = val.trim().replace(',', '.') !== initial;
+  const included = pack.modules.filter((c) => c !== 'core');
+
+  return (
+    <tr style={{ borderTop: '1px solid #334155' }}>
+      <Td>
+        <span style={{ color: '#fff', fontWeight: 600 }}>{pack.label}</span>
+        <span style={{ color: '#64748b', fontSize: 11 }}> · palier {pack.tierLevel}</span>
+      </Td>
+      <Td>
+        <span style={{ color: '#94a3b8', fontSize: 11 }}>
+          Socle{included.length ? ' + ' : ''}
+          {included.map((c) => labels.get(c) ?? c).join(' + ')}
+        </span>
+      </Td>
+      <Td right>
+        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          <input
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && dirty) onSave(val); }}
+            aria-label={`Prix ${pack.label}`}
+            style={{ ...darkInput, width: 90, textAlign: 'right', padding: '5px 8px' }}
+          />
+          <ActionBtn accent={dirty} title="Enregistrer le prix" disabled={saving || !dirty} onClick={() => onSave(val)}>
+            {saving ? '…' : 'Enregistrer'}
+          </ActionBtn>
+        </div>
+      </Td>
+    </tr>
   );
 }
 
@@ -302,10 +424,10 @@ function CatalogEditor({ token, onChanged }: { token: string; onChanged: () => v
   return (
     <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, marginTop: 20 }}>
       <div style={{ padding: '14px 16px', borderBottom: '1px solid #334155' }}>
-        <div style={{ color: '#fff', fontWeight: 600 }}>Catalogue & prix</div>
+        <div style={{ color: '#fff', fontWeight: 600 }}>Modules & options</div>
         <div style={{ color: '#64748b', fontSize: 11 }}>
-          Prix €HT par siège et par mois. Champ vide = « sur devis ». Effet immédiat sur les devis,
-          la page d’inscription et le MRR — sans redéploiement.
+          Prix des options à la carte (les modules inclus dans un palier sont facturés via le
+          palier). Champ vide = « sur devis ».
         </div>
       </div>
       {err && <div className="error" style={{ margin: 12 }}>{err}</div>}

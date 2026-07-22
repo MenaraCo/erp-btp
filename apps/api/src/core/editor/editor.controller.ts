@@ -32,6 +32,12 @@ interface CatalogModuleInput {
   priceMonthly?: number | null;
   label?: string;
   active?: boolean;
+  minTierLevel?: number | null;
+}
+interface CatalogPackInput {
+  priceMonthly?: number | null;
+  label?: string;
+  active?: boolean;
 }
 interface TenantPromoInput {
   code?: string | null;
@@ -119,6 +125,18 @@ export class EditorController {
   @Post('catalog/modules/:code')
   updateCatalogModule(@Param('code') code: string, @Body() body: CatalogModuleInput) {
     return this.editor.updateCatalogModule(code, body ?? {});
+  }
+
+  /** Paliers commerciaux avec prix et contenu. */
+  @Get('packs')
+  packs() {
+    return this.editor.getPacks();
+  }
+
+  /** Ajuste le prix d'un palier — effet immédiat, sans redéploiement. */
+  @Post('packs/:code')
+  updatePack(@Param('code') code: string, @Body() body: CatalogPackInput) {
+    return this.editor.updatePack(code, body ?? {});
   }
 
   /* ── Codes promo ── */

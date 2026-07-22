@@ -88,7 +88,12 @@ export class CatalogService {
    */
   async updateModule(
     code: string,
-    patch: { priceMonthly?: number | null; label?: string; active?: boolean },
+    patch: {
+      priceMonthly?: number | null;
+      label?: string;
+      active?: boolean;
+      minTierLevel?: number | null;
+    },
   ): Promise<CatalogModule | null> {
     const module = await this.modules.findOne({ where: { code } });
     if (!module) {
@@ -103,9 +108,38 @@ export class CatalogService {
     if (patch.active !== undefined) {
       module.active = patch.active;
     }
+    if (patch.minTierLevel !== undefined) {
+      module.minTierLevel = patch.minTierLevel;
+    }
     await this.modules.save(module);
     const all = await this.getCatalogModules();
     return all.find((m) => m.code === code) ?? null;
+  }
+
+  /**
+   * Back-office éditeur : ajuste le prix (ou le libellé / l'activation) d'un palier.
+   * Effet immédiat sur les devis, l'inscription et le MRR — sans redéploiement.
+   */
+  async updatePack(
+    code: string,
+    patch: { priceMonthly?: number | null; label?: string; active?: boolean },
+  ): Promise<CatalogPack | null> {
+    const pack = await this.packs.findOne({ where: { code } });
+    if (!pack) {
+      return null;
+    }
+    if (patch.priceMonthly !== undefined) {
+      pack.priceMonthly = patch.priceMonthly === null ? null : String(patch.priceMonthly);
+    }
+    if (patch.label !== undefined) {
+      pack.label = patch.label;
+    }
+    if (patch.active !== undefined) {
+      pack.active = patch.active;
+    }
+    await this.packs.save(pack);
+    const all = await this.getCatalogPacks();
+    return all.find((p) => p.code === code) ?? null;
   }
 
   /**

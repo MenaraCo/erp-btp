@@ -431,13 +431,45 @@ export class EditorService {
     return this.catalog.getCatalogModules();
   }
 
+  /** Paliers commerciaux avec leur prix et leur contenu. */
+  getPacks() {
+    return this.catalog.getCatalogPacks();
+  }
+
+  /** Ajuste le prix (ou le libellé / l'activation) d'un palier. */
+  async updatePack(
+    code: string,
+    patch: { priceMonthly?: number | null; label?: string; active?: boolean },
+  ) {
+    if (patch.priceMonthly !== undefined && patch.priceMonthly !== null) {
+      const v = Number(patch.priceMonthly);
+      if (!Number.isFinite(v) || v < 0) {
+        throw new BadRequestException('Prix invalide (doit être ≥ 0)');
+      }
+      patch.priceMonthly = Math.round(v * 100) / 100;
+    }
+    if (patch.label !== undefined && !patch.label.trim()) {
+      throw new BadRequestException('Le libellé ne peut pas être vide');
+    }
+    const updated = await this.catalog.updatePack(code, patch);
+    if (!updated) {
+      throw new NotFoundException(`Palier ${code} introuvable`);
+    }
+    return updated;
+  }
+
   /**
    * Editor pricing control (cahier §3.2/§3.7 B): changes a module's price/label/active state.
    * Takes effect immediately for quotes, the client console and MRR — no redeployment.
    */
   async updateCatalogModule(
     code: string,
-    patch: { priceMonthly?: number | null; label?: string; active?: boolean },
+    patch: {
+      priceMonthly?: number | null;
+      label?: string;
+      active?: boolean;
+      minTierLevel?: number | null;
+    },
   ) {
     if (!MODULE_CODES.has(code)) {
       throw new BadRequestException(`Module inconnu: ${code}`);
@@ -451,6 +483,13 @@ export class EditorService {
     }
     if (patch.label !== undefined && !patch.label.trim()) {
       throw new BadRequestException('Le libellé ne peut pas être vide');
+    }
+    if (patch.minTierLevel !== undefined && patch.minTierLevel !== null) {
+      const lvl = Math.trunc(Number(patch.minTierLevel));
+      if (!Number.isFinite(lvl) || lvl < 1) {
+        throw new BadRequestException('Palier minimum invalide');
+      }
+      patch.minTierLevel = lvl;
     }
     const updated = await this.catalog.updateModule(code, patch);
     if (!updated) {

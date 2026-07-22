@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, Lock, Plus, Trash2 } from 'lucide-react';
+import { Lock, Plus, Trash2 } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
@@ -22,6 +22,28 @@ interface CatalogModule {
   active: boolean;
   priceMonthly: number | null;
   description: string | null;
+}
+interface PackRow {
+  code: string;
+  label: string;
+  tierLevel: number;
+  priceMonthly: number | null;
+  modules: string[];
+}
+interface PackState {
+  packCode: string | null;
+  packLabel: string | null;
+  tierLevel: number | null;
+  packSeats: number;
+  addons: Array<{ code: string; label: string; seats: number }>;
+}
+interface AddonRow {
+  code: string;
+  label: string;
+  priceMonthly: number | null;
+  minTierLevel: number | null;
+  seats: number;
+  eligible: boolean;
 }
 interface SubscribedModule {
   moduleCode: string;
@@ -76,7 +98,7 @@ function useApi() {
 }
 
 /* ═══════════════════════════════════════════════════════════ */
-const TABS = ['État', 'Modules & Jetons'] as const;
+const TABS = ['État', 'Formule & Options'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function AbonnementPage() {
@@ -108,7 +130,7 @@ export default function AbonnementPage() {
       </div>
 
       {token && tab === 'État' && <TabEtat />}
-      {token && tab === 'Modules & Jetons' && <TabModules />}
+      {token && tab === 'Formule & Options' && <TabModules />}
     </div>
   );
 }
@@ -220,104 +242,180 @@ function TabModules() {
   const api = useApi();
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
-  const [seatDraft, setSeatDraft] = useState<Record<string, string>>({});
+  const [seatDraft, setSeatDraft] = useState<string>('');
+  const [addonDraft, setAddonDraft] = useState<Record<string, string>>({});
 
+  const packs = useQuery({
+    queryKey: ['sub-packs'],
+    queryFn: () => api<PackRow[]>('/subscription/packs'),
+  });
+  const state = useQuery({
+    queryKey: ['sub-pack-state'],
+    queryFn: () => api<PackState>('/subscription/pack'),
+  });
+  const addons = useQuery({
+    queryKey: ['sub-addons'],
+    queryFn: () => api<AddonRow[]>('/subscription/addons'),
+  });
   const catalog = useQuery({
     queryKey: ['catalog-modules'],
     queryFn: () => api<CatalogModule[]>('/catalog/modules'),
   });
-  const subscribed = useQuery({
-    queryKey: ['subscription-modules'],
-    queryFn: () => api<SubscribedModule[]>('/subscription/modules'),
-  });
 
-  const subMap = useMemo(
-    () => new Map((subscribed.data ?? []).map((m) => [m.moduleCode, m])),
-    [subscribed.data],
+  const moduleLabels = useMemo(
+    () => new Map((catalog.data ?? []).map((m) => [m.code, m.label])),
+    [catalog.data],
   );
 
-  const saveModule = useMutation({
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['sub-pack-state'] });
+    qc.invalidateQueries({ queryKey: ['sub-addons'] });
+    qc.invalidateQueries({ queryKey: ['subscription-modules'] });
+    qc.invalidateQueries({ queryKey: ['subscription'] });
+    qc.invalidateQueries({ queryKey: ['seats'] });
+  };
+
+  const changePack = useMutation({
+    mutationFn: (v: { packCode: string; seats: number }) =>
+      api('/subscription/pack', { method: 'POST', body: v }),
+    onSuccess: () => { setErr(null); refresh(); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
+  const changeAddon = useMutation({
     mutationFn: (v: { moduleCode: string; seats: number }) =>
-      api('/subscription/module', { method: 'POST', body: v }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['subscription-modules'] });
-      qc.invalidateQueries({ queryKey: ['subscription'] });
-    },
+      api('/subscription/addon', { method: 'POST', body: v }),
+    onSuccess: () => { setErr(null); refresh(); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
 
-  if (catalog.isLoading) return <p className="muted">Chargement…</p>;
-  if (catalog.isError) return <p className="muted">Accès non autorisé (permission « subscription.manage »).</p>;
+  if (packs.isLoading || state.isLoading) return <p className="muted">Chargement…</p>;
+  if (packs.isError) return <p className="muted">Accès non autorisé (permission « subscription.manage »).</p>;
+
+  const st = state.data;
+  const currentTier = st?.tierLevel ?? 0;
+  const seats = seatDraft !== '' ? seatDraft : String(st?.packSeats || 1);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {err && <div className="error">{err}</div>}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table className="grid" style={{ margin: 0 }}>
-          <thead>
-            <tr>
-              <th>Module</th>
-              <th style={{ textAlign: 'right' }}>Prix /siège/mois</th>
-              <th style={{ textAlign: 'right' }}>Jetons</th>
-              <th style={{ width: 200 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {(catalog.data ?? []).map((m) => {
-              const sub = subMap.get(m.code);
-              const draftKey = m.code;
-              const draftValue = seatDraft[draftKey] ?? String(sub?.seatsPurchased ?? (m.code === 'core' ? 1 : 1));
-              const onDevis = m.priceMonthly === null;
-              return (
-                <tr key={m.code}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>
-                      {m.label}
-                      {m.isAddon && <span className="badge info" style={{ marginLeft: 8 }}>add-on</span>}
-                      {sub?.active && <Check size={13} style={{ marginLeft: 8, color: 'var(--accent)', verticalAlign: 'middle' }} />}
-                    </div>
-                    {m.description && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{m.description}</div>}
-                  </td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {m.priceMonthly === 0 ? 'Inclus' : onDevis ? 'Sur devis' : euro(m.priceMonthly)}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {sub ? `${sub.seatsAssigned}/${sub.seatsPurchased}` : '—'}
-                  </td>
-                  <td>
-                    {onDevis ? (
-                      <span className="muted" style={{ fontSize: 11 }}>Nous contacter</span>
-                    ) : (
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
-                        <input
-                          type="number"
-                          min={0}
-                          value={draftValue}
-                          onChange={(e) => setSeatDraft({ ...seatDraft, [draftKey]: e.target.value })}
-                          style={{ width: 56, textAlign: 'right' }}
-                          aria-label={`Jetons ${m.label}`}
-                        />
-                        <button
-                          className="btn btn-secondary"
-                          disabled={saveModule.isPending}
-                          onClick={() => {
-                            setErr(null);
-                            const seats = Number(draftValue);
-                            if (!Number.isInteger(seats) || seats < 0) { setErr('Nombre de jetons invalide'); return; }
-                            saveModule.mutate({ moduleCode: m.code, seats });
-                          }}
-                        >
-                          {sub?.active ? 'Ajuster' : 'Souscrire'}
-                        </button>
-                      </div>
+      {/* Palier actuel */}
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Votre formule</h2>
+        {st?.packCode ? (
+          <p style={{ marginTop: 0 }}>
+            <strong>{st.packLabel}</strong>{' '}
+            <span className="muted">· {st.packSeats} jeton{st.packSeats > 1 ? 's' : ''}</span>
+          </p>
+        ) : (
+          <p className="muted" style={{ marginTop: 0 }}>
+            Aucun palier souscrit. Choisissez-en un ci-dessous.
+          </p>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          {(packs.data ?? []).map((p) => {
+            const current = p.code === st?.packCode;
+            const included = p.modules.filter((c) => c !== 'core');
+            return (
+              <div key={p.code} style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8,
+                border: `1px solid ${current ? 'var(--accent)' : 'var(--border)'}`,
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>
+                    {p.label}
+                    {current && <span className="badge success" style={{ marginLeft: 8 }}>votre formule</span>}
+                  </div>
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    Socle inclus{included.length ? ' + ' : ''}
+                    {included.map((c) => moduleLabels.get(c) ?? c).join(' + ')}
+                  </div>
+                </div>
+                <div style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{euro(p.priceMonthly)}<span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> /siège</span></div>
+                <button
+                  className={current ? 'btn btn-secondary' : 'btn'}
+                  disabled={changePack.isPending}
+                  onClick={() => changePack.mutate({ packCode: p.code, seats: Math.max(1, Number(seats) || 1) })}
+                >
+                  {current ? 'Ajuster' : p.tierLevel > currentTier ? 'Passer à ce palier' : 'Redescendre'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+          <label>Nombre de jetons du palier</label>
+          <input
+            type="number" min={1} value={seats}
+            aria-label="Jetons du palier"
+            onChange={(e) => setSeatDraft(e.target.value)}
+            style={{ width: 90, textAlign: 'right' }}
+          />
+        </div>
+      </div>
+
+      {/* Options à la carte */}
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Options</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Les options se souscrivent par-dessus votre formule. Certaines nécessitent un palier minimum.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {(addons.data ?? []).map((a) => {
+            const requiredPack = (packs.data ?? []).find((p) => p.tierLevel === a.minTierLevel);
+            const draft = addonDraft[a.code] ?? String(a.seats || 1);
+            const onDevis = a.priceMonthly === null;
+            return (
+              <div key={a.code} style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8,
+                border: `1px solid ${a.seats > 0 ? 'var(--accent)' : 'var(--border)'}`,
+                opacity: a.eligible ? 1 : 0.55,
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>
+                    {a.label}
+                    {a.seats > 0 && <span className="badge success" style={{ marginLeft: 8 }}>souscrite</span>}
+                  </div>
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    {a.eligible
+                      ? onDevis ? 'Sur devis' : `${euro(a.priceMonthly)} /siège/mois`
+                      : `Nécessite au minimum le palier ${requiredPack?.label ?? a.minTierLevel}`}
+                  </div>
+                </div>
+                {a.eligible && !onDevis && (
+                  <>
+                    <input
+                      type="number" min={0} value={draft}
+                      aria-label={`Jetons ${a.label}`}
+                      onChange={(e) => setAddonDraft({ ...addonDraft, [a.code]: e.target.value })}
+                      style={{ width: 56, textAlign: 'right' }}
+                    />
+                    <button
+                      className="btn btn-secondary"
+                      disabled={changeAddon.isPending}
+                      onClick={() => changeAddon.mutate({ moduleCode: a.code, seats: Math.max(0, Number(draft) || 0) })}
+                    >
+                      {a.seats > 0 ? 'Ajuster' : 'Souscrire'}
+                    </button>
+                    {a.seats > 0 && (
+                      <button
+                        className="btn-ghost"
+                        title="Retirer l’option"
+                        disabled={changeAddon.isPending}
+                        onClick={() => changeAddon.mutate({ moduleCode: a.code, seats: 0 })}
+                      >
+                        Retirer
+                      </button>
                     )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </>
+                )}
+                {a.eligible && onDevis && <span className="muted" style={{ fontSize: 11 }}>Nous contacter</span>}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <SeatAssignments />
