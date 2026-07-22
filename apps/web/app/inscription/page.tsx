@@ -42,6 +42,12 @@ export default function InscriptionPage() {
   // moduleCode -> seats (0 / undefined = not selected)
   const [seats, setSeats] = useState<Record<string, number>>({});
 
+  // Formule : engagement (mensuel sans engagement / annuel 12 mois) et rythme de facturation.
+  const [billingTerm, setBillingTerm] = useState<'monthly' | 'annual'>('monthly');
+  const [billingInterval, setBillingInterval] = useState<'monthly' | 'yearly'>('monthly');
+  const [promoCode, setPromoCode] = useState('');
+  const [annualDiscountPct, setAnnualDiscountPct] = useState(10);
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -50,6 +56,9 @@ export default function InscriptionPage() {
     apiFetch<CatalogModule[]>('/public/catalog/modules')
       .then(setModules)
       .catch(() => setModules([]));
+    apiFetch<{ annualDiscountPct: number }>('/public/catalog/pricing')
+      .then((p) => setAnnualDiscountPct(p.annualDiscountPct))
+      .catch(() => undefined);
   }, []);
 
   const billableModules = useMemo(
@@ -66,6 +75,22 @@ export default function InscriptionPage() {
     () =>
       selected.reduce((sum, m) => sum + (m.priceMonthly ?? 0) * (seats[m.code] ?? 0), 0),
     [selected, seats],
+  );
+
+  /** Mensuel après remise d'engagement (le code promo est validé/appliqué côté serveur). */
+  const monthlyAfterTerm = useMemo(() => {
+    const pct = billingTerm === 'annual' ? annualDiscountPct : 0;
+    return Math.round(monthlyTotal * (1 - pct / 100) * 100) / 100;
+  }, [monthlyTotal, billingTerm, annualDiscountPct]);
+
+  const amountPerInvoice = useMemo(
+    () => (billingInterval === 'yearly' ? Math.round(monthlyAfterTerm * 12 * 100) / 100 : monthlyAfterTerm),
+    [monthlyAfterTerm, billingInterval],
+  );
+
+  const annualSavings = useMemo(
+    () => Math.round((monthlyTotal - monthlyAfterTerm) * 12 * 100) / 100,
+    [monthlyTotal, monthlyAfterTerm],
   );
 
   function chooseDoor(d: Door) {
@@ -96,6 +121,9 @@ export default function InscriptionPage() {
               password,
               mode: 'direct' as const,
               modules: selected.map((m) => ({ moduleCode: m.code, seats: seats[m.code] })),
+              billingTerm,
+              billingInterval,
+              promoCode: promoCode.trim() || null,
             };
       const res = await apiFetch<RegisterResult>('/auth/register', { method: 'POST', body });
       setSession(res.accessToken, email, res.tenantSlug);
@@ -231,6 +259,55 @@ export default function InscriptionPage() {
                     Total : {euro(monthlyTotal)} <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>/mois HT</span>
                   </div>
                 )}
+
+                {/* Formule d'engagement */}
+                <div className="label" style={{ marginTop: 14, marginBottom: 6 }}>Formule</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <FormuleCard
+                    selected={billingTerm === 'monthly'}
+                    title="Sans engagement"
+                    detail="Mensuel, résiliable à tout moment"
+                    price={monthlyTotal > 0 ? `${euro(monthlyTotal)} /mois` : ''}
+                    onClick={() => { setBillingTerm('monthly'); setBillingInterval('monthly'); }}
+                  />
+                  <FormuleCard
+                    selected={billingTerm === 'annual'}
+                    title={`Engagement 12 mois — ${annualDiscountPct} % de remise`}
+                    detail={
+                      monthlyTotal > 0
+                        ? `Économisez ${euro(Math.round(monthlyTotal * (annualDiscountPct / 100) * 12 * 100) / 100)} par an`
+                        : 'Reconduction tacite au mois le mois à l’échéance'
+                    }
+                    price={monthlyTotal > 0 ? `${euro(Math.round(monthlyTotal * (1 - annualDiscountPct / 100) * 100) / 100)} /mois` : ''}
+                    onClick={() => setBillingTerm('annual')}
+                    accent
+                  />
+                </div>
+
+                {billingTerm === 'annual' && (
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <ChoicePill
+                      selected={billingInterval === 'monthly'}
+                      label="Payer mensuellement"
+                      onClick={() => setBillingInterval('monthly')}
+                    />
+                    <ChoicePill
+                      selected={billingInterval === 'yearly'}
+                      label="Payer en une fois"
+                      onClick={() => setBillingInterval('yearly')}
+                    />
+                  </div>
+                )}
+
+                <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+                  <label>Code promo (optionnel)</label>
+                  <input
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                    placeholder="CODE"
+                    style={{ width: 160 }}
+                  />
+                </div>
               </div>
             )}
 
@@ -263,8 +340,30 @@ export default function InscriptionPage() {
                   </tr>
                 ))}
                 <tr>
-                  <td style={{ fontWeight: 700 }}>Total mensuel HT</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(monthlyTotal)}</td>
+                  <td>Sous-total mensuel HT</td>
+                  <td style={{ textAlign: 'right' }}>{euro(monthlyTotal)}</td>
+                </tr>
+                {billingTerm === 'annual' && (
+                  <tr>
+                    <td>Remise engagement 12 mois ({annualDiscountPct} %)</td>
+                    <td style={{ textAlign: 'right', color: 'var(--accent)' }}>
+                      −{euro(Math.round((monthlyTotal - monthlyAfterTerm) * 100) / 100)} /mois
+                    </td>
+                  </tr>
+                )}
+                {promoCode.trim() && (
+                  <tr>
+                    <td className="muted">Code promo « {promoCode.trim()} »</td>
+                    <td className="muted" style={{ textAlign: 'right', fontSize: 12 }}>
+                      validé au paiement
+                    </td>
+                  </tr>
+                )}
+                <tr>
+                  <td style={{ fontWeight: 700 }}>
+                    {billingInterval === 'yearly' ? 'Total annuel HT' : 'Total mensuel HT'}
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(amountPerInvoice)}</td>
                 </tr>
               </tbody>
             </table>
@@ -281,8 +380,16 @@ export default function InscriptionPage() {
               </p>
             </div>
 
+            <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>
+              {billingTerm === 'annual'
+                ? `Engagement de 12 mois, puis reconduction tacite au mois le mois. Économie : ${euro(annualSavings)} sur l’année.`
+                : 'Sans engagement, reconduction tacite chaque mois. Résiliable à tout moment.'}
+            </p>
+
             <button className="btn" onClick={submitRegister} disabled={loading} style={{ width: '100%' }}>
-              {loading ? 'Traitement…' : `Payer ${euro(monthlyTotal)} /mois et démarrer`}
+              {loading
+                ? 'Traitement…'
+                : `Payer ${euro(amountPerInvoice)} ${billingInterval === 'yearly' ? '/an' : '/mois'} et démarrer`}
             </button>
           </div>
         )}
@@ -292,6 +399,61 @@ export default function InscriptionPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+/* ─────────── sélecteurs de formule ─────────── */
+function FormuleCard({
+  selected, title, detail, price, onClick, accent,
+}: {
+  selected: boolean; title: string; detail: string; price: string; onClick: () => void; accent?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%',
+        padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: 'transparent',
+        border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+        boxShadow: selected ? '0 0 0 1px var(--accent) inset' : 'none',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+          border: `2px solid ${selected ? 'var(--accent)' : 'var(--border-strong, #cbd5e1)'}`,
+          background: selected ? 'var(--accent)' : 'transparent',
+        }}
+      />
+      <span style={{ flex: 1 }}>
+        <span style={{ display: 'block', fontWeight: 600, fontSize: 13 }}>
+          {title}
+          {accent && <span className="badge success" style={{ marginLeft: 6 }}>économique</span>}
+        </span>
+        <span className="muted" style={{ fontSize: 11 }}>{detail}</span>
+      </span>
+      {price && <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{price}</span>}
+    </button>
+  );
+}
+
+function ChoicePill({ selected, label, onClick }: { selected: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1, padding: '7px 10px', fontSize: 12, borderRadius: 8, cursor: 'pointer',
+        border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+        background: selected ? 'var(--accent)' : 'transparent',
+        color: selected ? '#fff' : 'inherit',
+        fontWeight: selected ? 600 : 400,
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

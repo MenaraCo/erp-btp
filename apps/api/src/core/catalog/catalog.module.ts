@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogService } from './catalog.service';
 import { CatalogController } from './catalog.controller';
 import { PublicCatalogController } from './public-catalog.controller';
+import { PricingModule } from '../pricing/pricing.module';
 import { ModuleEntity } from './entities/module.entity';
 import { CapabilityEntity } from './entities/capability.entity';
 import { ModuleCapabilityEntity } from './entities/module-capability.entity';
@@ -13,6 +14,7 @@ import { QuotaDefinitionEntity } from './entities/quota-definition.entity';
 /** Global commercial catalogue (modules, capabilities, packs, quotas) — read access. */
 @Module({
   imports: [
+    PricingModule,
     TypeOrmModule.forFeature([
       ModuleEntity,
       CapabilityEntity,

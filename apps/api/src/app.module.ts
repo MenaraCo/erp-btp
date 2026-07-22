@@ -65,6 +65,7 @@ export class AppModule implements NestModule {
         'auth/register',
         'public/catalog/modules',
         'public/catalog/packs',
+        'public/catalog/pricing',
         'public/company-search',
       )
       .forRoutes('*');

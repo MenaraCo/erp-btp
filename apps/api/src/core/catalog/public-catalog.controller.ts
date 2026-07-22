@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { CatalogService } from './catalog.service';
+import { PricingService } from '../pricing/pricing.service';
 
 /**
  * Public commercial catalogue for the sign-up page (cahier §3.3) — no auth, no tenant. Serves the
@@ -9,7 +10,10 @@ import { CatalogService } from './catalog.service';
  */
 @Controller('public/catalog')
 export class PublicCatalogController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(
+    private readonly catalog: CatalogService,
+    private readonly pricing: PricingService,
+  ) {}
 
   @Get('modules')
   modules() {
@@ -19,5 +23,11 @@ export class PublicCatalogController {
   @Get('packs')
   packs() {
     return this.catalog.getCatalogPacks();
+  }
+
+  /** Conditions tarifaires publiques (remise d'engagement annuel), pour la page d'inscription. */
+  @Get('pricing')
+  async pricing_() {
+    return { annualDiscountPct: await this.pricing.getAnnualDiscountPct() };
   }
 }
