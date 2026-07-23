@@ -14,6 +14,7 @@ import { CompanyLookupModule } from './core/company-lookup/company-lookup.module
 import { EditorModule } from './core/editor/editor.module';
 import { RbacModule } from './core/rbac/rbac.module';
 import { AuthModule } from './core/auth/auth.module';
+import { UsersModule } from './core/users/users.module';
 import { DirectoryModule } from './modules/directory/directory.module';
 import { EstimatingModule } from './modules/estimating/estimating.module';
 import { InvoicingModule } from './modules/invoicing/invoicing.module';
@@ -42,6 +43,7 @@ import { HealthModule } from './health/health.module';
     EditorModule,
     RbacModule,
     AuthModule,
+    UsersModule,
     DirectoryModule,
     EstimatingModule,
     InvoicingModule,

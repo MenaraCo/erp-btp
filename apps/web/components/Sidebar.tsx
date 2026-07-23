@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, CalendarDays, FolderOpen, FileText, BookOpen,
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
-  CreditCard, Gauge, ChevronsLeft, ChevronsRight,
+  CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog,
 } from 'lucide-react';
 
 const STORAGE_KEY = 'erp-sidebar-collapsed';
@@ -32,6 +32,7 @@ const NAV: NavItem[] = [
   { href: '/chantiers', label: 'Chantiers', section: 'Exécution' },
   { href: '/invoicing', label: 'Facturation', section: 'Exécution' },
   { href: '/params', label: 'Paramètres', section: 'Administration' },
+  { href: '/users', label: 'Utilisateurs', section: 'Administration' },
   { href: '/abonnement', label: 'Abonnement', section: 'Administration' },
 ];
 
@@ -49,6 +50,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/chantiers': Building2,
   '/invoicing': Receipt,
   '/params': Settings,
+  '/users': UserCog,
   '/abonnement': CreditCard,
 };
 

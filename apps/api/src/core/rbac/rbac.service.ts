@@ -38,6 +38,53 @@ export class RbacService {
     });
   }
 
+  /** All tenant roles with their granted permission keys (for the admin console). */
+  listRoles(
+    tenantId: string,
+  ): Promise<Array<{ code: string; label: string; isSystem: boolean; permissions: string[] }>> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT r.code, r.label, r.is_system,
+                COALESCE(ARRAY_AGG(p.key ORDER BY p.key) FILTER (WHERE p.key IS NOT NULL), '{}') AS permissions
+           FROM role r
+           LEFT JOIN role_permission rp ON rp.role_id = r.id
+           LEFT JOIN permission p ON p.id = rp.permission_id
+          GROUP BY r.id, r.code, r.label, r.is_system
+          ORDER BY r.is_system DESC, r.label`,
+      );
+      return rows.map((r: { code: string; label: string; is_system: boolean; permissions: string[] }) => ({
+        code: r.code,
+        label: r.label,
+        isSystem: r.is_system,
+        permissions: r.permissions ?? [],
+      }));
+    });
+  }
+
+  /** Role codes currently held by a user. */
+  listUserRoles(tenantId: string, userId: string): Promise<string[]> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT r.code FROM user_role ur JOIN role r ON r.id = ur.role_id
+          WHERE ur.user_id = $1 ORDER BY r.code`,
+        [userId],
+      );
+      return rows.map((r: { code: string }) => r.code);
+    });
+  }
+
+  /** Removes a role (by code) from a user. */
+  revokeRole(tenantId: string, userId: string, roleCode: string): Promise<void> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await em.query(
+        `DELETE FROM user_role ur
+          USING role r
+          WHERE ur.role_id = r.id AND ur.user_id = $1 AND r.code = $2`,
+        [userId, roleCode],
+      );
+    });
+  }
+
   /** Assigns a role (by code) to a user. Roles are cumulable. */
   assignRole(tenantId: string, userId: string, roleCode: string): Promise<void> {
     return runInTenant(this.dataSource, tenantId, async (em) => {
