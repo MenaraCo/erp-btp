@@ -12,6 +12,7 @@ import { downloadXlsx } from '@/lib/xlsx';
 import { useWorkspace } from '@/lib/workspace';
 import { Montage, MontageLine } from './Montage';
 import { LibraryDrawer } from './LibraryDrawer';
+import { WorkflowBar } from './WorkflowBar';
 
 const round = (v: number, n: number) => Number((Number(v) || 0).toFixed(n));
 
@@ -463,6 +464,17 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
               </span>
             )}
           </div>
+
+          {!isPanel2 && (
+            <WorkflowBar
+              devisId={devisId}
+              status={d.status}
+              onChanged={() => {
+                qc.invalidateQueries({ queryKey: ['devis', devisId] });
+                qc.invalidateQueries({ queryKey: ['affaire', affaireId] });
+              }}
+            />
+          )}
 
           {!isLatest && (
             <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, padding: '8px 14px', marginBottom: 8, fontSize: 13, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
