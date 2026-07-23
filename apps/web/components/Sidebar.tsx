@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, CalendarDays, FolderOpen, FileText, BookOpen,
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
-  CreditCard, ChevronsLeft, ChevronsRight,
+  CreditCard, Gauge, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 
 const STORAGE_KEY = 'erp-sidebar-collapsed';
@@ -28,6 +28,7 @@ const NAV: NavItem[] = [
   { href: '/estimating/bibliotheque/ressources', label: 'Ressources', section: 'Études de prix', level: 1 },
   { href: '/clients', label: 'Clients', section: 'Référentiel' },
   { href: '/suppliers', label: 'Fournisseurs', section: 'Référentiel' },
+  { href: '/direction', label: 'Direction', section: 'Exécution' },
   { href: '/chantiers', label: 'Chantiers', section: 'Exécution' },
   { href: '/invoicing', label: 'Facturation', section: 'Exécution' },
   { href: '/params', label: 'Paramètres', section: 'Administration' },
@@ -44,6 +45,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/estimating/bibliotheque/ressources': Package,
   '/clients': Users,
   '/suppliers': Truck,
+  '/direction': Gauge,
   '/chantiers': Building2,
   '/invoicing': Receipt,
   '/params': Settings,

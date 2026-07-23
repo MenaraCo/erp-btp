@@ -5,6 +5,7 @@ import { FinancialConfigService, FormulaSetInput } from './financial-config.serv
 import { AdvancementInput, AdvancementService } from './advancement.service';
 import { AnalyticalResultsService } from './analytical-results.service';
 import { FinancialForecastService } from './financial-forecast.service';
+import { PortfolioService } from './portfolio.service';
 
 @Controller()
 export class FinancialController {
@@ -13,7 +14,16 @@ export class FinancialController {
     private readonly advancement: AdvancementService,
     private readonly analyticalResults: AnalyticalResultsService,
     private readonly forecast: FinancialForecastService,
+    private readonly portfolio: PortfolioService,
   ) {}
+
+  /** Vue Direction : portefeuille de tous les chantiers, chantiers à risque en tête (§5.8). */
+  @Get('financial/portfolio')
+  @RequiresCapability('financial.portfolio')
+  @RequiresPermission('financial.read')
+  getPortfolio() {
+    return this.portfolio.getPortfolio();
+  }
 
   @Get('chantiers/:chantierId/analytical-results')
   @RequiresCapability('financial.dashboard')
