@@ -101,4 +101,12 @@ export class PurchasingController {
   summary(@Param('chantierId') chantierId: string) {
     return this.purchasing.summary(chantierId);
   }
+
+  /** Chaîne des achats du chantier : demandes de prix et commandes détaillées (écran de suivi). */
+  @Get('chantiers/:chantierId/purchasing-chain')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  chain(@Param('chantierId') chantierId: string) {
+    return this.purchasing.listChain(chantierId);
+  }
 }

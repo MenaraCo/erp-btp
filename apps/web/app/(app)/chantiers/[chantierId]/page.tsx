@@ -136,7 +136,13 @@ export default function ChantierDetailPage() {
           ← Chantiers
         </Link>
       </p>
-      <h1 style={{ marginBottom: 4 }}>Chantier {chantier.data?.code ?? ''}</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <h1 style={{ marginBottom: 4 }}>Chantier {chantier.data?.code ?? ''}</h1>
+        <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+          <Link href={`/chantiers/${chantierId}/pointages`} className="btn btn-secondary">Pointages</Link>
+          <Link href={`/chantiers/${chantierId}/achats`} className="btn btn-secondary">Achats</Link>
+        </div>
+      </div>
 
       {results.data && (
         <div className="card-grid" style={{ marginTop: 12 }}>

@@ -240,6 +240,81 @@ export class PurchasingService {
     });
   }
 
+  /**
+   * Chaîne des achats d'un chantier, pour l'écran de suivi : demandes de prix et commandes avec
+   * leurs lignes, leur statut, leurs bons de livraison et leurs factures fournisseur.
+   * L'engagé n'est compté qu'à partir d'une commande validée (cahier §5.8).
+   */
+  listChain(chantierId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertChantier(em, chantierId);
+
+      const requests = await em.query(
+        `SELECT r.id, r.code, r.status, s.name AS supplier_name
+           FROM purchase_request r
+           LEFT JOIN supplier s ON s.id = r.supplier_id
+          WHERE r.chantier_id = $1
+          ORDER BY r.created_at DESC`,
+        [chantierId],
+      );
+
+      const orders = await em.query(
+        `SELECT o.id, o.code, o.status, s.name AS supplier_name,
+                COALESCE(SUM(l.amount_ht), 0)::numeric(16,2) AS total_ht,
+                COUNT(l.id)::int AS lines_count
+           FROM purchase_order o
+           LEFT JOIN supplier s ON s.id = o.supplier_id
+           LEFT JOIN purchase_order_line l ON l.order_id = o.id
+          WHERE o.chantier_id = $1
+          GROUP BY o.id, o.code, o.status, s.name
+          ORDER BY o.created_at DESC`,
+        [chantierId],
+      );
+
+      const lines = await em.query(
+        `SELECT l.id, l.order_id, l.nature, l.designation, l.quantity, l.unit_price, l.amount_ht,
+                c.code AS code_analytique
+           FROM purchase_order_line l
+           JOIN purchase_order o ON o.id = l.order_id
+           LEFT JOIN analytical_code c ON c.id = l.code_analytique_id
+          WHERE o.chantier_id = $1
+          ORDER BY l.created_at`,
+        [chantierId],
+      );
+
+      const deliveries = await em.query(
+        `SELECT d.id, d.order_id, d.code
+           FROM delivery_note d
+           JOIN purchase_order o ON o.id = d.order_id
+          WHERE o.chantier_id = $1
+          ORDER BY d.created_at`,
+        [chantierId],
+      );
+
+      const invoices = await em.query(
+        `SELECT i.id, i.order_id, i.code, i.nature, i.amount_ht, i.invoice_date
+           FROM supplier_invoice i
+          WHERE i.chantier_id = $1
+          ORDER BY i.created_at`,
+        [chantierId],
+      );
+
+      const byOrder = <T extends { order_id: string }>(rows: T[], id: string) =>
+        rows.filter((r) => r.order_id === id);
+
+      return {
+        requests,
+        orders: orders.map((o: { id: string }) => ({
+          ...o,
+          lines: byOrder(lines, o.id),
+          deliveries: byOrder(deliveries, o.id),
+          invoices: byOrder(invoices, o.id),
+        })),
+      };
+    });
+  }
+
   private async assertChantier(em: EntityManager, chantierId: string): Promise<void> {
     const c = await em.query(`SELECT id FROM chantier WHERE id = $1`, [chantierId]);
     if (c.length === 0) {
