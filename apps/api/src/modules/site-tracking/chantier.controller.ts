@@ -74,11 +74,25 @@ export class ChantierController {
     return this.chantiers.setComponentQuantity(componentId, body.quantiteObjectif);
   }
 
+  @Post('marches/:marcheId/etude/validate')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  validateEtude(@Param('marcheId') marcheId: string) {
+    return this.chantiers.validateEtude(marcheId);
+  }
+
   @Post('marches/:marcheId/contre-etude/validate')
   @RequiresCapability('site_tracking.budget')
   @RequiresPermission('site_tracking.write')
   validate(@Param('marcheId') marcheId: string) {
     return this.chantiers.validateContreEtude(marcheId);
+  }
+
+  @Get('marches/:marcheId/change-log')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  changeLog(@Param('marcheId') marcheId: string) {
+    return this.chantiers.listChangeLog(marcheId);
   }
 
   // --- Budget prévisionnel ---

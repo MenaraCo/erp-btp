@@ -44,7 +44,8 @@ describe('Prévisionnel de chantier B.3 — moteur d’indicateurs branché (§5
     }
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;
     chantierId = acc.chantier.id;
-    // contre-étude validée → prévisionnel initialisé = objectif (800 labor)
+    // budget d'étude validé → contre-étude, puis contre-étude validée → prévisionnel = objectif
+    await as('post', `/marches/${acc.marche.id}/etude/validate`).expect(201);
     await as('post', `/marches/${acc.marche.id}/contre-etude/validate`).expect(201);
     // avancement global 50 %
     await as('post', `/chantiers/${chantierId}/advancement`).send({ pct: '0.5' }).expect(201);

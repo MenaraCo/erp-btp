@@ -78,11 +78,28 @@ export class ChantierService {
       await em.query(
         `INSERT INTO marche
            (tenant_id, affaire_id, devis_version_id, chantier_id, code, name, total_ht,
-            execution_form, contre_etude_status, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'by_ouvrage','draft','active') RETURNING *`,
+            execution_form, contre_etude_status, execution_phase, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'by_ouvrage','draft','etude','active') RETURNING *`,
         [tenantId, affaire.id, versionId, chantierId, marcheCode, marcheName, venteTotal],
       )
     )[0];
+  }
+
+  /** Journalise une modification/validation d'exécution (horodaté, avec l'auteur). Cahier §5.5. */
+  private logChange(
+    em: EntityManager,
+    tenantId: string,
+    marcheId: string,
+    action: string,
+    detail: Record<string, unknown>,
+    executionLineId: string | null = null,
+  ): Promise<unknown> {
+    return em.query(
+      `INSERT INTO execution_change_log
+         (tenant_id, marche_id, execution_line_id, actor_user_id, action, detail)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [tenantId, marcheId, executionLineId, this.context.getUserId() ?? null, action, JSON.stringify(detail)],
+    );
   }
 
   /**
@@ -305,13 +322,38 @@ export class ChantierService {
     }
   }
 
-  /** The contre-étude is per-marché (cahier §5.5): a marché's étude d'exécution freezes on its own. */
+  /**
+   * L'édition n'est permise qu'en phase `contre_etude` (cahier §5.5) : le budget d'étude doit
+   * d'abord être validé, et une fois la contre-étude validée le marché passe en exécution (figé).
+   */
   private async assertMarcheEditable(em: EntityManager, marcheId: string): Promise<void> {
-    const m = await em.query(`SELECT contre_etude_status FROM marche WHERE id = $1`, [marcheId]);
+    const m = await em.query(`SELECT execution_phase FROM marche WHERE id = $1`, [marcheId]);
     if (m.length === 0) throw new NotFoundException(`Unknown marché "${marcheId}"`);
-    if (m[0].contre_etude_status === 'validated') {
-      throw new ConflictException('Contre-étude is validated (frozen).');
+    if (m[0].execution_phase === 'etude') {
+      throw new ConflictException('Validez d’abord le budget d’étude pour passer en contre-étude.');
     }
+    if (m[0].execution_phase === 'execution') {
+      throw new ConflictException('La contre-étude est validée : le marché est en exécution (figé).');
+    }
+  }
+
+  /** Valide le budget d'étude d'un marché : passe de la phase `etude` à `contre_etude` (horodaté). */
+  validateEtude(marcheId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const m = await em.query(`SELECT chantier_id, execution_phase FROM marche WHERE id = $1`, [marcheId]);
+      if (m.length === 0) throw new NotFoundException(`Unknown marché "${marcheId}"`);
+      if (m[0].execution_phase !== 'etude') {
+        throw new ConflictException('Le budget d’étude est déjà validé.');
+      }
+      await em.query(
+        `UPDATE marche SET execution_phase = 'contre_etude', etude_validated_at = now(), updated_at = now()
+          WHERE id = $1`,
+        [marcheId],
+      );
+      await this.logChange(em, tenantId, marcheId, 'validate_etude', {});
+      return this.getChantierInTx(em, m[0].chantier_id);
+    });
   }
 
   /** Renegotiate a resource unit price (contre-étude) and recompute the marché's objectif budget. */
@@ -330,6 +372,9 @@ export class ChantierService {
         [String(unitCostObjectif), nomenclatureResourceId],
       );
       await this.recompute(em, tenantId, chantierId, false, marcheId);
+      await this.logChange(em, tenantId, marcheId, 'renegotiate_resource', {
+        nomenclatureResourceId, unitCostObjectif: String(unitCostObjectif),
+      });
       return this.getChantierInTx(em, chantierId);
     });
   }
@@ -351,18 +396,32 @@ export class ChantierService {
         [String(quantiteObjectif), componentId],
       );
       await this.recompute(em, tenantId, chantierId, false, marcheId);
+      await this.logChange(em, tenantId, marcheId, 'set_component_quantity', {
+        componentId, quantiteObjectif: String(quantiteObjectif),
+      });
       return this.getChantierInTx(em, chantierId);
     });
   }
 
-  /** Validate a marché's contre-étude: freeze its objectif as the control "budget initial". */
+  /**
+   * Valide la contre-étude d'un marché : passe de `contre_etude` à `execution`, fige l'objectif
+   * comme « budget initial » du contrôle de gestion et initialise le prévisionnel (horodaté).
+   */
   validateContreEtude(marcheId: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const m = await em.query(`SELECT chantier_id FROM marche WHERE id = $1`, [marcheId]);
+      const m = await em.query(`SELECT chantier_id, execution_phase FROM marche WHERE id = $1`, [marcheId]);
       if (m.length === 0) throw new NotFoundException(`Unknown marché "${marcheId}"`);
+      if (m[0].execution_phase === 'etude') {
+        throw new ConflictException('Validez d’abord le budget d’étude.');
+      }
+      if (m[0].execution_phase === 'execution') {
+        throw new ConflictException('La contre-étude est déjà validée.');
+      }
       await em.query(
-        `UPDATE marche SET contre_etude_status = 'validated', updated_at = now() WHERE id = $1`,
+        `UPDATE marche SET execution_phase = 'execution', contre_etude_status = 'validated',
+                contre_etude_validated_at = now(), updated_at = now()
+          WHERE id = $1`,
         [marcheId],
       );
       // Initialise the prévisionnel budget from the validated objectif (this marché's lines).
@@ -372,6 +431,7 @@ export class ChantierService {
           WHERE l.id = b.execution_line_id AND l.marche_id = $1`,
         [marcheId],
       );
+      await this.logChange(em, tenantId, marcheId, 'validate_contre_etude', {});
       return this.getChantierInTx(em, m[0].chantier_id);
     });
   }
@@ -381,7 +441,7 @@ export class ChantierService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `SELECT l.chantier_id, m.contre_etude_status
+        `SELECT l.chantier_id, m.execution_phase
            FROM execution_line l JOIN marche m ON m.id = l.marche_id
           WHERE l.id = $1`,
         [lineId],
@@ -389,7 +449,7 @@ export class ChantierService {
       if (rows.length === 0) {
         throw new NotFoundException(`Unknown execution line "${lineId}"`);
       }
-      if (rows[0].contre_etude_status !== 'validated') {
+      if (rows[0].execution_phase !== 'execution') {
         throw new ConflictException('Validate the contre-étude before adjusting the prévisionnel.');
       }
       const upd = returningRows<{ id: string }>(
@@ -435,7 +495,8 @@ export class ChantierService {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.getChantierInTx(em, chantierId); // 404 if unknown
       return em.query(
-        `SELECT id, code, name, total_ht, contre_etude_status, status, affaire_id
+        `SELECT id, code, name, total_ht, contre_etude_status, execution_phase,
+                etude_validated_at, contre_etude_validated_at, status, affaire_id
            FROM marche WHERE chantier_id = $1 ORDER BY created_at ASC`,
         [chantierId],
       );
@@ -474,6 +535,18 @@ export class ChantierService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
       em.query(`SELECT * FROM nomenclature_resource WHERE chantier_id = $1 ORDER BY code ASC`, [chantierId]),
+    );
+  }
+
+  /** Journal horodaté des modifications et validations de phase d'un marché (cahier §5.5). */
+  listChangeLog(marcheId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, (em) =>
+      em.query(
+        `SELECT id, execution_line_id, actor_user_id, action, detail, created_at
+           FROM execution_change_log WHERE marche_id = $1 ORDER BY created_at DESC`,
+        [marcheId],
+      ),
     );
   }
 }

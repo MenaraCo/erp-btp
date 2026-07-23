@@ -47,6 +47,7 @@ describe('Site-tracking 3.6 — résultats analytiques (budget / engagé / réal
     }
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;
     chantierId = acc.chantier.id;
+    await as('post', `/marches/${acc.marche.id}/etude/validate`).expect(201);
     await as('post', `/marches/${acc.marche.id}/contre-etude/validate`).expect(201);
     lineId = (await as('get', `/chantiers/${chantierId}`).expect(200)).body.lines[0].id;
 

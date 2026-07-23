@@ -374,10 +374,14 @@ async function ensureSampleChantier(
   // Forecast inputs (idempotent): validate each marché's contre-étude (initialise le prévisionnel)
   // et enregistre un avancement global, pour que la vue prévisionnelle soit réaliste.
   const marches = await runInTenant(ds, tenantId, (em) =>
-    em.query(`SELECT id, contre_etude_status FROM marche WHERE chantier_id = $1`, [chantierId]),
+    em.query(`SELECT id, execution_phase FROM marche WHERE chantier_id = $1`, [chantierId]),
   );
   for (const m of marches) {
-    if (m.contre_etude_status !== 'validated') {
+    // étude → contre-étude → exécution (chaque validation est horodatée).
+    if (m.execution_phase === 'etude') {
+      await s.chantiers.validateEtude(m.id);
+    }
+    if (m.execution_phase !== 'execution') {
       await s.chantiers.validateContreEtude(m.id);
     }
   }

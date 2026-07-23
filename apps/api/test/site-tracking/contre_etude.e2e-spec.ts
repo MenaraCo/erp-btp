@@ -61,6 +61,8 @@ describe('Site-tracking 3.2 — contre-étude (renégociation PU / quantités, g
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;
     chantierId = acc.chantier.id;
     marcheId = acc.marche.id;
+    // Le suivi démarre en phase `etude` : on valide le budget d'étude pour passer en contre-étude.
+    await as('post', `/marches/${marcheId}/etude/validate`).expect(201);
   });
 
   afterAll(async () => {

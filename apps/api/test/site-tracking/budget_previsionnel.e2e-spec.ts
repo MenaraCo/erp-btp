@@ -66,6 +66,7 @@ describe('Site-tracking 3.3 — budget prévisionnel', () => {
   });
 
   it('initialise le prévisionnel depuis l’objectif à la validation, puis l’ajuste', async () => {
+    await as('post', `/marches/${marcheId}/etude/validate`).expect(201);
     const validated = (await as('post', `/marches/${marcheId}/contre-etude/validate`).expect(201)).body;
     // objectif labor = 2 * 40 * 10 = 800 ; prévisionnel initialisé = 800
     expect(byNature(validated, 'objectif').labor).toBe('800.00');
