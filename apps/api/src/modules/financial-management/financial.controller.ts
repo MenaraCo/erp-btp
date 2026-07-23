@@ -7,6 +7,7 @@ import { AnalyticalResultsService } from './analytical-results.service';
 import { FinancialForecastService } from './financial-forecast.service';
 import { PortfolioService } from './portfolio.service';
 import { MonthlyService } from './monthly.service';
+import { PilotageService } from './pilotage.service';
 
 @Controller()
 export class FinancialController {
@@ -17,7 +18,16 @@ export class FinancialController {
     private readonly forecast: FinancialForecastService,
     private readonly portfolio: PortfolioService,
     private readonly monthly: MonthlyService,
+    private readonly pilotage: PilotageService,
   ) {}
+
+  /** Courbes de pilotage : budget / budget avancé / réalisé+engagé, mois par mois (§5.8). */
+  @Get('chantiers/:chantierId/pilotage')
+  @RequiresCapability('financial.dashboard')
+  @RequiresPermission('financial.read')
+  getPilotage(@Param('chantierId') chantierId: string) {
+    return this.pilotage.getSeries(chantierId);
+  }
 
   /** Gestion mensuelle : flux engagé / réalisé par nature, en 3 colonnes M / M-1 / CUMUL (§5.8). */
   @Get('chantiers/:chantierId/monthly')

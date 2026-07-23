@@ -8,6 +8,7 @@ import { AnalyticalResultsService } from './analytical-results.service';
 import { FinancialForecastService } from './financial-forecast.service';
 import { PortfolioService } from './portfolio.service';
 import { MonthlyService } from './monthly.service';
+import { PilotageService } from './pilotage.service';
 import { FinancialController } from './financial.controller';
 
 /**
@@ -20,6 +21,7 @@ import { FinancialController } from './financial.controller';
   providers: [
     PortfolioService,
     MonthlyService,
+    PilotageService,
     FinancialConfigService,
     AdvancementService,
     AnalyticalResultsService,

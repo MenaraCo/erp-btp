@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
 
 /* ─────────── types ─────────── */
@@ -172,6 +173,91 @@ export default function DirectionPage() {
       <p className="muted" style={{ marginTop: 12, fontSize: 12 }}>
         Cliquez un chantier pour ouvrir son détail. <Link href="/chantiers" className="link">Tous les chantiers →</Link>
       </p>
+
+      <AlertSettings />
+    </div>
+  );
+}
+
+/* ─────────── seuils d'alerte configurables ─────────── */
+interface FormulaSet {
+  eac_method: 'm1' | 'm2';
+  ecart_alert_pct: string;
+  marge_cible_pct: string;
+}
+function AlertSettings() {
+  const { token } = useAuth();
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [ecart, setEcart] = useState<string | null>(null);
+  const [marge, setMarge] = useState<string | null>(null);
+  const [eac, setEac] = useState<'m1' | 'm2' | null>(null);
+
+  const fs = useQuery({
+    queryKey: ['formula-set'],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<FormulaSet>('/financial/formula-set', { token }),
+  });
+
+  const save = useMutation({
+    mutationFn: (body: { ecartAlertPct: number; margeCiblePct: number; eacMethod: 'm1' | 'm2' }) =>
+      apiFetch('/financial/formula-set', { method: 'PUT', token, body }),
+    onSuccess: () => {
+      setErr(null); setSaved(true);
+      qc.invalidateQueries({ queryKey: ['formula-set'] });
+      qc.invalidateQueries({ queryKey: ['portfolio'] });
+      setTimeout(() => setSaved(false), 2500);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
+
+  if (fs.isError || !fs.data) return null;
+  // Les seuils sont stockés en fraction (-0.05) ; on présente en % (-5).
+  const ecartVal = ecart ?? (Number(fs.data.ecart_alert_pct) * 100).toString();
+  const margeVal = marge ?? (Number(fs.data.marge_cible_pct) * 100).toString();
+  const eacVal = eac ?? fs.data.eac_method;
+
+  return (
+    <div className="card" style={{ marginTop: 20, maxWidth: 640 }}>
+      <h2 style={{ marginTop: 0 }}>Seuils d’alerte du contrôle de gestion</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Paramètres appliqués à tous les chantiers. Modifiables sans redéploiement ; chaque version est conservée.
+      </p>
+      {err && <div className="error">{err}</div>}
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Alerte écart au stade (%)</label>
+          <input type="number" step="0.5" value={ecartVal} onChange={(e) => setEcart(e.target.value)} style={{ width: 100, textAlign: 'right' }} />
+          <span className="muted" style={{ fontSize: 11 }}>négatif = seuil de dérive (ex. −5)</span>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Marge cible (%)</label>
+          <input type="number" step="0.5" value={margeVal} onChange={(e) => setMarge(e.target.value)} style={{ width: 100, textAlign: 'right' }} />
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Méthode EAC</label>
+          <select value={eacVal} onChange={(e) => setEac(e.target.value as 'm1' | 'm2')} style={{ width: 200 }}>
+            <option value="m1">Réalisé + reste à dépenser</option>
+            <option value="m2">Budget / CPI</option>
+          </select>
+        </div>
+        <button
+          className="btn"
+          disabled={save.isPending}
+          onClick={() => {
+            setErr(null);
+            const ecartPct = Number(ecartVal) / 100;
+            const margePct = Number(margeVal) / 100;
+            if (!Number.isFinite(ecartPct) || !Number.isFinite(margePct)) { setErr('Valeurs invalides'); return; }
+            save.mutate({ ecartAlertPct: ecartPct, margeCiblePct: margePct, eacMethod: eacVal });
+          }}
+        >
+          {save.isPending ? 'Enregistrement…' : 'Enregistrer les seuils'}
+        </button>
+        {saved && <span className="badge success">Enregistré</span>}
+      </div>
     </div>
   );
 }
