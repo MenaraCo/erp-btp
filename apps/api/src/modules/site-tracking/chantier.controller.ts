@@ -45,6 +45,13 @@ export class ChantierController {
     return this.chantiers.listNomenclature(chantierId);
   }
 
+  @Get('chantiers/:chantierId/execution-tree')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  executionTree(@Param('chantierId') chantierId: string) {
+    return this.chantiers.executionTree(chantierId);
+  }
+
   // --- Contre-étude ---
 
   @Put('chantiers/:chantierId/nomenclature/:resourceId')

@@ -538,6 +538,135 @@ export class ChantierService {
     );
   }
 
+  /**
+   * Arbre d'exécution d'un chantier (cahier §5.5) : par marché, la MÊME structure que le déboursé
+   * (titre/ouvrage → sous-ouvrages → composants ressources/%), avec le budget étude / objectif /
+   * prévisionnel à chaque ouvrage. C'est la vue pilotée pendant la contre-étude et l'exécution.
+   */
+  executionTree(chantierId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const chantier = await em.query(`SELECT * FROM chantier WHERE id = $1`, [chantierId]);
+      if (chantier.length === 0) throw new NotFoundException(`Unknown chantier "${chantierId}"`);
+
+      const marches = await em.query(
+        `SELECT id, code, name, total_ht, execution_phase, etude_validated_at,
+                contre_etude_validated_at, status
+           FROM marche WHERE chantier_id = $1 ORDER BY created_at ASC`,
+        [chantierId],
+      );
+
+      const lines = await em.query(
+        `SELECT id, marche_id, parent_line_id, type, vendable, code, designation, unit,
+                quantite_etude, quantite_objectif, debourse_unitaire_etude, debourse_unitaire_objectif, sort_order
+           FROM execution_line WHERE chantier_id = $1 ORDER BY sort_order ASC`,
+        [chantierId],
+      );
+      const budgets = await em.query(
+        `SELECT b.execution_line_id, b.nature, b.montant_etude, b.montant_objectif, b.montant_previsionnel
+           FROM execution_line_budget b
+           JOIN execution_line l ON l.id = b.execution_line_id
+          WHERE l.chantier_id = $1`,
+        [chantierId],
+      );
+      const comps = await em.query(
+        `SELECT ec.id, ec.execution_line_id, ec.kind, ec.child_line_id, ec.rate,
+                ec.quantite_etude, ec.quantite_objectif, ec.sort_order,
+                n.id AS nomenclature_id, n.code AS n_code, n.label AS n_label, n.nature AS n_nature,
+                n.unit AS n_unit, n.unit_cost_etude, n.unit_cost_objectif
+           FROM execution_component ec
+           JOIN execution_line el ON el.id = ec.execution_line_id
+           LEFT JOIN nomenclature_resource n ON n.id = ec.nomenclature_resource_id
+          WHERE el.chantier_id = $1 ORDER BY ec.sort_order ASC`,
+        [chantierId],
+      );
+
+      // Index budgets + composants par ligne.
+      const budgetByLine = new Map<string, Array<Record<string, unknown>>>();
+      for (const b of budgets) {
+        const arr = budgetByLine.get(b.execution_line_id) ?? [];
+        arr.push(b);
+        budgetByLine.set(b.execution_line_id, arr);
+      }
+      const compByLine = new Map<string, Array<Record<string, unknown>>>();
+      for (const c of comps) {
+        const arr = compByLine.get(c.execution_line_id) ?? [];
+        arr.push(c);
+        compByLine.set(c.execution_line_id, arr);
+      }
+      const childrenOf = new Map<string | null, Array<Record<string, unknown>>>();
+      for (const l of lines) {
+        const key = l.parent_line_id ?? null;
+        const arr = childrenOf.get(key) ?? [];
+        arr.push(l);
+        childrenOf.set(key, arr);
+      }
+
+      const sum = (rows: Array<Record<string, unknown>>, field: string) =>
+        rows.reduce((acc, r) => acc.plus(new Decimal((r[field] as string) ?? 0)), new Decimal(0)).toFixed(2);
+
+      const buildNode = (l: Record<string, unknown>): Record<string, unknown> => {
+        const lineId = l.id as string;
+        const lineBudgets = budgetByLine.get(lineId) ?? [];
+        const lineComps = (compByLine.get(lineId) ?? []).map((c) => ({
+          id: c.id,
+          kind: c.kind,
+          childLineId: c.child_line_id,
+          rate: c.rate,
+          quantiteEtude: c.quantite_etude,
+          quantiteObjectif: c.quantite_objectif,
+          nomenclature: c.nomenclature_id
+            ? {
+                id: c.nomenclature_id, code: c.n_code, label: c.n_label, nature: c.n_nature,
+                unit: c.n_unit, unitCostEtude: c.unit_cost_etude, unitCostObjectif: c.unit_cost_objectif,
+              }
+            : null,
+        }));
+        return {
+          id: lineId,
+          parentLineId: l.parent_line_id,
+          marcheId: l.marche_id,
+          type: l.type,
+          vendable: l.vendable,
+          code: l.code,
+          designation: l.designation,
+          unit: l.unit,
+          quantiteEtude: l.quantite_etude,
+          quantiteObjectif: l.quantite_objectif,
+          debourseUnitaireEtude: l.debourse_unitaire_etude,
+          debourseUnitaireObjectif: l.debourse_unitaire_objectif,
+          budget: lineBudgets.length
+            ? {
+                etude: sum(lineBudgets, 'montant_etude'),
+                objectif: sum(lineBudgets, 'montant_objectif'),
+                previsionnel: sum(lineBudgets, 'montant_previsionnel'),
+                byNature: lineBudgets.map((b) => ({
+                  nature: b.nature, etude: b.montant_etude,
+                  objectif: b.montant_objectif, previsionnel: b.montant_previsionnel,
+                })),
+              }
+            : null,
+          components: lineComps,
+          children: (childrenOf.get(lineId) ?? []).map(buildNode),
+        };
+      };
+
+      const marcheTree = marches.map((m: Record<string, unknown>) => {
+        const topLines = (childrenOf.get(null) ?? []).filter((l) => l.marche_id === m.id);
+        const nodes = topLines.map(buildNode);
+        const total = (field: string) =>
+          nodes.reduce((acc, n) => acc.plus(new Decimal((n.budget as Record<string, string> | null)?.[field] ?? 0)), new Decimal(0)).toFixed(2);
+        return {
+          ...m,
+          totals: { etude: total('etude'), objectif: total('objectif'), previsionnel: total('previsionnel') },
+          lines: nodes,
+        };
+      });
+
+      return { chantier: chantier[0], marches: marcheTree };
+    });
+  }
+
   /** Journal horodaté des modifications et validations de phase d'un marché (cahier §5.5). */
   listChangeLog(marcheId: string) {
     const tenantId = this.context.requireTenantId();
