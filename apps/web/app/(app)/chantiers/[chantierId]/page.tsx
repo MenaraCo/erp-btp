@@ -141,6 +141,7 @@ export default function ChantierDetailPage() {
         <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
           <Link href={`/chantiers/${chantierId}/pointages`} className="btn btn-secondary">Pointages</Link>
           <Link href={`/chantiers/${chantierId}/achats`} className="btn btn-secondary">Achats</Link>
+          <Link href={`/chantiers/${chantierId}/mensuel`} className="btn btn-secondary">Gestion mensuelle</Link>
         </div>
       </div>
 

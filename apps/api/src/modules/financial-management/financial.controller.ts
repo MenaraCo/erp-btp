@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { FinancialConfigService, FormulaSetInput } from './financial-config.service';
@@ -6,6 +6,7 @@ import { AdvancementInput, AdvancementService } from './advancement.service';
 import { AnalyticalResultsService } from './analytical-results.service';
 import { FinancialForecastService } from './financial-forecast.service';
 import { PortfolioService } from './portfolio.service';
+import { MonthlyService } from './monthly.service';
 
 @Controller()
 export class FinancialController {
@@ -15,7 +16,32 @@ export class FinancialController {
     private readonly analyticalResults: AnalyticalResultsService,
     private readonly forecast: FinancialForecastService,
     private readonly portfolio: PortfolioService,
+    private readonly monthly: MonthlyService,
   ) {}
+
+  /** Gestion mensuelle : flux engagé / réalisé par nature, en 3 colonnes M / M-1 / CUMUL (§5.8). */
+  @Get('chantiers/:chantierId/monthly')
+  @RequiresCapability('financial.dashboard')
+  @RequiresPermission('financial.read')
+  getMonthly(@Param('chantierId') chantierId: string, @Query('month') month: string) {
+    return this.monthly.getMonthly(chantierId, month);
+  }
+
+  /** Mois clôturés du chantier. */
+  @Get('chantiers/:chantierId/closures')
+  @RequiresCapability('financial.dashboard')
+  @RequiresPermission('financial.read')
+  getClosures(@Param('chantierId') chantierId: string) {
+    return this.monthly.listClosures(chantierId);
+  }
+
+  /** Clôture un mois : fige l'instantané mensuel (cumuls + flux du mois). */
+  @Post('chantiers/:chantierId/monthly/:month/close')
+  @RequiresCapability('financial.forecast')
+  @RequiresPermission('financial.write')
+  closeMonth(@Param('chantierId') chantierId: string, @Param('month') month: string) {
+    return this.monthly.closeMonth(chantierId, month);
+  }
 
   /** Vue Direction : portefeuille de tous les chantiers, chantiers à risque en tête (§5.8). */
   @Get('financial/portfolio')

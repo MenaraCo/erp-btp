@@ -7,6 +7,7 @@ import { AdvancementService } from './advancement.service';
 import { AnalyticalResultsService } from './analytical-results.service';
 import { FinancialForecastService } from './financial-forecast.service';
 import { PortfolioService } from './portfolio.service';
+import { MonthlyService } from './monthly.service';
 import { FinancialController } from './financial.controller';
 
 /**
@@ -18,6 +19,7 @@ import { FinancialController } from './financial.controller';
   imports: [TenancyModule, AnalyticalModule, SiteTrackingModule],
   providers: [
     PortfolioService,
+    MonthlyService,
     FinancialConfigService,
     AdvancementService,
     AnalyticalResultsService,
