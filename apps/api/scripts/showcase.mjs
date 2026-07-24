@@ -68,16 +68,16 @@ async function main() {
     const c = `SHW-${code}`;
     R[code] = existingRes.get(c) ?? (await api('POST', `/libraries/${lib.id}/resources`, { code: c, label, unit, nature, unitCost })).id;
   };
-  await addRes('MO-MACON', 'Maçon', 'h', 'labor', '38.50');
-  await addRes('MO-COFF', 'Coffreur', 'h', 'labor', '42.00');
-  await addRes('MO-PEINT', 'Peintre', 'h', 'labor', '35.00');
-  await addRes('MAT-BETON', 'Béton C25/30', 'm3', 'material', '120.00');
-  await addRes('MAT-ACIER', 'Acier HA', 'kg', 'material', '1.35');
-  await addRes('MAT-PARP', 'Parpaing 20', 'u', 'material', '1.20');
-  await addRes('MAT-ENDUIT', 'Enduit', 'kg', 'material', '2.00');
+  await addRes('MO-MACON', 'Maçon', 'H', 'labor', '38.50');
+  await addRes('MO-COFF', 'Coffreur', 'H', 'labor', '42.00');
+  await addRes('MO-PEINT', 'Peintre', 'H', 'labor', '35.00');
+  await addRes('MAT-BETON', 'Béton C25/30', 'M3', 'material', '120.00');
+  await addRes('MAT-ACIER', 'Acier HA', 'KG', 'material', '1.35');
+  await addRes('MAT-PARP', 'Parpaing 20', 'U', 'material', '1.20');
+  await addRes('MAT-ENDUIT', 'Enduit', 'KG', 'material', '2.00');
   await addRes('MAT-PEINT', 'Peinture acrylique', 'L', 'material', '8.00');
-  await addRes('LOC-GRUE', 'Location grue', 'j', 'equipment', '350.00');
-  await addRes('ST-ETANCH', 'Étanchéité (sous-traitance)', 'm2', 'subcontract', '45.00');
+  await addRes('LOC-GRUE', 'Location grue', 'J', 'equipment', '350.00');
+  await addRes('ST-ETANCH', 'Étanchéité (sous-traitance)', 'M2', 'subcontract', '45.00');
   log('bibliothèque : 10 ressources');
 
   // 3) Ouvrages composés (dont un sous-ouvrage et des %). Les composants ne sont ajoutés qu'à la création.
@@ -90,39 +90,48 @@ async function main() {
     O[code] = id;
     if (!existed) for (const b of components()) await comp(id, b);
   };
-  await defOuv('OUV-SEM', 'Semelle béton armé', 'm3', () => [
+  await defOuv('OUV-SEM', 'Semelle béton armé', 'M3', () => [
     { kind: 'resource', childResourceId: R['MAT-BETON'], quantity: '1.05' },
     { kind: 'resource', childResourceId: R['MAT-ACIER'], quantity: '90' },
     { kind: 'resource', childResourceId: R['MO-MACON'], quantity: '2.5' },
     { kind: 'percentage', rate: '0.03' },
   ]);
-  await defOuv('OUV-MUR', 'Mur en parpaing', 'm2', () => [
+  await defOuv('OUV-MUR', 'Mur en parpaing', 'M2', () => [
     { kind: 'resource', childResourceId: R['MAT-PARP'], quantity: '12.5' },
     { kind: 'resource', childResourceId: R['MO-MACON'], quantity: '1.2' },
     { kind: 'resource', childResourceId: R['MAT-ACIER'], quantity: '5' },
     { kind: 'percentage', rate: '0.02' },
   ]);
-  await defOuv('OUV-END', 'Enduit de façade', 'm2', () => [
+  await defOuv('OUV-END', 'Enduit de façade', 'M2', () => [
     { kind: 'resource', childResourceId: R['MAT-ENDUIT'], quantity: '3' },
     { kind: 'resource', childResourceId: R['MO-PEINT'], quantity: '0.5' },
   ]);
-  await defOuv('OUV-PEINT', 'Peinture murs', 'm2', () => [
+  await defOuv('OUV-PEINT', 'Peinture murs', 'M2', () => [
     { kind: 'resource', childResourceId: R['MAT-PEINT'], quantity: '0.3' },
     { kind: 'resource', childResourceId: R['MO-PEINT'], quantity: '0.4' },
   ]);
-  await defOuv('OUV-FOND', 'Fondations complètes', 'ens', () => [
+  await defOuv('OUV-FOND', 'Fondations complètes', 'ENS', () => [
     { kind: 'sub_ouvrage', childOuvrageId: O['OUV-SEM'], quantity: '4' },
     { kind: 'resource', childResourceId: R['LOC-GRUE'], quantity: '2' },
   ]);
-  log('ouvrages : 4 + 1 composite (sous-ouvrage)');
+  await defOuv('OUV-ETANCH', 'Étanchéité toiture', 'M2', () => [
+    { kind: 'resource', childResourceId: R['ST-ETANCH'], quantity: '1' },
+    { kind: 'resource', childResourceId: R['MO-MACON'], quantity: '0.15' },
+  ]);
+  log('ouvrages : 5 + 1 composite (sous-ouvrage)');
 
   // 4) Affaire + devis + corps hiérarchique
   const created = await api('POST', '/affaires', { code: AFFAIRE_CODE, name: 'Résidence Les Tilleuls — R+2' });
   const versionId = created.version.id;
   const devisId = created.devis.id;
   const line = (body) => api('POST', `/versions/${versionId}/lines`, body);
-  const ouvrageLine = (code, designation, ouvId, quantity, parentLineId) =>
-    line({ type: 'ouvrage', code, designation, sourceOuvrageId: ouvId, quantity, parentLineId });
+  // Insère un ouvrage depuis la bibliothèque en COPIANT son sous-détail (ressources + ratios + prix)
+  // en lignes enfants éditables — c'est la constitution de l'ouvrage, visible dans le déboursé.
+  const ouvrageLine = async (code, designation, ouvId, quantity, parentLineId) => {
+    const res = await api('POST', `/versions/${versionId}/ouvrages`, { ouvrageId: ouvId, quantity, designation, parentLineId });
+    await api('PATCH', `/lines/${res.ouvrage.id}`, { code });
+    return { id: res.ouvrage.id };
+  };
 
   const t1 = (await line({ type: 'titre', code: '1', designation: 'GROS ŒUVRE' })).id;
   await ouvrageLine('1.1', 'Semelles filantes', O['OUV-SEM'], '25', t1);
@@ -141,8 +150,8 @@ async function main() {
   await api('PUT', `/lines/${varLine.id}/section`, { sectionType: 'variante' });
 
   const t3 = (await line({ type: 'titre', code: '3', designation: 'VRD / ÉTANCHÉITÉ' })).id;
-  await line({ type: 'ouvrage', code: '3.1', designation: 'Étanchéité toiture', quantity: '120', nature: 'subcontract', parentLineId: t3 });
-  log('corps du devis : 3 titres, ouvrages + ligne manuelle + option + variante');
+  await ouvrageLine('3.1', 'Étanchéité toiture (sous-traitance)', O['OUV-ETANCH'], '120', t3);
+  log('corps du devis : 3 titres, ouvrages avec sous-détail + ligne manuelle + option + variante');
 
   // 5) Feuille de vente : FG/bénéfice par nature + frais annexes + remise + TVA
   await api('PUT', `/versions/${versionId}/sale-sheet`, {
@@ -194,7 +203,7 @@ async function main() {
   const semelle = (await ouvragesOf()).find((o) => /Semelle/.test(o.designation));
   if (semelle) {
     await api('POST', `/execution-lines/${semelle.id}/components`, {
-      code: 'LOC-BENNE', label: 'Location benne (chantier)', unit: 'j', nature: 'equipment', unitCost: '80', quantity: '3',
+      code: 'LOC-BENNE', label: 'Location benne (chantier)', unit: 'J', nature: 'equipment', unitCost: '80', quantity: '3',
     });
   }
   await api('POST', `/marches/${marcheId}/execution-lines`, { code: 'IMP', designation: 'Imprévus terrassement', unit: 'ens', quantiteObjectif: '1' });
@@ -264,7 +273,7 @@ async function main() {
   // 14) Avenant
   await api('POST', `/marches/${marcheId}/avenants`, {
     label: 'Travaux supplémentaires — reprise réseau',
-    lines: [{ designation: 'Reprise réseau EU', unit: 'ml', quantite: '35', pu: '48' }],
+    lines: [{ designation: 'Reprise réseau EU', unit: 'ML', quantite: '35', pu: '48' }],
   });
   log('avenant créé');
 
