@@ -36,6 +36,21 @@ interface Summary {
   engageTotal: string;
   realiseTotal: string;
 }
+interface OuvrageOption { id: string; label: string }
+interface TreeNodeLite { id: string; type: string; code: string | null; designation: string; children: TreeNodeLite[] }
+interface ExecTreeLite { marches: { code: string; lines: TreeNodeLite[] }[] }
+
+/** Aplati l'arbre d'exécution en liste d'ouvrages, pour imputer un achat à un ouvrage. */
+function ouvrageOptions(tree: ExecTreeLite | undefined): OuvrageOption[] {
+  if (!tree) return [];
+  const out: OuvrageOption[] = [];
+  const walk = (n: TreeNodeLite) => {
+    if (n.type === 'ouvrage') out.push({ id: n.id, label: `${n.code ? n.code + ' ' : ''}${n.designation}` });
+    n.children.forEach(walk);
+  };
+  tree.marches.forEach((m) => m.lines.forEach(walk));
+  return out;
+}
 
 const NATURES: { value: string; label: string }[] = [
   { value: 'material', label: 'Matériaux' },
@@ -86,6 +101,13 @@ export default function AchatsPage() {
     retry: false,
     queryFn: () => apiFetch<Summary>(`/chantiers/${chantierId}/purchasing-summary`, { token }),
   });
+  const tree = useQuery({
+    queryKey: ['execution-tree', chantierId],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<ExecTreeLite>(`/chantiers/${chantierId}/execution-tree`, { token }),
+  });
+  const ouvrages = ouvrageOptions(tree.data);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['purchasing-chain', chantierId] });
@@ -148,6 +170,7 @@ export default function AchatsPage() {
         <OrderCard
           key={o.id}
           order={o}
+          ouvrages={ouvrages}
           token={token}
           onError={onError}
           onChanged={refresh}
@@ -165,9 +188,10 @@ export default function AchatsPage() {
 
 /* ─────────── carte d'une commande ─────────── */
 function OrderCard({
-  order, token, onError, onChanged, onValidate, onCancel, busy,
+  order, ouvrages, token, onError, onChanged, onValidate, onCancel, busy,
 }: {
   order: Order;
+  ouvrages: OuvrageOption[];
   token: string | null;
   onError: (e: unknown) => void;
   onChanged: () => void;
@@ -180,22 +204,25 @@ function OrderCard({
   const [designation, setDesignation] = useState('');
   const [quantity, setQuantity] = useState('');
   const [unitPrice, setUnitPrice] = useState('');
+  const [lineOuvrage, setLineOuvrage] = useState('');
   const [blCode, setBlCode] = useState('');
   const [invCode, setInvCode] = useState('');
   const [invAmount, setInvAmount] = useState('');
   const [invNature, setInvNature] = useState('material');
+  const [invOuvrage, setInvOuvrage] = useState('');
 
   const draft = order.status === 'draft';
 
   const addLine = useMutation({
     mutationFn: () =>
       apiFetch(`/purchase-orders/${order.id}/lines`, {
-        method: 'POST', token, body: { nature, designation, quantity, unitPrice },
+        method: 'POST', token, body: { nature, designation, quantity, unitPrice, executionLineId: lineOuvrage || null },
       }),
     onSuccess: () => {
-      setDesignation(''); setQuantity(''); setUnitPrice('');
+      setDesignation(''); setQuantity(''); setUnitPrice(''); setLineOuvrage('');
       qc.invalidateQueries({ queryKey: ['purchasing-chain'] });
       qc.invalidateQueries({ queryKey: ['purchasing-summary'] });
+      qc.invalidateQueries({ queryKey: ['execution-tree'] });
       onChanged();
     },
     onError,
@@ -211,9 +238,13 @@ function OrderCard({
   const addInvoice = useMutation({
     mutationFn: () =>
       apiFetch(`/purchase-orders/${order.id}/invoices`, {
-        method: 'POST', token, body: { code: invCode, nature: invNature, amountHt: invAmount },
+        method: 'POST', token, body: { code: invCode, nature: invNature, amountHt: invAmount, executionLineId: invOuvrage || null },
       }),
-    onSuccess: () => { setInvCode(''); setInvAmount(''); onChanged(); },
+    onSuccess: () => {
+      setInvCode(''); setInvAmount(''); setInvOuvrage('');
+      qc.invalidateQueries({ queryKey: ['execution-tree'] });
+      onChanged();
+    },
     onError,
   });
 
@@ -280,6 +311,13 @@ function OrderCard({
             <label>PU (€)</label>
             <input type="number" min={0} step="0.01" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} style={{ width: 100, textAlign: 'right' }} />
           </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Ouvrage (imputation)</label>
+            <select value={lineOuvrage} onChange={(e) => setLineOuvrage(e.target.value)} style={{ width: 200 }}>
+              <option value="">— Non réparti —</option>
+              {ouvrages.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </div>
           <button className="btn btn-secondary" type="submit" disabled={addLine.isPending}>Ajouter la ligne</button>
         </form>
       )}
@@ -344,6 +382,13 @@ function OrderCard({
           <div className="field" style={{ marginBottom: 0 }}>
             <label>Montant HT (€)</label>
             <input type="number" min={0} step="0.01" value={invAmount} onChange={(e) => setInvAmount(e.target.value)} style={{ width: 120, textAlign: 'right' }} />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Ouvrage (imputation)</label>
+            <select value={invOuvrage} onChange={(e) => setInvOuvrage(e.target.value)} style={{ width: 200 }}>
+              <option value="">— Non réparti —</option>
+              {ouvrages.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
           </div>
           <button className="btn btn-secondary" type="submit" disabled={addInvoice.isPending}>Enregistrer la facture</button>
         </form>

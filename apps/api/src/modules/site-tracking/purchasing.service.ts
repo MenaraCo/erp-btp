@@ -29,6 +29,8 @@ export interface SupplierInvoiceInput {
   nature: string;
   amountHt: string | number;
   invoiceDate?: string;
+  /** Imputation structurelle à un ouvrage (réalisé par ouvrage, cahier §5.8). Optionnel. */
+  executionLineId?: string | null;
   /** Imputation analytique au code analytique du plan partagé (réalisé, cahier §5.8). Optionnel. */
   codeAnalytiqueId?: string | null;
 }
@@ -97,12 +99,15 @@ export class PurchasingService {
     const price = new Decimal(input.unitPrice ?? 0);
     const amount = qty.times(price).toDecimalPlaces(2);
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const order = await em.query(`SELECT status FROM purchase_order WHERE id = $1`, [orderId]);
+      const order = await em.query(`SELECT chantier_id, status FROM purchase_order WHERE id = $1`, [orderId]);
       if (order.length === 0) {
         throw new NotFoundException(`Unknown purchase order "${orderId}"`);
       }
       if (order[0].status !== 'draft') {
         throw new ConflictException('Lines can only be added to a draft order.');
+      }
+      if (input.executionLineId != null) {
+        await this.assertExecutionLineInChantier(em, input.executionLineId, order[0].chantier_id);
       }
       if (input.codeAnalytiqueId != null) {
         await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
@@ -190,15 +195,18 @@ export class PurchasingService {
       if (order[0].status !== 'validated') {
         throw new ConflictException('Supplier invoices require a validated order.');
       }
+      if (input.executionLineId != null) {
+        await this.assertExecutionLineInChantier(em, input.executionLineId, order[0].chantier_id);
+      }
       if (input.codeAnalytiqueId != null) {
         await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
       }
       return (
         await em.query(
           `INSERT INTO supplier_invoice
-             (tenant_id, chantier_id, order_id, code, nature, amount_ht, invoice_date, code_analytique_id)
-           VALUES ($1,$2,$3,$4,$5,$6, COALESCE($7, now()), $8) RETURNING *`,
-          [tenantId, order[0].chantier_id, orderId, input.code, input.nature,
+             (tenant_id, chantier_id, order_id, execution_line_id, code, nature, amount_ht, invoice_date, code_analytique_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7, COALESCE($8, now()), $9) RETURNING *`,
+          [tenantId, order[0].chantier_id, orderId, input.executionLineId ?? null, input.code, input.nature,
             new Decimal(input.amountHt ?? 0).toDecimalPlaces(2).toString(), input.invoiceDate ?? null,
             input.codeAnalytiqueId ?? null],
         )
@@ -212,6 +220,17 @@ export class PurchasingService {
       throw new NotFoundException(`Unknown code analytique "${codeId}"`);
     }
   }
+
+  private async assertExecutionLineInChantier(em: EntityManager, lineId: string, chantierId: string): Promise<void> {
+    const rows = await em.query(
+      `SELECT id FROM execution_line WHERE id = $1 AND chantier_id = $2`,
+      [lineId, chantierId],
+    );
+    if (rows.length === 0) {
+      throw new NotFoundException(`Execution line "${lineId}" not found on this chantier`);
+    }
+  }
+
 
   /** Engagé (validated orders) and réalisé achats (supplier invoices), by nature, for a chantier. */
   summary(chantierId: string) {

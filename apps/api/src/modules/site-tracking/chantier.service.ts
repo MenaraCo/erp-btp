@@ -717,6 +717,34 @@ export class ChantierService {
         [chantierId],
       );
 
+      // Engagé (commandes validées) + réalisé (factures fournisseur + pointages) rattachés à la
+      // ligne budgétée de tête (parent_line_id IS NULL) — axe structurel du pilotage (§5.8).
+      const engageRows = await em.query(
+        `SELECT top.id AS line_id, SUM(l.amount_ht)::numeric(16,2) AS montant
+           FROM purchase_order_line l
+           JOIN purchase_order o ON o.id = l.order_id
+           JOIN execution_line el ON el.id = l.execution_line_id
+           JOIN execution_line top ON top.id = COALESCE(el.parent_line_id, el.id)
+          WHERE o.chantier_id = $1 AND o.status = 'validated' AND l.execution_line_id IS NOT NULL
+          GROUP BY top.id`,
+        [chantierId],
+      );
+      const realiseRows = await em.query(
+        `SELECT top.id AS line_id, SUM(m.montant)::numeric(16,2) AS montant FROM (
+           SELECT execution_line_id, amount_ht AS montant FROM supplier_invoice
+             WHERE chantier_id = $1 AND execution_line_id IS NOT NULL
+           UNION ALL
+           SELECT execution_line_id, cost AS montant FROM timesheet
+             WHERE chantier_id = $1 AND execution_line_id IS NOT NULL
+         ) m
+         JOIN execution_line el ON el.id = m.execution_line_id
+         JOIN execution_line top ON top.id = COALESCE(el.parent_line_id, el.id)
+         GROUP BY top.id`,
+        [chantierId],
+      );
+      const engageByLine = new Map<string, string>(engageRows.map((r: { line_id: string; montant: string }) => [r.line_id, r.montant]));
+      const realiseByLine = new Map<string, string>(realiseRows.map((r: { line_id: string; montant: string }) => [r.line_id, r.montant]));
+
       // Index budgets + composants par ligne.
       const budgetByLine = new Map<string, Array<Record<string, unknown>>>();
       for (const b of budgets) {
@@ -771,6 +799,8 @@ export class ChantierService {
           quantiteObjectif: l.quantite_objectif,
           debourseUnitaireEtude: l.debourse_unitaire_etude,
           debourseUnitaireObjectif: l.debourse_unitaire_objectif,
+          engage: engageByLine.get(lineId) ?? '0.00',
+          realise: realiseByLine.get(lineId) ?? '0.00',
           budget: lineBudgets.length
             ? {
                 etude: sum(lineBudgets, 'montant_etude'),

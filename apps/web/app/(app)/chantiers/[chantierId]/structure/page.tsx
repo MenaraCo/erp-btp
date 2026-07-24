@@ -23,6 +23,7 @@ interface TreeNode {
   id: string; type: string; vendable: boolean; code: string | null; designation: string; unit: string | null;
   quantiteEtude: string; quantiteObjectif: string;
   debourseUnitaireEtude: string; debourseUnitaireObjectif: string;
+  engage: string; realise: string;
   budget: Budget | null; components: CompNode[]; children: TreeNode[];
 }
 type Phase = 'etude' | 'contre_etude' | 'execution';
@@ -276,6 +277,9 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
               <th style={{ textAlign: 'right' }}>Prévisionnel</th>
               {advancing && <th style={{ textAlign: 'right' }}>Avanc. (%)</th>}
               {advancing && <th style={{ textAlign: 'right' }}>Budget avancé</th>}
+              {advancing && <th style={{ textAlign: 'right' }}>Engagé</th>}
+              {advancing && <th style={{ textAlign: 'right' }}>Réalisé</th>}
+              {advancing && <th style={{ textAlign: 'right' }}>Écart au stade</th>}
               {editable && <th style={{ width: 40 }}></th>}
             </tr>
           </thead>
@@ -287,12 +291,21 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
               <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(marche.totals.etude)}</td>
               <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(marche.totals.objectif)}</td>
               <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(marche.totals.previsionnel)}</td>
-              {advancing && <td></td>}
-              {advancing && (
-                <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                  {euro(marche.lines.reduce((a, l) => a + (l.budget ? Number(l.budget.objectif) * (pctByLine.get(l.id) ?? 0) : 0), 0))}
-                </td>
-              )}
+              {advancing && (() => {
+                const tBudgetAvance = marche.lines.reduce((a, l) => a + (l.budget ? Number(l.budget.objectif) * (pctByLine.get(l.id) ?? 0) : 0), 0);
+                const tEngage = marche.lines.reduce((a, l) => a + Number(l.engage), 0);
+                const tRealise = marche.lines.reduce((a, l) => a + Number(l.realise), 0);
+                const tEcart = tBudgetAvance - (tEngage + tRealise);
+                return (
+                  <>
+                    <td></td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(tBudgetAvance)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(tEngage)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(tRealise)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: tEcart < 0 ? 'var(--danger)' : undefined }}>{euro(tEcart)}</td>
+                  </>
+                );
+              })()}
               {editable && <td></td>}
             </tr>
           </tbody>
@@ -320,9 +333,11 @@ function LineRows({ node, depth, edit, advance }: { node: TreeNode; depth: numbe
   const [addingRes, setAddingRes] = useState(false);
   const hasDetail = node.components.length > 0 || node.children.length > 0;
   const pad = 8 + depth * 20;
-  const cols = 5 + (edit.editable ? 1 : 0) + (advance.active ? 2 : 0);
+  const cols = 5 + (edit.editable ? 1 : 0) + (advance.active ? 5 : 0);
   const linePct = advance.pctByLine.get(node.id) ?? 0;
   const budgetAvance = node.budget ? Number(node.budget.objectif) * linePct : 0;
+  const depense = Number(node.engage) + Number(node.realise);
+  const ecartAuStade = budgetAvance - depense;
 
   return (
     <>
@@ -359,6 +374,17 @@ function LineRows({ node, depth, edit, advance }: { node: TreeNode; depth: numbe
         {advance.active && (
           <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{node.budget ? euro(budgetAvance) : ''}</td>
         )}
+        {advance.active && (
+          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{node.budget ? euro(node.engage) : ''}</td>
+        )}
+        {advance.active && (
+          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{node.budget ? euro(node.realise) : ''}</td>
+        )}
+        {advance.active && (
+          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: node.budget && ecartAuStade < 0 ? 'var(--danger)' : undefined }}>
+            {node.budget ? euro(ecartAuStade) : ''}
+          </td>
+        )}
         {edit.editable && (
           <td style={{ textAlign: 'center' }}>
             <IconButton title="Supprimer l'ouvrage" onClick={() => edit.removeLine(node.id)} disabled={edit.pending}><Trash2 size={13} /></IconButton>
@@ -385,7 +411,7 @@ function LineRows({ node, depth, edit, advance }: { node: TreeNode; depth: numbe
 }
 
 function ComponentRow({ comp, pad, edit, advance }: { comp: CompNode; pad: number; edit: Edit; advance: Advance }) {
-  const trailing = (advance.active ? 2 : 0) + (edit.editable ? 1 : 0);
+  const trailing = (advance.active ? 5 : 0) + (edit.editable ? 1 : 0);
   if (comp.kind === 'sub_line') return null;
   if (comp.kind === 'percentage') {
     return (
@@ -420,6 +446,9 @@ function ComponentRow({ comp, pad, edit, advance }: { comp: CompNode; pad: numbe
         )}
       </td>
       <td></td>
+      {advance.active && <td></td>}
+      {advance.active && <td></td>}
+      {advance.active && <td></td>}
       {advance.active && <td></td>}
       {advance.active && <td></td>}
       {edit.editable && (
