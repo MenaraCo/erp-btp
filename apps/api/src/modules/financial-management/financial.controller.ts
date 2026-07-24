@@ -108,4 +108,42 @@ export class FinancialController {
   getAdvancement(@Param('chantierId') chantierId: string) {
     return this.advancement.current(chantierId);
   }
+
+  /* ─── Avancement ouvrage par ouvrage (cahier §5.8) ─── */
+
+  @Get('chantiers/:chantierId/line-advancement')
+  @RequiresCapability('financial.forecast')
+  @RequiresPermission('financial.read')
+  getLineAdvancement(@Param('chantierId') chantierId: string) {
+    return this.advancement.currentLines(chantierId);
+  }
+
+  @Post('chantiers/:chantierId/line-advancement')
+  @RequiresCapability('financial.forecast')
+  @RequiresPermission('financial.write')
+  recordLineAdvancement(
+    @Param('chantierId') chantierId: string,
+    @Body() body: { executionLineId?: string; pct?: string | number },
+  ) {
+    if (!body?.executionLineId || body?.pct == null) {
+      throw new BadRequestException('executionLineId and pct are required');
+    }
+    return this.advancement.recordLine(chantierId, body.executionLineId, body.pct);
+  }
+
+  /** Applique un avancement en masse : global (tout le chantier), par marché ou par sous-arbre. */
+  @Post('chantiers/:chantierId/line-advancement/apply')
+  @RequiresCapability('financial.forecast')
+  @RequiresPermission('financial.write')
+  applyLineAdvancement(
+    @Param('chantierId') chantierId: string,
+    @Body() body: { pct?: string | number; parentLineId?: string | null; marcheId?: string | null },
+  ) {
+    if (body?.pct == null) {
+      throw new BadRequestException('pct is required');
+    }
+    return this.advancement.applyToLines(chantierId, {
+      pct: body.pct, parentLineId: body.parentLineId ?? null, marcheId: body.marcheId ?? null,
+    });
+  }
 }

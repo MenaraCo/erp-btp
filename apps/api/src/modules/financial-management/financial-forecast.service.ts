@@ -28,7 +28,8 @@ export class FinancialForecastService {
 
     const results = await this.analytics.chantierResults(chantierId); // 404 if unknown chantier
     const formulaSet = await this.config.getActiveFormulaSet(tenantId);
-    const adv = await this.advancement.current(chantierId);
+    // Avancement global effectif : moyenne pondérée des avancements par ouvrage, sinon global saisi.
+    const effectivePct = await this.advancement.effectiveGlobalPct(chantierId);
 
     const previsionnel = await runInTenant(this.dataSource, tenantId, async (em) => {
       const row = await em.query(
@@ -41,7 +42,7 @@ export class FinancialForecastService {
       return row[0].total as string;
     });
 
-    const avancement = adv.global?.pct ?? '0';
+    const avancement = effectivePct;
 
     const inputs: FormulaInputs = {
       vente: results.budgetVenteHt ?? '0',

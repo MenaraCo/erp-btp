@@ -61,6 +61,15 @@ interface Edit {
   pending: boolean;
 }
 
+/** Saisie de l'avancement par ouvrage (phase exécution). */
+interface Advance {
+  active: boolean;
+  pctByLine: Map<string, number>;
+  setLinePct: (lineId: string, pctFraction: string) => void;
+  pending: boolean;
+}
+interface LineAdvancementRow { execution_line_id: string; pct: string }
+
 export default function StructurePage() {
   const { token } = useAuth();
   const chantierId = String(useParams().chantierId);
@@ -110,11 +119,26 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
   const [adding, setAdding] = useState(false);
   const phaseMeta = PHASE_META[marche.execution_phase];
   const editable = marche.execution_phase === 'contre_etude';
+  const advancing = marche.execution_phase === 'execution';
+
+  const lineAdv = useQuery({
+    queryKey: ['line-advancement', chantierId],
+    enabled: Boolean(token) && advancing,
+    retry: false,
+    queryFn: () => apiFetch<LineAdvancementRow[]>(`/chantiers/${chantierId}/line-advancement`, { token }),
+  });
+  const pctByLine = new Map((lineAdv.data ?? []).map((r) => [r.execution_line_id, Number(r.pct)]));
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['execution-tree', chantierId] });
     qc.invalidateQueries({ queryKey: ['change-log', marche.id] });
     qc.invalidateQueries({ queryKey: ['chantier-marches', chantierId] });
+    // l'avancement alimente le prédictif : rafraîchir tout ce qui en dépend
+    qc.invalidateQueries({ queryKey: ['line-advancement', chantierId] });
+    qc.invalidateQueries({ queryKey: ['chantier-forecast', chantierId] });
+    qc.invalidateQueries({ queryKey: ['chantier-results', chantierId] });
+    qc.invalidateQueries({ queryKey: ['pilotage', chantierId] });
+    qc.invalidateQueries({ queryKey: ['portfolio'] });
   };
   const onErr = (e: unknown) => setErr(e instanceof ApiError ? e.message : 'Erreur');
 
@@ -157,6 +181,17 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
     onSuccess: () => { setErr(null); invalidate(); setAdding(false); }, onError: onErr,
   });
 
+  const mLineAdv = useMutation({
+    mutationFn: ({ id, pct }: { id: string; pct: string }) =>
+      apiFetch(`/chantiers/${chantierId}/line-advancement`, { method: 'POST', token, body: { executionLineId: id, pct } }),
+    onSuccess: () => { setErr(null); invalidate(); }, onError: onErr,
+  });
+  const mApplyAdv: UseMutationResult<unknown, unknown, string> = useMutation({
+    mutationFn: (pct: string) =>
+      apiFetch(`/chantiers/${chantierId}/line-advancement/apply`, { method: 'POST', token, body: { pct, marcheId: marche.id } }),
+    onSuccess: () => { setErr(null); invalidate(); }, onError: onErr,
+  });
+
   const pending = [mRenegotiate, mCompQty, mLineQty, mRemoveComp, mRemoveLine, mAddResource].some((m) => m.isPending);
   const edit: Edit = {
     editable,
@@ -167,6 +202,12 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
     removeLine: (id) => mRemoveLine.mutate(id),
     addResource: (id, body) => mAddResource.mutate({ id, body }),
     pending,
+  };
+  const advance: Advance = {
+    active: advancing,
+    pctByLine,
+    setLinePct: (id, pct) => mLineAdv.mutate({ id, pct }),
+    pending: mLineAdv.isPending || mApplyAdv.isPending,
   };
 
   return (
@@ -209,8 +250,20 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
           ressources et des ouvrages. Le budget objectif est recalculé à chaque changement.
         </p>
       )}
+      {advancing && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 6, marginBottom: 0 }}>
+          Exécution : saisissez l'avancement <strong>ouvrage par ouvrage</strong> (%). Le budget avancé (crédit) =
+          budget objectif × avancement, agrégé pour alimenter l'écart au stade, l'EAC et la marge prévisionnelle.
+        </p>
+      )}
       {err && <div className="error" style={{ marginTop: 8 }}>{err}</div>}
       {showLog && <ChangeLog marcheId={marche.id} token={token} />}
+
+      {advancing && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 10, flexWrap: 'wrap' }}>
+          <GlobalAdvanceControl onApply={(pct) => mApplyAdv.mutate(pct)} pending={mApplyAdv.isPending} />
+        </div>
+      )}
 
       <div style={{ overflowX: 'auto', marginTop: 12 }}>
         <table className="grid" style={{ margin: 0, minWidth: 760 }}>
@@ -221,17 +274,25 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
               <th style={{ textAlign: 'right' }}>Budget étude</th>
               <th style={{ textAlign: 'right' }}>Objectif</th>
               <th style={{ textAlign: 'right' }}>Prévisionnel</th>
+              {advancing && <th style={{ textAlign: 'right' }}>Avanc. (%)</th>}
+              {advancing && <th style={{ textAlign: 'right' }}>Budget avancé</th>}
               {editable && <th style={{ width: 40 }}></th>}
             </tr>
           </thead>
           <tbody>
-            {marche.lines.map((n) => <LineRows key={n.id} node={n} depth={0} edit={edit} />)}
+            {marche.lines.map((n) => <LineRows key={n.id} node={n} depth={0} edit={edit} advance={advance} />)}
             <tr style={{ borderTop: '2px solid var(--border)' }}>
               <td><strong>Total marché</strong></td>
               <td></td>
               <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(marche.totals.etude)}</td>
               <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(marche.totals.objectif)}</td>
               <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(marche.totals.previsionnel)}</td>
+              {advancing && <td></td>}
+              {advancing && (
+                <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                  {euro(marche.lines.reduce((a, l) => a + (l.budget ? Number(l.budget.objectif) * (pctByLine.get(l.id) ?? 0) : 0), 0))}
+                </td>
+              )}
               {editable && <td></td>}
             </tr>
           </tbody>
@@ -254,12 +315,14 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
 }
 
 /* ─────────── ligne d'ouvrage + composants (récursif) ─────────── */
-function LineRows({ node, depth, edit }: { node: TreeNode; depth: number; edit: Edit }) {
+function LineRows({ node, depth, edit, advance }: { node: TreeNode; depth: number; edit: Edit; advance: Advance }) {
   const [open, setOpen] = useState(depth === 0);
   const [addingRes, setAddingRes] = useState(false);
   const hasDetail = node.components.length > 0 || node.children.length > 0;
   const pad = 8 + depth * 20;
-  const cols = edit.editable ? 6 : 5;
+  const cols = 5 + (edit.editable ? 1 : 0) + (advance.active ? 2 : 0);
+  const linePct = advance.pctByLine.get(node.id) ?? 0;
+  const budgetAvance = node.budget ? Number(node.budget.objectif) * linePct : 0;
 
   return (
     <>
@@ -282,14 +345,28 @@ function LineRows({ node, depth, edit }: { node: TreeNode; depth: number; edit: 
         <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{node.budget ? euro(node.budget.etude) : ''}</td>
         <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{node.budget ? euro(node.budget.objectif) : ''}</td>
         <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{node.budget ? euro(node.budget.previsionnel) : ''}</td>
+        {advance.active && (
+          <td style={{ textAlign: 'right' }}>
+            {node.budget ? (
+              <EditableNumber
+                value={String(Math.round(linePct * 1000) / 10)}
+                onSubmit={(v) => { const f = Number(v) / 100; if (f >= 0 && f <= 1) advance.setLinePct(node.id, String(f)); }}
+                disabled={advance.pending}
+              />
+            ) : ''}
+          </td>
+        )}
+        {advance.active && (
+          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{node.budget ? euro(budgetAvance) : ''}</td>
+        )}
         {edit.editable && (
           <td style={{ textAlign: 'center' }}>
             <IconButton title="Supprimer l'ouvrage" onClick={() => edit.removeLine(node.id)} disabled={edit.pending}><Trash2 size={13} /></IconButton>
           </td>
         )}
       </tr>
-      {open && node.components.map((c) => <ComponentRow key={c.id} comp={c} pad={pad + 20} edit={edit} />)}
-      {open && node.children.map((child) => <LineRows key={child.id} node={child} depth={depth + 1} edit={edit} />)}
+      {open && node.components.map((c) => <ComponentRow key={c.id} comp={c} pad={pad + 20} edit={edit} advance={advance} />)}
+      {open && node.children.map((child) => <LineRows key={child.id} node={child} depth={depth + 1} edit={edit} advance={advance} />)}
       {open && edit.editable && (
         <tr>
           <td colSpan={cols} style={{ paddingLeft: pad + 20 }}>
@@ -307,13 +384,14 @@ function LineRows({ node, depth, edit }: { node: TreeNode; depth: number; edit: 
   );
 }
 
-function ComponentRow({ comp, pad, edit }: { comp: CompNode; pad: number; edit: Edit }) {
+function ComponentRow({ comp, pad, edit, advance }: { comp: CompNode; pad: number; edit: Edit; advance: Advance }) {
+  const trailing = (advance.active ? 2 : 0) + (edit.editable ? 1 : 0);
   if (comp.kind === 'sub_line') return null;
   if (comp.kind === 'percentage') {
     return (
       <tr className="muted">
         <td style={{ paddingLeft: pad, fontStyle: 'italic' }}>Frais généraux ({(Number(comp.rate) * 100).toLocaleString('fr-FR')} %)</td>
-        <td colSpan={edit.editable ? 5 : 4}></td>
+        <td colSpan={4 + trailing}></td>
       </tr>
     );
   }
@@ -342,6 +420,8 @@ function ComponentRow({ comp, pad, edit }: { comp: CompNode; pad: number; edit: 
         )}
       </td>
       <td></td>
+      {advance.active && <td></td>}
+      {advance.active && <td></td>}
       {edit.editable && (
         <td style={{ textAlign: 'center' }}>
           <IconButton title="Supprimer la ressource" onClick={() => edit.removeComponent(comp.id)} disabled={edit.pending}><Trash2 size={12} /></IconButton>
@@ -379,6 +459,23 @@ function IconButton({ children, title, onClick, disabled }: { children: React.Re
       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 2 }}>
       {children}
     </button>
+  );
+}
+
+function GlobalAdvanceControl({ onApply, pending }: { onApply: (pctFraction: string) => void; pending: boolean }) {
+  const [pct, setPct] = useState('');
+  const valid = pct.trim() !== '' && Number(pct) >= 0 && Number(pct) <= 100;
+  return (
+    <div className="field" style={{ marginBottom: 0, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+      <div>
+        <label>Avancement global (%)</label>
+        <input type="number" min={0} max={100} step={1} value={pct} placeholder="ex. 50" onChange={(e) => setPct(e.target.value)} style={{ width: 100, textAlign: 'right' }} />
+      </div>
+      <button className="btn btn-secondary" style={{ fontSize: 13 }} disabled={!valid || pending}
+        onClick={() => { onApply(String(Number(pct) / 100)); setPct(''); }}>
+        {pending ? '…' : 'Appliquer à tous les ouvrages'}
+      </button>
+    </div>
   );
 }
 
