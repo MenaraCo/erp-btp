@@ -12,12 +12,17 @@ import { isTransferable } from '../estimating/devis-workflow';
 import { VenteService } from '../estimating/vente.service';
 import { ChantierService } from '../site-tracking/chantier.service';
 
-interface DevisLineMeta {
+interface CorpsLine {
   id: string;
+  parent_line_id: string | null;
+  type: string;
   code: string | null;
   designation: string;
   unit: string | null;
   quantity: string | null;
+  vendable: boolean;
+  source_ouvrage_id: string | null;
+  section_type: string | null;
 }
 
 @Injectable()
@@ -70,18 +75,46 @@ export class AcceptanceService {
     const pvByLine = new Map(fv.items.map((i) => [i.id, i.pv]));
     // Only "main" lines enter the contract: options/variantes are excluded from the marché.
     const mainLineIds = new Set(fv.items.filter((i) => i.section === 'main').map((i) => i.id));
-    const allLines: DevisLineMeta[] = await runInTenant(this.dataSource, tenantId, (em) =>
+
+    // Corps du devis (titres + ouvrages) pour reproduire l'ARBRE dans le marché (cahier §5.6) :
+    // la situation de travaux aura la même structure que le devis.
+    const corps: CorpsLine[] = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT id, code, designation, unit, quantity FROM devis_line
-          WHERE devis_version_id = $1 AND type = 'ouvrage' AND vendable = true
-            AND source_ouvrage_id IS NOT NULL
+        `SELECT id, parent_line_id, type, code, designation, unit, quantity, vendable,
+                source_ouvrage_id, section_type
+           FROM devis_line
+          WHERE devis_version_id = $1 AND type IN ('titre','sous_titre','ouvrage')
           ORDER BY sort_order ASC, created_at ASC`,
         [versionId],
       ),
     );
-    const devisLines = allLines.filter((l) => mainLineIds.has(l.id));
+    const byId = new Map(corps.map((l) => [l.id, l]));
+    const excludedSection = (l: CorpsLine) => l.section_type === 'option' || l.section_type === 'variante';
+    // Ouvrages facturables (inchangé : « main », vendable, issu d'un ouvrage bibliothèque).
+    const billable = corps.filter(
+      (l) => l.type === 'ouvrage' && l.vendable && l.source_ouvrage_id && mainLineIds.has(l.id),
+    );
+    // Inclure la chaîne de titres ancêtres de chaque ouvrage facturable.
+    const included = new Set<string>();
+    for (const o of billable) {
+      included.add(o.id);
+      let p = o.parent_line_id;
+      while (p && byId.has(p) && !included.has(p)) {
+        const parent = byId.get(p)!;
+        if (excludedSection(parent)) break;
+        included.add(p);
+        p = parent.parent_line_id;
+      }
+    }
+    const childrenOf = new Map<string | null, CorpsLine[]>();
+    for (const l of corps) {
+      const k = l.parent_line_id ?? null;
+      const arr = childrenOf.get(k);
+      if (arr) arr.push(l);
+      else childrenOf.set(k, [l]);
+    }
 
-    // Phase B — create the marché (on a chantier) + its facturation lines in one transaction.
+    // Phase B — create the marché (on a chantier) + its facturation tree in one transaction.
     const marche = await runInTenant(this.dataSource, tenantId, async (em) => {
       const current = await em.query(`SELECT status FROM devis WHERE id = $1 FOR UPDATE`, [devisId]);
       if (!isTransferable(current[0].status)) {
@@ -96,19 +129,43 @@ export class AcceptanceService {
         venteTotal: fv.totalPvHt,
         targetChantierId: targetChantierId ?? null,
       });
+      const marcheLineIdByDevis = new Map<string, string>();
       let sort = 0;
-      for (const l of devisLines) {
-        const pv = new Decimal(pvByLine.get(l.id) ?? 0);
-        const qty = new Decimal(l.quantity ?? 0);
-        const pu = qty.isZero() ? new Decimal(0) : pv.dividedBy(qty).toDecimalPlaces(4);
-        await em.query(
-          `INSERT INTO marche_line
-             (tenant_id, marche_id, code, designation, unit, quantite, pu, montant_ht, source_devis_line_id, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [tenantId, m.id, l.code, l.designation, l.unit, qty.toString(), pu.toString(),
-            pv.toDecimalPlaces(2).toString(), l.id, sort++],
-        );
-      }
+      // DFS : parent inséré avant ses enfants ; les titres portent la structure, les ouvrages le montant.
+      const insertNode = async (l: CorpsLine): Promise<void> => {
+        if (included.has(l.id)) {
+          const parentMarcheId = l.parent_line_id ? marcheLineIdByDevis.get(l.parent_line_id) ?? null : null;
+          let row: { id: string };
+          if (l.type === 'ouvrage') {
+            const pv = new Decimal(pvByLine.get(l.id) ?? 0);
+            const qty = new Decimal(l.quantity ?? 0);
+            const pu = qty.isZero() ? new Decimal(0) : pv.dividedBy(qty).toDecimalPlaces(4);
+            row = (
+              await em.query(
+                `INSERT INTO marche_line
+                   (tenant_id, marche_id, parent_line_id, type, code, designation, unit, quantite, pu,
+                    montant_ht, source_devis_line_id, sort_order)
+                 VALUES ($1,$2,$3,'ouvrage',$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+                [tenantId, m.id, parentMarcheId, l.code, l.designation, l.unit, qty.toString(), pu.toString(),
+                  pv.toDecimalPlaces(2).toString(), l.id, sort++],
+              )
+            )[0];
+          } else {
+            row = (
+              await em.query(
+                `INSERT INTO marche_line
+                   (tenant_id, marche_id, parent_line_id, type, code, designation, unit, quantite, pu,
+                    montant_ht, source_devis_line_id, sort_order)
+                 VALUES ($1,$2,$3,'titre',$4,$5,NULL,0,0,0,$6,$7) RETURNING id`,
+                [tenantId, m.id, parentMarcheId, l.code, l.designation, l.id, sort++],
+              )
+            )[0];
+          }
+          marcheLineIdByDevis.set(l.id, row.id);
+        }
+        for (const c of childrenOf.get(l.id) ?? []) await insertNode(c);
+      };
+      for (const root of childrenOf.get(null) ?? []) await insertNode(root);
       return m;
     });
 
@@ -120,7 +177,7 @@ export class AcceptanceService {
     return {
       chantier: chantier[0],
       marche,
-      lineCount: devisLines.length,
+      lineCount: billable.length,
       executionLineCount,
     };
   }

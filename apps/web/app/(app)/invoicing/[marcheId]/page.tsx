@@ -11,6 +11,8 @@ import { euro } from '@/lib/format';
 /* ─────────── types ─────────── */
 interface MarcheLine {
   id: string;
+  parent_line_id: string | null;
+  type: 'titre' | 'ouvrage';
   code: string | null;
   designation: string;
   unit: string | null;
@@ -19,6 +21,8 @@ interface MarcheLine {
   montant_ht: string;
   avenant_id: string | null;
 }
+/** Ligne de marché aplatie pour l'affichage en arbre (profondeur + ordre DFS). */
+interface FlatLine extends MarcheLine { depth: number }
 interface MarcheDetail {
   marche: { id: string; code: string; name: string; total_ht: string };
   lines: MarcheLine[];
@@ -68,6 +72,28 @@ function fractionToPct(s: string | number | null | undefined): string {
   const n = Number(s);
   if (!Number.isFinite(n)) return '—';
   return `${(n * 100).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %`;
+}
+
+/** Aplati l'arbre de lignes de marché (DFS + profondeur) et calcule les ouvrages descendants de chaque titre. */
+function flattenMarcheTree(lines: MarcheLine[]): { flat: FlatLine[]; ouvrageDescendants: Map<string, string[]> } {
+  const childrenOf = new Map<string | null, MarcheLine[]>();
+  for (const l of lines) {
+    const k = l.parent_line_id ?? null;
+    const arr = childrenOf.get(k);
+    if (arr) arr.push(l);
+    else childrenOf.set(k, [l]);
+  }
+  const flat: FlatLine[] = [];
+  const ouvrageDescendants = new Map<string, string[]>();
+  const walk = (l: MarcheLine, depth: number): string[] => {
+    flat.push({ ...l, depth });
+    let leaves: string[] = l.type === 'ouvrage' ? [l.id] : [];
+    for (const c of childrenOf.get(l.id) ?? []) leaves = leaves.concat(walk(c, depth + 1));
+    if (l.type === 'titre') ouvrageDescendants.set(l.id, leaves);
+    return leaves;
+  };
+  for (const root of childrenOf.get(null) ?? []) walk(root, 0);
+  return { flat, ouvrageDescendants };
 }
 
 export default function MarcheDetailPage() {
@@ -187,6 +213,10 @@ function SituationsTab({ marcheId, lines, token }: { marcheId: string; lines: Ma
     return { perLine, totalPeriode: round2(totalPeriode) };
   }, [lines, pct, prevByLine, revisionNum]);
 
+  const { flat, ouvrageDescendants } = useMemo(() => flattenMarcheTree(lines), [lines]);
+  const sumBy = (ids: string[], f: (id: string) => number) => ids.reduce((a, id) => a + f(id), 0);
+  const montantById = useMemo(() => new Map(lines.map((l) => [l.id, Number(l.montant_ht)])), [lines]);
+
   const create = useMutation({
     mutationFn: () =>
       apiFetch(`/marches/${marcheId}/situations`, {
@@ -274,12 +304,30 @@ function SituationsTab({ marcheId, lines, token }: { marcheId: string; lines: Ma
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((l) => {
+                  {flat.map((l) => {
+                    const pad = 8 + l.depth * 18;
+                    if (l.type === 'titre') {
+                      // Titre = poste structurel : sous-totaux de ses ouvrages descendants.
+                      const desc = ouvrageDescendants.get(l.id) ?? [];
+                      const sousTotalMarche = sumBy(desc, (id) => montantById.get(id) ?? 0);
+                      const sousTotalPeriode = sumBy(desc, (id) => preview.perLine.get(id) ?? 0);
+                      return (
+                        <tr key={l.id} style={{ background: 'var(--bg)' }}>
+                          <td style={{ paddingLeft: pad, fontWeight: 600 }}>
+                            {l.code ? <span className="code-cell">{l.code}</span> : null} {l.designation}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{euro(sousTotalMarche)}</td>
+                          <td></td>
+                          <td></td>
+                          <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{euro(sousTotalPeriode)}</td>
+                        </tr>
+                      );
+                    }
                     const prev = prevByLine.get(l.id);
                     const periode = preview.perLine.get(l.id) ?? 0;
                     return (
                       <tr key={l.id}>
-                        <td>
+                        <td style={{ paddingLeft: pad }}>
                           {l.code ? <strong>{l.code} </strong> : null}{l.designation}
                           {l.avenant_id && <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>avenant</span>}
                           <div className="muted" style={{ fontSize: 11 }}>{l.quantite} {l.unit ?? ''} × {euro(l.pu)}</div>
