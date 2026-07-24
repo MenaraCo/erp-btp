@@ -78,21 +78,26 @@ export class AcceptanceService {
 
     // Corps du devis (titres + ouvrages) pour reproduire l'ARBRE dans le marché (cahier §5.6) :
     // la situation de travaux aura la même structure que le devis.
+    // Corps facturable : titres + ouvrages + ressources AUTONOMES (posées sous un titre, hors
+    // ouvrage). Les ressources sous-détail d'un ouvrage sont exclues (facturées via leur ouvrage).
     const corps: CorpsLine[] = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT id, parent_line_id, type, code, designation, unit, quantity, vendable,
-                source_ouvrage_id, section_type
-           FROM devis_line
-          WHERE devis_version_id = $1 AND type IN ('titre','sous_titre','ouvrage')
-          ORDER BY sort_order ASC, created_at ASC`,
+        `SELECT dl.id, dl.parent_line_id, dl.type, dl.code, dl.designation, dl.unit, dl.quantity,
+                dl.vendable, dl.source_ouvrage_id, dl.section_type
+           FROM devis_line dl
+           LEFT JOIN devis_line p ON p.id = dl.parent_line_id
+          WHERE dl.devis_version_id = $1
+            AND (dl.type IN ('titre','sous_titre','ouvrage')
+                 OR (dl.type = 'ressource' AND (dl.parent_line_id IS NULL OR p.type IN ('titre','sous_titre'))))
+          ORDER BY dl.sort_order ASC, dl.created_at ASC`,
         [versionId],
       ),
     );
     const byId = new Map(corps.map((l) => [l.id, l]));
     const excludedSection = (l: CorpsLine) => l.section_type === 'option' || l.section_type === 'variante';
-    // Ouvrages facturables (inchangé : « main », vendable, issu d'un ouvrage bibliothèque).
+    // Lignes facturables : ouvrages (biblio OU manuels à PV) + ressources autonomes, « main » et vendables.
     const billable = corps.filter(
-      (l) => l.type === 'ouvrage' && l.vendable && l.source_ouvrage_id && mainLineIds.has(l.id),
+      (l) => (l.type === 'ouvrage' || l.type === 'ressource') && l.vendable && mainLineIds.has(l.id),
     );
     // Inclure la chaîne de titres ancêtres de chaque ouvrage facturable.
     const included = new Set<string>();
@@ -136,7 +141,8 @@ export class AcceptanceService {
         if (included.has(l.id)) {
           const parentMarcheId = l.parent_line_id ? marcheLineIdByDevis.get(l.parent_line_id) ?? null : null;
           let row: { id: string };
-          if (l.type === 'ouvrage') {
+          // Ouvrage OU ressource autonome = ligne facturable (type marche_line 'ouvrage') ; titre = structure.
+          if (l.type === 'ouvrage' || l.type === 'ressource') {
             const pv = new Decimal(pvByLine.get(l.id) ?? 0);
             const qty = new Decimal(l.quantity ?? 0);
             const pu = qty.isZero() ? new Decimal(0) : pv.dividedBy(qty).toDecimalPlaces(4);

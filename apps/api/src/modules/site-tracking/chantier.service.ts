@@ -236,8 +236,57 @@ export class ChantierService {
           { code: dl.code, designation: dl.designation, unit: dl.unit }, top++);
       }
 
+      // Ressources AUTONOMES (posées directement sous un titre, hors ouvrage) : elles portent leur
+      // propre déboursé (pu × qté × (1+perte)) et doivent aussi alimenter le budget chantier —
+      // sinon le budget objectif diverge du déboursé étudié (cahier §5.5). On les matérialise en
+      // lignes d'exécution avec une ressource de nomenclature propre (valorisée au pu du devis).
+      const standaloneRes = await em.query(
+        `SELECT dl.id, dl.code, dl.designation, dl.unit, dl.quantity, dl.perte, dl.pu, dl.nature,
+                dl.vendable, dl.source_resource_id
+           FROM devis_line dl
+           LEFT JOIN devis_line p ON p.id = dl.parent_line_id
+          WHERE dl.devis_version_id = $1 AND dl.type = 'ressource'
+            AND (dl.parent_line_id IS NULL OR p.type IN ('titre','sous_titre'))
+          ORDER BY dl.sort_order ASC, dl.created_at ASC`,
+        [versionId],
+      );
+      for (const dl of standaloneRes) {
+        const src = dl.source_resource_id ? resById.get(dl.source_resource_id) : undefined;
+        const nature = dl.nature ?? src?.nature ?? 'material';
+        const line = (
+          await em.query(
+            `INSERT INTO execution_line
+               (tenant_id, chantier_id, marche_id, parent_line_id, type, vendable, code, designation, unit,
+                source_devis_line_id, source_ouvrage_id, quantite_etude, quantite_objectif,
+                debourse_unitaire_etude, debourse_unitaire_objectif, sort_order)
+             VALUES ($1,$2,$3,NULL,'ouvrage',$4,$5,$6,$7,$8,NULL,$9,$9,0,0,$10) RETURNING id`,
+            [tenantId, chantier.id, marcheId, dl.vendable, dl.code, dl.designation, dl.unit,
+              dl.id, dl.quantity ?? '0', top++],
+          )
+        )[0];
+        // Nomenclature propre au chantier valorisée au pu du devis (pas de dédup : pu spécifique).
+        const nomenc = (
+          await em.query(
+            `INSERT INTO nomenclature_resource
+               (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
+                unit_cost_etude, unit_cost_objectif, code_analytique_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING id`,
+            [tenantId, chantier.id, marcheId, dl.source_resource_id ?? null, dl.code ?? '', dl.designation,
+              dl.unit, nature, dl.pu ?? '0', src?.code_analytique_id ?? null],
+          )
+        )[0];
+        // qté du composant = (1 + perte%) ; le budget = qté ligne × (1+perte) × pu = déboursé.
+        const perteQty = new Decimal(1).plus(new Decimal(dl.perte ?? 0).dividedBy(100)).toString();
+        await em.query(
+          `INSERT INTO execution_component
+             (tenant_id, execution_line_id, kind, nomenclature_resource_id, quantite_etude, quantite_objectif, sort_order)
+           VALUES ($1,$2,'resource',$3,$4,$4,0)`,
+          [tenantId, line.id, nomenc.id, perteQty],
+        );
+      }
+
       await this.recompute(em, tenantId, chantier.id, true, marcheId);
-      return devisLines.length;
+      return devisLines.length + standaloneRes.length;
     });
   }
 
