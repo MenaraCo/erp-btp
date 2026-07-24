@@ -12,6 +12,8 @@ export interface DragItem {
   id: string; code: string; label: string; unit: string | null;
   debourse?: string; codeAnalytique?: string | null;
   sourceOuvrageId?: string | null;
+  /** true si l'item vient du panneau Bibliothèque (id = id biblio ouvrage/ressource). */
+  fromLibrary?: boolean;
 }
 
 export interface MontageLine {
@@ -175,15 +177,23 @@ export function Montage({
 
   const onDropItem = (parentId: string | null, item: DragItem) => {
     if (item.kind === 'ouvrage') {
-      if (item.sourceOuvrageId) {
-        insertOuvrage.mutate({ ouvrageId: item.sourceOuvrageId, parentLineId: parentId, quantity: '1' });
+      // Ouvrage biblio (fromLibrary → id = ouvrage biblio) ou déplacement d'un ouvrage biblio existant
+      // (sourceOuvrageId) : on COPIE le sous-détail. Un ouvrage manuel déplacé reste une ligne simple.
+      const ouvrageId = item.fromLibrary ? item.id : item.sourceOuvrageId ?? null;
+      if (ouvrageId) {
+        insertOuvrage.mutate({ ouvrageId, parentLineId: parentId, quantity: '1' });
       } else {
         addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: item.label, code: item.code, unit: item.unit ?? '', quantity: '1' });
       }
     } else if (item.kind === 'titre' || item.kind === 'sous_titre') {
       addLine.mutate({ type: item.kind, parentLineId: item.kind === 'sous_titre' ? parentId : null, designation: item.label, sortOrder: 9999 });
     } else {
-      addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: item.label, code: item.code, codeAnalytique: item.codeAnalytique ?? null, unit: item.unit ?? '', quantity: '1', pu: item.debourse ?? '0' });
+      // Ressource biblio : conserver le lien source_resource_id (appro, achats, transfert en dépendent).
+      addLine.mutate({
+        type: 'ressource', parentLineId: parentId, designation: item.label, code: item.code,
+        codeAnalytique: item.codeAnalytique ?? null, unit: item.unit ?? '', quantity: '1',
+        pu: item.debourse ?? '0', sourceResourceId: item.fromLibrary ? item.id : null,
+      });
     }
   };
 

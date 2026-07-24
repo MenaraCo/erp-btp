@@ -120,7 +120,7 @@ export function LibraryDrawer({
             <div
               key={o.id}
               draggable
-              onDragStart={(e) => setDrag(e, { kind: 'ouvrage', id: o.id, code: o.code, label: o.label, unit: o.unit, debourse: o.debourse })}
+              onDragStart={(e) => setDrag(e, { kind: 'ouvrage', id: o.id, code: o.code, label: o.label, unit: o.unit, debourse: o.debourse, fromLibrary: true })}
               title={`Glisser pour insérer « ${o.label} »`}
               style={{
                 display: 'flex', flexDirection: 'column', gap: 2,
@@ -149,7 +149,7 @@ export function LibraryDrawer({
             <div
               key={r.id}
               draggable
-              onDragStart={(e) => setDrag(e, { kind: 'ressource', id: r.id, code: r.code, label: r.label, unit: r.unit, debourse: r.unitCost, codeAnalytique: r.codeAnalytiqueCode ?? null })}
+              onDragStart={(e) => setDrag(e, { kind: 'ressource', id: r.id, code: r.code, label: r.label, unit: r.unit, debourse: r.unitCost, codeAnalytique: r.codeAnalytiqueCode ?? null, fromLibrary: true })}
               title={`Glisser pour insérer « ${r.label} »`}
               style={{
                 display: 'flex', flexDirection: 'column', gap: 2,
