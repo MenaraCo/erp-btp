@@ -403,6 +403,142 @@ export class ChantierService {
     });
   }
 
+  /* ───────── Édition structurelle (contre-étude, cahier §5.5) — modifier les prestations ───────── */
+
+  /** Ajoute une ressource PROPRE au chantier comme composant d'un ouvrage (source_resource_id NULL). */
+  addResourceComponent(
+    executionLineId: string,
+    input: { code: string; label: string; unit?: string | null; nature: string; unitCost: string | number; quantity: string | number },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT chantier_id, marche_id FROM execution_line WHERE id = $1`,
+        [executionLineId],
+      );
+      if (rows.length === 0) throw new NotFoundException(`Unknown execution line "${executionLineId}"`);
+      const { chantier_id: chantierId, marche_id: marcheId } = rows[0];
+      await this.assertMarcheEditable(em, marcheId);
+      const nomenc = (
+        await em.query(
+          `INSERT INTO nomenclature_resource
+             (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
+              unit_cost_etude, unit_cost_objectif)
+           VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8,$8) RETURNING id`,
+          [tenantId, chantierId, marcheId, input.code, input.label, input.unit ?? null, input.nature, String(input.unitCost)],
+        )
+      )[0];
+      const sort = Number(
+        (await em.query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM execution_component WHERE execution_line_id = $1`,
+          [executionLineId],
+        ))[0].n,
+      );
+      await em.query(
+        `INSERT INTO execution_component
+           (tenant_id, execution_line_id, kind, nomenclature_resource_id, quantite_etude, quantite_objectif, sort_order)
+         VALUES ($1,$2,'resource',$3,$4,$4,$5)`,
+        [tenantId, executionLineId, nomenc.id, String(input.quantity), sort],
+      );
+      await this.recompute(em, tenantId, chantierId, false, marcheId);
+      await this.logChange(em, tenantId, marcheId, 'add_resource_component', {
+        code: input.code, nature: input.nature, quantity: String(input.quantity), unitCost: String(input.unitCost),
+      }, executionLineId);
+      return this.getChantierInTx(em, chantierId);
+    });
+  }
+
+  /** Supprime un composant d'un ouvrage (ressource / % / sous-ligne). */
+  removeComponent(componentId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT el.chantier_id, el.marche_id FROM execution_component ec
+           JOIN execution_line el ON el.id = ec.execution_line_id WHERE ec.id = $1`,
+        [componentId],
+      );
+      if (rows.length === 0) throw new NotFoundException(`Unknown component "${componentId}"`);
+      const { chantier_id: chantierId, marche_id: marcheId } = rows[0];
+      await this.assertMarcheEditable(em, marcheId);
+      await em.query(`DELETE FROM execution_component WHERE id = $1`, [componentId]);
+      await this.recompute(em, tenantId, chantierId, false, marcheId);
+      await this.logChange(em, tenantId, marcheId, 'remove_component', { componentId });
+      return this.getChantierInTx(em, chantierId);
+    });
+  }
+
+  /** Ajoute un ouvrage (prestation) au marché : ligne de haut niveau, budget alimenté par ses composants. */
+  addOuvrageLine(
+    marcheId: string,
+    input: { code?: string | null; designation: string; unit?: string | null; quantiteObjectif: string | number },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const m = await em.query(`SELECT chantier_id FROM marche WHERE id = $1`, [marcheId]);
+      if (m.length === 0) throw new NotFoundException(`Unknown marché "${marcheId}"`);
+      const chantierId = m[0].chantier_id as string;
+      await this.assertMarcheEditable(em, marcheId);
+      const sort = Number(
+        (await em.query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM execution_line
+            WHERE marche_id = $1 AND parent_line_id IS NULL`,
+          [marcheId],
+        ))[0].n,
+      );
+      const line = (
+        await em.query(
+          `INSERT INTO execution_line
+             (tenant_id, chantier_id, marche_id, parent_line_id, type, vendable, code, designation, unit,
+              quantite_etude, quantite_objectif, debourse_unitaire_etude, debourse_unitaire_objectif, sort_order)
+           VALUES ($1,$2,$3,NULL,'ouvrage',true,$4,$5,$6,$7,$7,0,0,$8) RETURNING id`,
+          [tenantId, chantierId, marcheId, input.code ?? null, input.designation, input.unit ?? null,
+            String(input.quantiteObjectif), sort],
+        )
+      )[0];
+      await this.recompute(em, tenantId, chantierId, false, marcheId);
+      await this.logChange(em, tenantId, marcheId, 'add_ouvrage_line', {
+        code: input.code ?? null, designation: input.designation,
+      }, line.id);
+      return this.getChantierInTx(em, chantierId);
+    });
+  }
+
+  /** Modifie la quantité d'un ouvrage (ligne) — recalcule son budget objectif. */
+  setLineQuantity(lineId: string, quantiteObjectif: string | number) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(`SELECT chantier_id, marche_id FROM execution_line WHERE id = $1`, [lineId]);
+      if (rows.length === 0) throw new NotFoundException(`Unknown execution line "${lineId}"`);
+      const { chantier_id: chantierId, marche_id: marcheId } = rows[0];
+      await this.assertMarcheEditable(em, marcheId);
+      await em.query(
+        `UPDATE execution_line SET quantite_objectif = $1, updated_at = now() WHERE id = $2`,
+        [String(quantiteObjectif), lineId],
+      );
+      await this.recompute(em, tenantId, chantierId, false, marcheId);
+      await this.logChange(em, tenantId, marcheId, 'set_line_quantity', {
+        lineId, quantiteObjectif: String(quantiteObjectif),
+      }, lineId);
+      return this.getChantierInTx(em, chantierId);
+    });
+  }
+
+  /** Supprime un ouvrage (et son sous-arbre : composants, budgets, lignes filles) du marché. */
+  removeLine(lineId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(`SELECT chantier_id, marche_id FROM execution_line WHERE id = $1`, [lineId]);
+      if (rows.length === 0) throw new NotFoundException(`Unknown execution line "${lineId}"`);
+      const { chantier_id: chantierId, marche_id: marcheId } = rows[0];
+      await this.assertMarcheEditable(em, marcheId);
+      // FKs ON DELETE CASCADE : composants, budgets et lignes filles suivent.
+      await em.query(`DELETE FROM execution_line WHERE id = $1`, [lineId]);
+      await this.recompute(em, tenantId, chantierId, false, marcheId);
+      await this.logChange(em, tenantId, marcheId, 'remove_line', { lineId });
+      return this.getChantierInTx(em, chantierId);
+    });
+  }
+
   /**
    * Valide la contre-étude d'un marché : passe de `contre_etude` à `execution`, fige l'objectif
    * comme « budget initial » du contrôle de gestion et initialise le prévisionnel (horodaté).
