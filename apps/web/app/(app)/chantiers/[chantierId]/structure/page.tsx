@@ -192,6 +192,10 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
       apiFetch(`/chantiers/${chantierId}/line-advancement/apply`, { method: 'POST', token, body: { pct, marcheId: marche.id } }),
     onSuccess: () => { setErr(null); invalidate(); }, onError: onErr,
   });
+  const mFromSituations = useMutation({
+    mutationFn: () => apiFetch(`/chantiers/${chantierId}/line-advancement/from-situations`, { method: 'POST', token }),
+    onSuccess: () => { setErr(null); invalidate(); }, onError: onErr,
+  });
 
   const pending = [mRenegotiate, mCompQty, mLineQty, mRemoveComp, mRemoveLine, mAddResource].some((m) => m.isPending);
   const edit: Edit = {
@@ -261,8 +265,17 @@ function MarcheBlock({ marche, chantierId, token }: { marche: MarcheTree; chanti
       {showLog && <ChangeLog marcheId={marche.id} token={token} />}
 
       {advancing && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', marginTop: 10, flexWrap: 'wrap' }}>
           <GlobalAdvanceControl onApply={(pct) => mApplyAdv.mutate(pct)} pending={mApplyAdv.isPending} />
+          <div>
+            <button className="btn btn-secondary" style={{ fontSize: 13 }} disabled={mFromSituations.isPending}
+              onClick={() => { setErr(null); mFromSituations.mutate(); }}>
+              {mFromSituations.isPending ? '…' : "Reprendre l'avancement des situations"}
+            </button>
+            <div className="muted" style={{ fontSize: 11, marginTop: 2, maxWidth: 260 }}>
+              Proposition depuis la dernière situation — modifiable ensuite ouvrage par ouvrage.
+            </div>
+          </div>
         </div>
       )}
 

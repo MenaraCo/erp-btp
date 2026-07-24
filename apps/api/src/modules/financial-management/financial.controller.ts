@@ -146,4 +146,12 @@ export class FinancialController {
       pct: body.pct, parentLineId: body.parentLineId ?? null, marcheId: body.marcheId ?? null,
     });
   }
+
+  /** Reprend l'avancement des situations comme proposition (modifiable ensuite). */
+  @Post('chantiers/:chantierId/line-advancement/from-situations')
+  @RequiresCapability('financial.forecast')
+  @RequiresPermission('financial.write')
+  applyFromSituations(@Param('chantierId') chantierId: string) {
+    return this.advancement.applyFromSituations(chantierId);
+  }
 }

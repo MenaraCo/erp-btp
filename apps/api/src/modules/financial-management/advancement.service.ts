@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 
@@ -83,7 +83,7 @@ export class AdvancementService {
          VALUES ($1, $2, $3, $4, 'manual')`,
         [tenantId, chantierId, executionLineId, String(p)],
       );
-      return this.currentLines(chantierId);
+      return this.currentLinesInEm(em, chantierId);
     });
   }
 
@@ -113,22 +113,62 @@ export class AdvancementService {
           [tenantId, chantierId, t.id, String(p)],
         );
       }
-      return this.currentLines(chantierId);
+      return this.currentLinesInEm(em, chantierId);
     });
+  }
+
+  /**
+   * Reprend l'avancement des SITUATIONS de travaux comme proposition d'avancement d'exécution
+   * (cahier §5.8, mode « situations ») : pour chaque ouvrage, le % cumulé de la dernière situation
+   * de son marché est appliqué à l'ouvrage d'exécution correspondant (lien via source_devis_line_id).
+   * Ces % ne sont PAS figés : ils sont enregistrés comme un avancement (source 'situations') que le
+   * conducteur peut ensuite modifier librement (le dernier enregistrement fait foi).
+   */
+  applyFromSituations(chantierId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `WITH last_sit AS (
+           SELECT DISTINCT ON (s.marche_id) s.id AS situation_id
+             FROM situation s
+             JOIN marche m ON m.id = s.marche_id
+            WHERE m.chantier_id = $1
+            ORDER BY s.marche_id, s.numero DESC
+         )
+         SELECT el.id AS execution_line_id, sl.pct_avancement AS pct
+           FROM situation_line sl
+           JOIN last_sit ls ON ls.situation_id = sl.situation_id
+           JOIN marche_line ml ON ml.id = sl.marche_line_id
+           JOIN execution_line el ON el.source_devis_line_id = ml.source_devis_line_id
+            AND el.chantier_id = $1 AND el.parent_line_id IS NULL
+          WHERE ml.source_devis_line_id IS NOT NULL`,
+        [chantierId],
+      );
+      for (const r of rows) {
+        await em.query(
+          `INSERT INTO execution_line_advancement (tenant_id, chantier_id, execution_line_id, pct, source)
+           VALUES ($1, $2, $3, $4, 'situations')`,
+          [tenantId, chantierId, r.execution_line_id, String(r.pct)],
+        );
+      }
+      return this.currentLinesInEm(em, chantierId);
+    });
+  }
+
+  /** Dernier avancement par ligne, dans une transaction donnée (voit les écritures en cours). */
+  private currentLinesInEm(em: EntityManager, chantierId: string) {
+    return em.query(
+      `SELECT DISTINCT ON (execution_line_id) execution_line_id, pct, recorded_at
+         FROM execution_line_advancement WHERE chantier_id = $1
+        ORDER BY execution_line_id, recorded_at DESC`,
+      [chantierId],
+    ) as Promise<Array<{ execution_line_id: string; pct: string; recorded_at: Date }>>;
   }
 
   /** Dernier avancement par ligne d'exécution (les lignes budgétées). */
   currentLines(chantierId: string) {
     const tenantId = this.context.requireTenantId();
-    return runInTenant(this.dataSource, tenantId, async (em) => {
-      const rows = await em.query(
-        `SELECT DISTINCT ON (execution_line_id) execution_line_id, pct, recorded_at
-           FROM execution_line_advancement WHERE chantier_id = $1
-          ORDER BY execution_line_id, recorded_at DESC`,
-        [chantierId],
-      );
-      return rows as Array<{ execution_line_id: string; pct: string; recorded_at: Date }>;
-    });
+    return runInTenant(this.dataSource, tenantId, (em) => this.currentLinesInEm(em, chantierId));
   }
 
   /**
