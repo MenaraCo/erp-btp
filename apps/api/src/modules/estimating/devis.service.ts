@@ -100,6 +100,8 @@ export interface DevisLineInput {
   quantity?: string | number | null;
   quantityFormula?: string | null;
   pu?: string | number | null;
+  perte?: string | number | null;
+  nature?: string | null;
   sourceOuvrageId?: string | null;
   sourceResourceId?: string | null;
   sortOrder?: number;
@@ -753,9 +755,9 @@ export class DevisService {
         await em.query(
           `INSERT INTO devis_line
              (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique, designation, unit,
-              quantity, quantity_formula, pu, source_ouvrage_id, source_resource_id, sort_order,
+              quantity, quantity_formula, pu, perte, nature, source_ouvrage_id, source_resource_id, sort_order,
               vendable, section_type)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
           [
             tenantId,
             versionId,
@@ -768,6 +770,8 @@ export class DevisService {
             quantity,
             input.quantityFormula ?? null,
             input.pu != null ? String(input.pu) : null,
+            input.perte != null ? String(input.perte) : '0',
+            input.nature ?? null,
             input.sourceOuvrageId ?? null,
             input.sourceResourceId ?? null,
             input.sortOrder ?? 0,
@@ -962,7 +966,7 @@ export class DevisService {
         ],
       );
 
-      // Propagate designation/pu/perte to all ressources with same code in this version.
+      // Propagate designation/pu/perte/nature to all ressources with same code in this version.
       const codeToSync = patch.code !== undefined ? patch.code : cur.code;
       if (patch.syncByCode && codeToSync && cur.type === 'ressource') {
         const sets: string[] = [];
@@ -970,6 +974,7 @@ export class DevisService {
         if (patch.designation !== undefined) { sets.push(`designation = $${vals.length + 1}`); vals.push(patch.designation); }
         if (patch.pu !== undefined) { sets.push(`pu = $${vals.length + 1}`); vals.push(patch.pu != null ? String(patch.pu) : null); }
         if (patch.perte !== undefined) { sets.push(`perte = $${vals.length + 1}`); vals.push(patch.perte != null ? String(patch.perte) : null); }
+        if (patch.nature !== undefined) { sets.push(`nature = $${vals.length + 1}`); vals.push(patch.nature ?? null); }
         if (sets.length > 0) {
           await em.query(
             `UPDATE devis_line SET ${sets.join(', ')}, updated_at = now()

@@ -27,8 +27,10 @@ export interface MontageLine {
   quantity: string | null;
   pu: string | null;
   perte: string | null;
+  nature: string | null;
   section_type: 'option' | 'variante' | null;
   source_ouvrage_id: string | null;
+  source_resource_id: string | null;
   sort_order: number;
   numero?: string | null;
   num_custom?: string | null;
@@ -531,6 +533,10 @@ function Node({
                   onChange={(v) => updateLine.mutate({ id: c.id, patch: { unit: v || null } })} />
                 <input defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: 44, textAlign: 'right' }}
                   onBlur={(e) => e.target.value !== cleanNum(c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0', syncByCode: true } })} />
+                {!isSubOuvrage && (
+                  <NatureSelect value={c.nature} readOnly={readOnly}
+                    onChange={(v) => updateLine.mutate({ id: c.id, patch: { nature: v || null, syncByCode: true } })} />
+                )}
                 {isSubOuvrage ? (
                   <span style={{ width: 72, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12 }}>{fmtEuro(subUnitPu, decimals)}</span>
                 ) : (
@@ -574,6 +580,10 @@ function Node({
           onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
         <UnitSelect value={line.unit} token={token} readOnly={readOnly}
           onChange={(v) => updateLine.mutate({ id: line.id, patch: { unit: v || null } })} />
+        {!vente && (
+          <NatureSelect value={line.nature} readOnly={readOnly}
+            onChange={(v) => updateLine.mutate({ id: line.id, patch: { nature: v || null, syncByCode: !!line.code } })} />
+        )}
         {vente ? (
           <PvCell computed={puVente} forced={!!info?.forced} pending={setLinePv.isPending} decimals={decimals}
             onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
@@ -684,6 +694,36 @@ function TypeBadge({ type }: { type: string }) {
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       border: `1px solid ${c.color}`, lineHeight: 1, userSelect: 'none',
     }}>{c.label}</span>
+  );
+}
+
+/** Nature d'une ressource (MO/matériaux/matériel/ST) — pilote la ventilation des tableaux de bord.
+ * Vide pour une ressource manuelle non classée : à défaut, le calcul retombe sur « Matériaux ». */
+const NATURE_CHOICES: { value: string; label: string; short: string }[] = [
+  { value: 'material', label: 'Matériaux', short: 'MAT' },
+  { value: 'labor', label: "Main d'œuvre", short: 'MO' },
+  { value: 'equipment', label: 'Matériel', short: 'MATL' },
+  { value: 'subcontract', label: 'Sous-traitance', short: 'ST' },
+];
+function NatureSelect({ value, readOnly, onChange }: {
+  value: string | null | undefined;
+  readOnly: boolean;
+  onChange: (v: string) => void;
+}) {
+  const current = value ?? '';
+  return (
+    <select
+      value={current}
+      disabled={readOnly}
+      title="Nature (ventilation MO / matériaux / matériel / sous-traitance)"
+      onChange={(e) => onChange(e.target.value)}
+      style={{ width: 62, fontSize: 12, padding: '1px 2px', border: `1px solid ${current ? '#e2e8f0' : '#f59e0b'}`, borderRadius: 4, background: current ? '#f8fafc' : '#fffbeb', color: '#475569', textAlign: 'center', flexShrink: 0 }}
+    >
+      <option value="">—</option>
+      {NATURE_CHOICES.map((n) => (
+        <option key={n.value} value={n.value} title={n.label}>{n.short}</option>
+      ))}
+    </select>
   );
 }
 
