@@ -18,6 +18,8 @@ import { WorkflowService } from './workflow.service';
 import { WorkflowController } from './workflow.controller';
 import { DevisPdfService } from './devis-pdf.service';
 import { DevisPdfController } from './devis-pdf.controller';
+import { ImportService } from './import/import.service';
+import { ImportController } from './import/import.controller';
 import { EstimatingSearchProvider } from './estimating-search.provider';
 
 /**
@@ -42,6 +44,7 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     VenteService,
     WorkflowService,
     DevisPdfService,
+    ImportService,
     EstimatingSearchProvider,
   ],
   controllers: [
@@ -51,6 +54,7 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     VenteController,
     WorkflowController,
     DevisPdfController,
+    ImportController,
   ],
   exports: [
     LibrariesService,

@@ -47,6 +47,28 @@ export async function apiFetch<T = unknown>(
   return data as T;
 }
 
+/** Uploads a file via multipart/form-data (field "file"). Le navigateur pose le Content-Type. */
+export async function apiUpload<T = unknown>(
+  path: string,
+  file: File,
+  token: string | null,
+): Promise<T> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    const message = data?.message ?? res.statusText;
+    throw new ApiError(res.status, Array.isArray(message) ? message.join(', ') : message);
+  }
+  return data as T;
+}
+
 /** Fetches a binary resource (e.g. a PDF) with the bearer token and returns a blob URL. */
 export async function apiFetchBlobUrl(path: string, token: string | null): Promise<string> {
   const res = await fetch(`${API_URL}${path}`, {
