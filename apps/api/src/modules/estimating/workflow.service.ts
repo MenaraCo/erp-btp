@@ -17,6 +17,7 @@ import {
   nextStates,
 } from './devis-workflow';
 import { deriveAffaireStatus } from './affaire-derived-status';
+import { VenteService } from './vente.service';
 
 export interface TransferCheck {
   status: DevisStatus;
@@ -29,6 +30,7 @@ export class WorkflowService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
+    private readonly vente: VenteService,
   ) {}
 
   /** Moves a devis to a new status, enforcing the state machine; recomputes the affaire status. */
@@ -89,15 +91,19 @@ export class WorkflowService {
         });
       }
 
-      const debourse = await em.query(
-        `SELECT COALESCE(SUM(o.debourse * COALESCE(dl.quantity, 0)), 0) AS total
-           FROM devis_line dl
-           JOIN devis_version dv ON dv.id = dl.devis_version_id
-           JOIN ouvrage o ON o.id = dl.source_ouvrage_id
-          WHERE dv.devis_id = $1 AND dl.type = 'ouvrage'`,
+      // Déboursé réel = feuille de vente (contenu du devis : sous-détail copié/manuel, ouvrages
+      // manuels, ressources autonomes) — surtout pas la bibliothèque, sinon un devis 100% manuel
+      // remonterait à tort « déboursé nul ».
+      const latest = await em.query(
+        `SELECT id FROM devis_version WHERE devis_id = $1 ORDER BY version_no DESC LIMIT 1`,
         [devisId],
       );
-      if (Number(debourse[0].total) === 0) {
+      let totalDebourse = 0;
+      if (latest.length > 0) {
+        const fv = await this.vente.computeForVersion(latest[0].id);
+        totalDebourse = Number(fv.totalDebourse ?? 0);
+      }
+      if (totalDebourse === 0) {
         alerts.push({
           level: 'warning',
           message: 'Le déboursé du devis est nul.',
