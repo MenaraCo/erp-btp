@@ -168,6 +168,47 @@ export class ChantierService {
         return row.id;
       };
 
+      // Contenu RÉEL du devis (pas la bibliothèque) : sous-détail copié/manuel + ressources autonomes.
+      // Le déboursé étudié se calcule dessus (feuille de vente) ; le chantier doit s'aligner, sinon
+      // budget objectif ≠ déboursé (ouvrages manuels, sous-détail édité, ressources saisies à la main).
+      interface DevisLine {
+        id: string; parent_line_id: string | null; type: string; code: string | null;
+        designation: string; unit: string | null; quantity: string | null; perte: string | null;
+        pu: string | null; nature: string | null; source_ouvrage_id: string | null;
+        source_resource_id: string | null; vendable: boolean; sort_order: number;
+      }
+      const allLines: DevisLine[] = await em.query(
+        `SELECT id, parent_line_id, type, code, designation, unit, quantity, perte, pu, nature,
+                source_ouvrage_id, source_resource_id, vendable, sort_order
+           FROM devis_line WHERE devis_version_id = $1 ORDER BY sort_order ASC, created_at ASC`,
+        [versionId],
+      );
+      const dById = new Map(allLines.map((l) => [l.id, l]));
+      const dChildren = new Map<string, DevisLine[]>();
+      for (const l of allLines) {
+        if (!l.parent_line_id) continue;
+        const arr = dChildren.get(l.parent_line_id) ?? [];
+        arr.push(l);
+        dChildren.set(l.parent_line_id, arr);
+      }
+      /** Nomenclature valorisée au PU du devis (ressource manuelle ou sous-détail édité). */
+      const nomencFromDevisRes = async (l: DevisLine): Promise<string> => {
+        const src = l.source_resource_id ? resById.get(l.source_resource_id) : undefined;
+        const nature = l.nature ?? src?.nature ?? 'material';
+        return (
+          await em.query(
+            `INSERT INTO nomenclature_resource
+               (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
+                unit_cost_etude, unit_cost_objectif, code_analytique_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING id`,
+            [tenantId, chantier.id, marcheId, l.source_resource_id ?? null, l.code ?? '', l.designation,
+              l.unit, nature, l.pu ?? '0', src?.code_analytique_id ?? null],
+          )
+        )[0].id;
+      };
+      const perteQty = (l: DevisLine) =>
+        new Decimal(l.quantity ?? 0).times(new Decimal(1).plus(new Decimal(l.perte ?? 0).dividedBy(100))).toString();
+
       const materialize = async (
         ouvrageId: string,
         parentLineId: string | null,
@@ -223,70 +264,86 @@ export class ChantierService {
         return line.id;
       };
 
-      const devisLines = await em.query(
-        `SELECT id, code, designation, unit, quantity, vendable, source_ouvrage_id
-           FROM devis_line
-          WHERE devis_version_id = $1 AND type = 'ouvrage' AND source_ouvrage_id IS NOT NULL
-          ORDER BY sort_order ASC, created_at ASC`,
-        [versionId],
-      );
-      let top = 0;
-      for (const dl of devisLines) {
-        await materialize(dl.source_ouvrage_id, null, dl.vendable, dl.id, dl.quantity ?? '0',
-          { code: dl.code, designation: dl.designation, unit: dl.unit }, top++);
-      }
-
-      // Ressources AUTONOMES (posées directement sous un titre, hors ouvrage) : elles portent leur
-      // propre déboursé (pu × qté × (1+perte)) et doivent aussi alimenter le budget chantier —
-      // sinon le budget objectif diverge du déboursé étudié (cahier §5.5). On les matérialise en
-      // lignes d'exécution avec une ressource de nomenclature propre (valorisée au pu du devis).
-      const standaloneRes = await em.query(
-        `SELECT dl.id, dl.code, dl.designation, dl.unit, dl.quantity, dl.perte, dl.pu, dl.nature,
-                dl.vendable, dl.source_resource_id
-           FROM devis_line dl
-           LEFT JOIN devis_line p ON p.id = dl.parent_line_id
-          WHERE dl.devis_version_id = $1 AND dl.type = 'ressource'
-            AND (dl.parent_line_id IS NULL OR p.type IN ('titre','sous_titre'))
-          ORDER BY dl.sort_order ASC, dl.created_at ASC`,
-        [versionId],
-      );
-      for (const dl of standaloneRes) {
-        const src = dl.source_resource_id ? resById.get(dl.source_resource_id) : undefined;
-        const nature = dl.nature ?? src?.nature ?? 'material';
-        const line = (
+      /** Crée une ligne d'exécution ouvrage à partir d'une ligne de devis (méta + qté). */
+      const insertExecOuvrage = async (dl: DevisLine, parentLineId: string | null, sortOrder: number) =>
+        (
           await em.query(
             `INSERT INTO execution_line
                (tenant_id, chantier_id, marche_id, parent_line_id, type, vendable, code, designation, unit,
                 source_devis_line_id, source_ouvrage_id, quantite_etude, quantite_objectif,
                 debourse_unitaire_etude, debourse_unitaire_objectif, sort_order)
-             VALUES ($1,$2,$3,NULL,'ouvrage',$4,$5,$6,$7,$8,NULL,$9,$9,0,0,$10) RETURNING id`,
-            [tenantId, chantier.id, marcheId, dl.vendable, dl.code, dl.designation, dl.unit,
-              dl.id, dl.quantity ?? '0', top++],
+             VALUES ($1,$2,$3,$4,'ouvrage',$5,$6,$7,$8,$9,$10,$11,$11,0,0,$12) RETURNING id`,
+            [tenantId, chantier.id, marcheId, parentLineId, dl.vendable, dl.code, dl.designation, dl.unit,
+              dl.id, dl.source_ouvrage_id, dl.quantity ?? '0', sortOrder],
           )
-        )[0];
-        // Nomenclature propre au chantier valorisée au pu du devis (pas de dédup : pu spécifique).
-        const nomenc = (
-          await em.query(
-            `INSERT INTO nomenclature_resource
-               (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
-                unit_cost_etude, unit_cost_objectif, code_analytique_id)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING id`,
-            [tenantId, chantier.id, marcheId, dl.source_resource_id ?? null, dl.code ?? '', dl.designation,
-              dl.unit, nature, dl.pu ?? '0', src?.code_analytique_id ?? null],
-          )
-        )[0];
-        // qté du composant = (1 + perte%) ; le budget = qté ligne × (1+perte) × pu = déboursé.
-        const perteQty = new Decimal(1).plus(new Decimal(dl.perte ?? 0).dividedBy(100)).toString();
+        )[0].id as string;
+
+      /** Ouvrage du devis avec sous-détail COPIÉ/MANUEL (enfants ressource/ouvrage) : source de vérité. */
+      const materializeFromChildren = async (dl: DevisLine, parentLineId: string | null, sortOrder: number): Promise<string> => {
+        const lineId = await insertExecOuvrage(dl, parentLineId, sortOrder);
+        let cSort = 0;
+        for (const c of dChildren.get(dl.id) ?? []) {
+          if (c.type === 'ressource') {
+            const nomencId = await nomencFromDevisRes(c);
+            await em.query(
+              `INSERT INTO execution_component
+                 (tenant_id, execution_line_id, kind, nomenclature_resource_id, quantite_etude, quantite_objectif, sort_order)
+               VALUES ($1,$2,'resource',$3,$4,$4,$5)`,
+              [tenantId, lineId, nomencId, perteQty(c), cSort++],
+            );
+          } else if (c.type === 'ouvrage') {
+            const childLineId = await buildOuvrage(c, lineId, cSort);
+            await em.query(
+              `INSERT INTO execution_component
+                 (tenant_id, execution_line_id, kind, child_line_id, quantite_etude, quantite_objectif, sort_order)
+               VALUES ($1,$2,'sub_line',$3,$4,$4,$5)`,
+              [tenantId, lineId, childLineId, perteQty(c), cSort++],
+            );
+          }
+        }
+        return lineId;
+      };
+
+      /** Dispatch d'un ouvrage : sous-détail du devis s'il existe, sinon bibliothèque, sinon manuel vide. */
+      const buildOuvrage = async (dl: DevisLine, parentLineId: string | null, sortOrder: number): Promise<string> => {
+        const hasCostChildren = (dChildren.get(dl.id) ?? []).some((c) => c.type === 'ressource' || c.type === 'ouvrage');
+        if (hasCostChildren) return materializeFromChildren(dl, parentLineId, sortOrder);
+        if (dl.source_ouvrage_id) {
+          return materialize(dl.source_ouvrage_id, parentLineId, dl.vendable, dl.id, dl.quantity ?? '0',
+            { code: dl.code, designation: dl.designation, unit: dl.unit }, sortOrder);
+        }
+        // Ouvrage manuel sans sous-détail : déboursé 0 (ligne facturée par son PV forcé seulement).
+        return insertExecOuvrage(dl, parentLineId, sortOrder);
+      };
+
+      /** Ressource AUTONOME (sous un titre, hors ouvrage) : ligne d'exécution + 1 composant au pu du devis. */
+      const materializeStandaloneRes = async (dl: DevisLine, sortOrder: number): Promise<void> => {
+        const lineId = await insertExecOuvrage(dl, null, sortOrder);
+        const nomencId = await nomencFromDevisRes(dl);
+        const mult = new Decimal(1).plus(new Decimal(dl.perte ?? 0).dividedBy(100)).toString();
         await em.query(
           `INSERT INTO execution_component
              (tenant_id, execution_line_id, kind, nomenclature_resource_id, quantite_etude, quantite_objectif, sort_order)
            VALUES ($1,$2,'resource',$3,$4,$4,0)`,
-          [tenantId, line.id, nomenc.id, perteQty],
+          [tenantId, lineId, nomencId, mult],
         );
+      };
+
+      // Matérialise depuis le CONTENU DU DEVIS : ouvrages et ressources autonomes de premier niveau
+      // (parent = titre/sous-titre ou racine) ; les enfants d'ouvrages sont traités par leur parent.
+      let top = 0;
+      let count = 0;
+      for (const l of allLines) {
+        if (l.type !== 'ouvrage' && l.type !== 'ressource') continue;
+        const parent = l.parent_line_id ? dById.get(l.parent_line_id) : undefined;
+        if (parent && parent.type !== 'titre' && parent.type !== 'sous_titre') continue; // enfant d'un ouvrage
+        if (l.type === 'ouvrage') await buildOuvrage(l, null, top++);
+        else await materializeStandaloneRes(l, top++);
+        count++;
       }
 
       await this.recompute(em, tenantId, chantier.id, true, marcheId);
-      return devisLines.length + standaloneRes.length;
+      return count;
     });
   }
 

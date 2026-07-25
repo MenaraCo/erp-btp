@@ -1058,8 +1058,12 @@ export class DevisService {
   computeApproForVersion(versionId: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
+      // Toutes les ressources du devis (biblio ET saisies à la main). Les métadonnées d'achat
+      // (unité d'achat, coeff de conversion, prix public…) viennent de la bibliothèque si la
+      // ressource y est rattachée ; sinon on retombe sur les valeurs de la ligne (code, pu, unité).
       const rows: Array<{
-        resource_id: string;
+        line_id: string;
+        resource_id: string | null;
         code: string | null;
         label: string;
         unite_emploi: string | null;
@@ -1074,16 +1078,17 @@ export class DevisService {
         pu: string | null;
         ouvrage_qty: string | null;
       }> = await em.query(
-        `SELECT r.id AS resource_id, r.code, r.label, r.unit AS unite_emploi,
+        `SELECT dl.id AS line_id, r.id AS resource_id,
+                COALESCE(r.code, dl.code) AS code, COALESCE(r.label, dl.designation) AS label,
+                COALESCE(r.unit, dl.unit) AS unite_emploi,
                 r.unite_achat, r.coeff_conversion, r.prix_public, r.conditionnement,
                 r.ref_fournisseur, s.code AS fournisseur,
                 dl.quantity, dl.perte, dl.pu, p.quantity AS ouvrage_qty
            FROM devis_line dl
-           JOIN resource r ON r.id = dl.source_resource_id
+           LEFT JOIN resource r ON r.id = dl.source_resource_id
            LEFT JOIN supplier s ON s.id = r.supplier_id
            LEFT JOIN devis_line p ON p.id = dl.parent_line_id AND p.type = 'ouvrage'
-          WHERE dl.devis_version_id = $1 AND dl.type = 'ressource'
-            AND dl.source_resource_id IS NOT NULL`,
+          WHERE dl.devis_version_id = $1 AND dl.type = 'ressource'`,
         [versionId],
       );
 
@@ -1096,9 +1101,11 @@ export class DevisService {
         const eff = ouvrageQty
           .times(new Decimal(r.quantity ?? 0))
           .times(new Decimal(1).plus(new Decimal(r.perte ?? 0).dividedBy(100)));
-        const cur = agg.get(r.resource_id) ?? { meta: r, qteEmploi: new Decimal(0) };
+        // Agrégation par ressource biblio si rattachée, sinon par code (ou id de ligne) pour le manuel.
+        const key = r.resource_id ?? `manual:${r.code ?? r.line_id}`;
+        const cur = agg.get(key) ?? { meta: r, qteEmploi: new Decimal(0) };
         cur.qteEmploi = cur.qteEmploi.plus(eff);
-        agg.set(r.resource_id, cur);
+        agg.set(key, cur);
       }
 
       return Array.from(agg.values()).map(({ meta, qteEmploi }) => {
