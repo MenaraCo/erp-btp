@@ -4,8 +4,15 @@ import { DataSource, EntityManager } from 'typeorm';
 import { TenantContext } from '../../../core/tenancy/tenant-context';
 import { runInTenant } from '../../../core/tenancy/tenant-transaction';
 import { parseDpgfExcel, parseDpgfXml, ParsedDevis } from './dpgf-parser';
+import { parseNomenclatureXml } from './nomenclature-parser';
 
 export type DpgfFormat = 'xml' | 'excel';
+
+export interface ImportNomenclatureResult {
+  libraryId: string;
+  libraryCode: string;
+  stats: { resources: number; ouvrages: number; composants: number; ignores: number };
+}
 
 export interface ImportDevisResult {
   affaireId: string;
@@ -83,6 +90,113 @@ export class ImportService {
         versionId: version.id,
         numero: code,
         stats: { lots: parsed.lots.length, ouvrages: totalOuvrages, client: Boolean(clientId) },
+      };
+    });
+  }
+
+  /** Importe une nomenclature XML (matériaux/tâches/ouvrages) dans une bibliothèque cible
+   * (créée si le code n'existe pas). Upsert par code, débours ouvrage recalculé. */
+  async importNomenclature(
+    buffer: Buffer,
+    libraryCode: string,
+    libraryName?: string,
+  ): Promise<ImportNomenclatureResult> {
+    let parsed;
+    try {
+      parsed = parseNomenclatureXml(buffer);
+    } catch (e) {
+      throw new BadRequestException(`Fichier illisible : ${(e as Error).message}`);
+    }
+    if (parsed.resources.length === 0 && parsed.ouvrages.length === 0) {
+      throw new BadRequestException('Aucune ressource ni ouvrage trouvé dans le fichier.');
+    }
+    const code = (libraryCode || 'IMPORT-NOM').trim().slice(0, 64);
+
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const lib = (await em.query(
+        `INSERT INTO library (tenant_id, code, name, description)
+         VALUES ($1,$2,$3,'Importée depuis une nomenclature XML')
+         ON CONFLICT (tenant_id, code) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+        [tenantId, code, (libraryName || code).slice(0, 255)],
+      ))[0];
+      const libraryId = lib.id;
+
+      const resByCode = new Map<string, string>();
+      const costById = new Map<string, number>();
+      for (const r of parsed.resources) {
+        const row = (await em.query(
+          `INSERT INTO resource (tenant_id, library_id, code, label, unit, nature, unit_cost, prix_public)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (tenant_id, library_id, code) DO UPDATE SET
+             label=EXCLUDED.label, unit=EXCLUDED.unit, nature=EXCLUDED.nature,
+             unit_cost=EXCLUDED.unit_cost, prix_public=EXCLUDED.prix_public, updated_at=now()
+           RETURNING id`,
+          [tenantId, libraryId, r.code, r.designation, r.unite.slice(0, 16), r.nature,
+            r.unitCost.toFixed(4), r.prixPublic != null ? r.prixPublic.toFixed(4) : null],
+        ))[0];
+        resByCode.set(r.code, row.id);
+        costById.set(row.id, r.unitCost);
+      }
+
+      const ouvByCode = new Map<string, string>();
+      for (const o of parsed.ouvrages) {
+        const row = (await em.query(
+          `INSERT INTO ouvrage (tenant_id, library_id, code, label, unit, debourse)
+           VALUES ($1,$2,$3,$4,$5,0)
+           ON CONFLICT (tenant_id, library_id, code) DO UPDATE SET
+             label=EXCLUDED.label, unit=EXCLUDED.unit, updated_at=now()
+           RETURNING id`,
+          [tenantId, libraryId, o.code, o.designation, o.unite.slice(0, 16)],
+        ))[0];
+        ouvByCode.set(o.code, row.id);
+      }
+
+      let composants = 0, ignores = 0;
+      const compByOuv = new Map<string, { kind: string; childRes: string | null; childOuv: string | null; ratio: number }[]>();
+      for (const id of ouvByCode.values()) {
+        await em.query(`DELETE FROM ouvrage_component WHERE parent_ouvrage_id=$1`, [id]);
+        compByOuv.set(id, []);
+      }
+      for (const o of parsed.ouvrages) {
+        const parentId = ouvByCode.get(o.code)!;
+        let sort = 0;
+        for (const comp of o.composants) {
+          const childRes = comp.kind === 'resource' ? resByCode.get(comp.refCode) ?? null : null;
+          const childOuv = comp.kind === 'sub_ouvrage' ? ouvByCode.get(comp.refCode) ?? null : null;
+          if (!childRes && !childOuv) { ignores++; continue; }
+          await em.query(
+            `INSERT INTO ouvrage_component
+               (tenant_id, parent_ouvrage_id, kind, child_resource_id, child_ouvrage_id, quantity, perte, sort_order)
+             VALUES ($1,$2,$3,$4,$5,$6,0,$7)`,
+            [tenantId, parentId, childRes ? 'resource' : 'sub_ouvrage', childRes, childOuv, comp.ratio.toString(), sort++],
+          );
+          compByOuv.get(parentId)!.push({ kind: childRes ? 'resource' : 'sub_ouvrage', childRes, childOuv, ratio: comp.ratio });
+          composants++;
+        }
+      }
+
+      // Débours = Σ ratio × débours(composant), récursif sur les sous-ouvrages.
+      const cache = new Map<string, number>();
+      const debours = (id: string, seen = new Set<string>()): number => {
+        if (cache.has(id)) return cache.get(id)!;
+        if (seen.has(id)) return 0;
+        seen.add(id);
+        let sum = 0;
+        for (const k of compByOuv.get(id) ?? []) {
+          sum += k.ratio * (k.kind === 'resource' ? (costById.get(k.childRes!) ?? 0) : debours(k.childOuv!, new Set(seen)));
+        }
+        cache.set(id, sum);
+        return sum;
+      };
+      for (const id of ouvByCode.values()) {
+        await em.query(`UPDATE ouvrage SET debourse=$2, updated_at=now() WHERE id=$1`, [id, debours(id).toFixed(4)]);
+      }
+
+      return {
+        libraryId,
+        libraryCode: code,
+        stats: { resources: parsed.resources.length, ouvrages: parsed.ouvrages.length, composants, ignores },
       };
     });
   }

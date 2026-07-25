@@ -105,6 +105,49 @@ describe('Estimating — import DPGF (XML + Excel) → affaire/devis', () => {
     expect(Number(cloisons.pu_vente)).toBeCloseTo(40, 2);
   });
 
+  const NOMENCLATURE = `<?xml version="1.0" encoding="UTF-8"?>
+<NOMENCLATURE>
+  <LES_RESSOURCES><LES_RESS_MX>
+    <RESS_MX><CODE>MAT1</CODE><TEXTE_COM>Peinture blanche</TEXTE_COM><UNITE>KG</UNITE>
+      <ENT_PU>10</ENT_PU><REMISE1>10</REMISE1><REMISE2>0</REMISE2><FAMILLE>P_PEIN</FAMILLE>
+      <PU_MERCURIALE>20</PU_MERCURIALE><ACHAT_FACTEUR>2</ACHAT_FACTEUR></RESS_MX>
+  </LES_RESS_MX></LES_RESSOURCES>
+  <LES_TACHES>
+    <TACHE><CODE>STP_POSE</CODE><TEXTE_COM>Pose sous-traitée</TEXTE_COM><UNITE>M2</UNITE>
+      <ENT_PU>15</ENT_PU><FAMILLE>ST</FAMILLE></TACHE>
+  </LES_TACHES>
+  <LES_OUVRAGES>
+    <OUVRAGE><CODE>OUV1</CODE><TEXTE_COM>Peinture pos&#233;e</TEXTE_COM><UNITE>M2</UNITE>
+      <SOUS_DETAIL>
+        <LIGNE_SOUS_DETAIL><QTE_SAISIE>0.5</QTE_SAISIE><REF_RESS_MX>MAT1</REF_RESS_MX></LIGNE_SOUS_DETAIL>
+        <LIGNE_SOUS_DETAIL><QTE_SAISIE>1</QTE_SAISIE><REF_TACHE>STP_POSE</REF_TACHE></LIGNE_SOUS_DETAIL>
+      </SOUS_DETAIL></OUVRAGE>
+  </LES_OUVRAGES>
+</NOMENCLATURE>`;
+
+  it('Nomenclature XML : matériaux/tâches/ouvrages → bibliothèque, débours recalculé', async () => {
+    const res = await auth(request(app.getHttpServer()).post('/imports/nomenclature?libraryCode=NOM-TEST&libraryName=Test'))
+      .attach('file', Buffer.from(NOMENCLATURE, 'utf8'), 'nomenclature.xml')
+      .expect(201);
+    expect(res.body.stats).toEqual({ resources: 2, ouvrages: 1, composants: 2, ignores: 0 });
+
+    // Matériau : débours = 10 × (1−10%) = 9 ; tâche ST : 15.
+    const resources = await inTenant<{ code: string; nature: string; unit_cost: string; prix_public: string }>(
+      `SELECT code, nature, unit_cost, prix_public FROM resource WHERE library_id=$1 ORDER BY code`,
+      [res.body.libraryId],
+    );
+    const mat = resources.find((r) => r.code === 'MAT1')!;
+    const st = resources.find((r) => r.code === 'STP_POSE')!;
+    expect(mat.nature).toBe('material');
+    expect(Number(mat.unit_cost)).toBeCloseTo(9, 2);
+    expect(Number(mat.prix_public)).toBeCloseTo(10, 2); // 20 / 2
+    expect(st.nature).toBe('subcontract');
+    // Ouvrage : 0.5 × 9 + 1 × 15 = 19.5.
+    const ouv = await inTenant<{ debourse: string }>(
+      `SELECT debourse FROM ouvrage WHERE library_id=$1 AND code='OUV1'`, [res.body.libraryId]);
+    expect(Number(ouv[0].debourse)).toBeCloseTo(19.5, 2);
+  });
+
   it('gating : sans capacité estimating, refus (403)', async () => {
     const other = await entitleUser(app, ds, 'Im2', 'admin', ['site_tracking']);
     await request(app.getHttpServer())
