@@ -14,8 +14,12 @@ interface NomResult {
   libraryId: string; libraryCode: string;
   stats: { resources: number; ouvrages: number; composants: number; ignores: number };
 }
+interface ResResult {
+  libraryId: string; libraryCode: string;
+  stats: { resources: number; fournisseurs: number };
+}
 
-type Tab = 'devis' | 'nomenclature';
+type Tab = 'devis' | 'nomenclature' | 'ressources';
 
 export default function ImportsPage() {
   const { token } = useAuth();
@@ -32,9 +36,11 @@ export default function ImportsPage() {
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
           <button style={tabStyle(tab === 'devis')} onClick={() => setTab('devis')}>Import Devis (DPGF)</button>
           <button style={tabStyle(tab === 'nomenclature')} onClick={() => setTab('nomenclature')}>Nomenclature XML</button>
-          <span style={{ ...tabStyle(false), cursor: 'not-allowed' }} title="À venir">Ressources Excel</span>
+          <button style={tabStyle(tab === 'ressources')} onClick={() => setTab('ressources')}>Ressources Excel</button>
         </div>
-        {tab === 'devis' ? <DevisImport token={token} /> : <NomenclatureImport token={token} />}
+        {tab === 'devis' && <DevisImport token={token} />}
+        {tab === 'nomenclature' && <NomenclatureImport token={token} />}
+        {tab === 'ressources' && <ResourcesImport token={token} />}
       </div>
     </div>
   );
@@ -105,6 +111,53 @@ function NomenclatureImport({ token }: { token: string | null }) {
               {mutation.data.stats.resources} ressource(s), {mutation.data.stats.ouvrages} ouvrage(s),
               {' '}{mutation.data.stats.composants} composant(s)
               {mutation.data.stats.ignores ? ` · ${mutation.data.stats.ignores} ignoré(s)` : ''}.
+            </div>
+            <Link className="btn-secondary" style={{ marginTop: 10, display: 'inline-flex' }}
+              href="/estimating/bibliotheque/ressources">
+              Voir la bibliothèque →
+            </Link>
+          </>
+        )}
+        reset={() => mutation.reset()}
+      />
+    </>
+  );
+}
+
+function ResourcesImport({ token }: { token: string | null }) {
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const mutation = useMutation<ResResult, Error, File>({
+    mutationFn: (f) =>
+      apiUpload<ResResult>(`/imports/ressources?libraryCode=${encodeURIComponent(code)}&libraryName=${encodeURIComponent(name || code)}`, f, token),
+  });
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+        <label style={{ flex: 1 }}>
+          <div className="form-label">Code bibliothèque cible *</div>
+          <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="ex. MENARA" />
+        </label>
+        <label style={{ flex: 2 }}>
+          <div className="form-label">Nom</div>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom affiché (optionnel)" />
+        </label>
+      </div>
+      <Dropzone
+        accept=".xlsx,.xls"
+        hint="Fichier .xlsx ou .xls"
+        note={<>Colonnes attendues (ordre libre) : CODE, DÉSIGNATION*, TYPE (M/MO/ST/MAT), UNITE, PU_PUBLIC, PU_DEBOURS, FAMILLE, CODE_ANALYTIQUE, FOURNISSEUR, REF_FOURNISSEUR. Les existants (même code) sont mis à jour.</>}
+        disabled={!code.trim()}
+        disabledReason="Renseignez d’abord le code de la bibliothèque cible."
+        onSubmit={(f) => mutation.mutate(f)}
+        pending={mutation.isPending}
+        error={mutation.error?.message}
+        success={mutation.isSuccess && (
+          <>
+            <div style={okTitle}>Import réussi — bibliothèque {mutation.data.libraryCode}</div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+              {mutation.data.stats.resources} ressource(s)
+              {mutation.data.stats.fournisseurs ? ` · ${mutation.data.stats.fournisseurs} fournisseur(s) créé(s)` : ''}.
             </div>
             <Link className="btn-secondary" style={{ marginTop: 10, display: 'inline-flex' }}
               href="/estimating/bibliotheque/ressources">

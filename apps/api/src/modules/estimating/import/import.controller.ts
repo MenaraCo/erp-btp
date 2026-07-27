@@ -51,6 +51,21 @@ export class ImportController {
     return this.imports.importNomenclature(file.buffer, libraryCode, libraryName);
   }
 
+  /** Importe des ressources depuis un tableur Excel dans une bibliothèque cible. */
+  @Post('ressources')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
+  importRessources(
+    @UploadedFile() file: UploadedMulterFile,
+    @Query('libraryCode') libraryCode?: string,
+    @Query('libraryName') libraryName?: string,
+  ) {
+    if (!file?.buffer) throw new BadRequestException('Fichier manquant.');
+    if (!libraryCode) throw new BadRequestException('libraryCode requis (bibliothèque cible).');
+    return this.imports.importResourcesExcel(file.buffer, libraryCode, libraryName);
+  }
+
   private detectFormat(filename: string): DpgfFormat {
     const ext = (filename || '').toLowerCase().split('.').pop();
     if (ext === 'xml') return 'xml';

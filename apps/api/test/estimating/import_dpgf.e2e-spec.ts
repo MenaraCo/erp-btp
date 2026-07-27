@@ -148,6 +148,31 @@ describe('Estimating — import DPGF (XML + Excel) → affaire/devis', () => {
     expect(Number(ouv[0].debourse)).toBeCloseTo(19.5, 2);
   });
 
+  it('Ressources Excel : colonnes CODE/TYPE/PU → bibliothèque, fournisseurs créés', async () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['CODE', 'DÉSIGNATION', 'TYPE', 'UNITE', 'PU_PUBLIC', 'PU_DEBOURS', 'FOURNISSEUR'],
+      ['R1', 'Enduit', 'M', 'KG', 3, 1.2, 'POINT P'],
+      ['R2', 'Maçon', 'MO', 'H', 0, 40, ''],
+      ['R3', 'Pose carrelage', 'ST', 'M2', 0, 22, 'SOLDIS'],
+    ]), 'Ressources');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+    const res = await auth(request(app.getHttpServer()).post('/imports/ressources?libraryCode=RES-TEST&libraryName=Res'))
+      .attach('file', buffer, 'ressources.xlsx')
+      .expect(201);
+    expect(res.body.stats.resources).toBe(3);
+    expect(res.body.stats.fournisseurs).toBe(2);
+
+    const rows = await inTenant<{ code: string; nature: string; unit_cost: string; prix_public: string }>(
+      `SELECT code, nature, unit_cost, prix_public FROM resource WHERE library_id=$1 ORDER BY code`,
+      [res.body.libraryId],
+    );
+    expect(rows.map((r) => r.nature)).toEqual(['material', 'labor', 'subcontract']);
+    expect(Number(rows[0].unit_cost)).toBeCloseTo(1.2, 2);
+    expect(Number(rows[0].prix_public)).toBeCloseTo(3, 2);
+  });
+
   it('gating : sans capacité estimating, refus (403)', async () => {
     const other = await entitleUser(app, ds, 'Im2', 'admin', ['site_tracking']);
     await request(app.getHttpServer())

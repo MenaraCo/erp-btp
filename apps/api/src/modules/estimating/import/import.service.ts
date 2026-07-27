@@ -5,6 +5,7 @@ import { TenantContext } from '../../../core/tenancy/tenant-context';
 import { runInTenant } from '../../../core/tenancy/tenant-transaction';
 import { parseDpgfExcel, parseDpgfXml, ParsedDevis } from './dpgf-parser';
 import { parseNomenclatureXml } from './nomenclature-parser';
+import { parseResourcesExcel } from './resources-excel-parser';
 
 export type DpgfFormat = 'xml' | 'excel';
 
@@ -12,6 +13,12 @@ export interface ImportNomenclatureResult {
   libraryId: string;
   libraryCode: string;
   stats: { resources: number; ouvrages: number; composants: number; ignores: number };
+}
+
+export interface ImportResourcesResult {
+  libraryId: string;
+  libraryCode: string;
+  stats: { resources: number; fournisseurs: number };
 }
 
 export interface ImportDevisResult {
@@ -197,6 +204,77 @@ export class ImportService {
         libraryId,
         libraryCode: code,
         stats: { resources: parsed.resources.length, ouvrages: parsed.ouvrages.length, composants, ignores },
+      };
+    });
+  }
+
+  /** Importe des ressources depuis un tableur (colonnes CODE, DÉSIGNATION, TYPE, UNITE, PU…) dans une
+   * bibliothèque cible. Upsert par code, fournisseur créé/lié par nom. */
+  async importResourcesExcel(
+    buffer: Buffer,
+    libraryCode: string,
+    libraryName?: string,
+  ): Promise<ImportResourcesResult> {
+    let rows;
+    try {
+      rows = parseResourcesExcel(buffer);
+    } catch (e) {
+      throw new BadRequestException(`Fichier illisible : ${(e as Error).message}`);
+    }
+    if (rows.length === 0) throw new BadRequestException('Aucune ressource trouvée dans le fichier.');
+    const code = (libraryCode || 'IMPORT-RES').trim().slice(0, 64);
+
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const lib = (await em.query(
+        `INSERT INTO library (tenant_id, code, name, description)
+         VALUES ($1,$2,$3,'Importée depuis un tableur de ressources')
+         ON CONFLICT (tenant_id, code) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+        [tenantId, code, (libraryName || code).slice(0, 255)],
+      ))[0];
+      const libraryId = lib.id;
+
+      const supplierByName = new Map<string, string>(
+        (await em.query(`SELECT name, id FROM supplier WHERE tenant_id=$1`, [tenantId])).map(
+          (r: { name: string; id: string }) => [r.name, r.id],
+        ),
+      );
+      const before = supplierByName.size;
+      const ensureSupplier = async (name: string | null): Promise<string | null> => {
+        if (!name) return null;
+        if (supplierByName.has(name)) return supplierByName.get(name)!;
+        const supCode = name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
+          || `F-${supplierByName.size + 1}`;
+        const id = (await em.query(
+          `INSERT INTO supplier (tenant_id, code, name) VALUES ($1,$2,$3) RETURNING id`,
+          [tenantId, supCode, name.slice(0, 255)],
+        ))[0].id;
+        supplierByName.set(name, id);
+        return id;
+      };
+
+      let count = 0;
+      for (const r of rows) {
+        const supplierId = await ensureSupplier(r.fournisseur);
+        await em.query(
+          `INSERT INTO resource
+             (tenant_id, library_id, code, label, unit, nature, unit_cost, prix_public, supplier_id, ref_fournisseur)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT (tenant_id, library_id, code) DO UPDATE SET
+             label=EXCLUDED.label, unit=EXCLUDED.unit, nature=EXCLUDED.nature, unit_cost=EXCLUDED.unit_cost,
+             prix_public=EXCLUDED.prix_public, supplier_id=COALESCE(EXCLUDED.supplier_id, resource.supplier_id),
+             ref_fournisseur=COALESCE(EXCLUDED.ref_fournisseur, resource.ref_fournisseur), updated_at=now()`,
+          [tenantId, libraryId, r.code.slice(0, 64), r.designation, r.unite.slice(0, 16), r.nature,
+            r.puDebours.toFixed(4), r.prixPublic != null ? r.prixPublic.toFixed(4) : null,
+            supplierId, r.refFournisseur?.slice(0, 128) ?? null],
+        );
+        count++;
+      }
+
+      return {
+        libraryId,
+        libraryCode: code,
+        stats: { resources: count, fournisseurs: supplierByName.size - before },
       };
     });
   }
