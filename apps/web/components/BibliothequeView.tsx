@@ -16,7 +16,7 @@ type Resource = FullResource & {
   codeAnalytiqueCode?: string | null; codeAnalytiqueLabel?: string | null;
   supplierName?: string | null;
 };
-interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string }
+interface Ouvrage { id: string; code: string; label: string; unit: string; debourse: string; categorie?: string | null }
 interface Page<T> { rows: T[]; total: number }
 
 /* Colonnes du tableau ressources : clé, libellé, tri serveur, rendu, alignement */
@@ -242,6 +242,7 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
               <thead><tr>
                 <SortHeader label="Code" colKey="code" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} />
                 <SortHeader label="Libellé" colKey="label" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} />
+                <SortHeader label="Catégorie" colKey="categorie" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} />
                 <SortHeader label="Unité" colKey="unit" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} />
                 <SortHeader label="Déboursé" colKey="debourse" sort={ouvSort} onSort={(k) => setOuvSort((s) => nextSort(s, k))} right />
                 <th style={{ width: 80 }} />
@@ -251,6 +252,7 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
                   <tr key={o.id} style={{ cursor: 'pointer' }} onClick={() => router.push(`/estimating/bibliotheque/ouvrages/${o.id}`)}>
                     <td className="code-cell">{o.code}</td>
                     <td>{o.label}</td>
+                    <td className="muted">{o.categorie || '—'}</td>
                     <td className="muted">{o.unit}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtEuro(o.debourse, nbDec)}</td>
                     <td><span className="link">Composer →</span></td>

@@ -12,6 +12,7 @@ interface DevisRow {
   designation: string;
   status: string;
   affaire_code: string;
+  affaire_name: string;
   responsable: string | null;
   priorite: string;
   date_debut: string | null;
@@ -66,6 +67,25 @@ export default function PlanningEtudesPage() {
 
   const ganttRows = etudes.filter((d) => d.date_debut && d.date_echeance);
 
+  // KPI + regroupement par affaire.
+  const today = new Date().toISOString().slice(0, 10);
+  const kpis = useMemo(() => ({
+    affaires: new Set(etudes.map((d) => d.affaire_code)).size,
+    offresRendues: etudes.filter((d) => d.status === 'sent').length,
+    delaiDepasse: etudes.filter((d) => d.date_echeance && d.date_echeance < today).length,
+    sansDate: etudes.filter((d) => !d.date_echeance).length,
+  }), [etudes, today]);
+
+  const ganttByAffaire = useMemo(() => {
+    const m = new Map<string, { name: string; rows: DevisRow[] }>();
+    for (const d of ganttRows) {
+      const g = m.get(d.affaire_code) ?? { name: d.affaire_name, rows: [] };
+      g.rows.push(d);
+      m.set(d.affaire_code, g);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [ganttRows]);
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -76,6 +96,13 @@ export default function PlanningEtudesPage() {
         </div>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>Devis en étude — responsable, priorité et échéances.</p>
+
+      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 16 }}>
+        <PlanningKpi n={kpis.affaires} label="Affaires en cours" color="var(--primary)" />
+        <PlanningKpi n={kpis.offresRendues} label="Offres rendues" color="#16a34a" />
+        <PlanningKpi n={kpis.delaiDepasse} label="Délai dépassé" color="#dc2626" />
+        <PlanningKpi n={kpis.sansDate} label="Sans date limite" color="#d97706" />
+      </div>
 
       {view === 'tableau' && (
         <div className="card" style={{ marginTop: 12 }}>
@@ -131,27 +158,45 @@ export default function PlanningEtudesPage() {
                   ))}
                 </div>
               </div>
-              {/* lignes */}
-              {ganttRows.map((d) => {
-                const s = new Date(d.date_debut!); const e = new Date(d.date_echeance!);
-                const left = Math.max(0, daysBetween(win.start, s) / win.totalDays) * 100;
-                const width = Math.max(1.5, (daysBetween(s, e) || 1) / win.totalDays * 100);
-                return (
-                  <div key={d.id} style={{ display: 'flex', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--surface)' }}>
-                    <div style={{ width: 220, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }}>
-                      {d.numero ? <span className="code-cell">{d.numero} </span> : null}{d.designation}
-                    </div>
-                    <div style={{ flex: 1, position: 'relative', height: 18 }}>
-                      <div title={`${d.responsable ?? ''} · ${d.priorite}`}
-                        style={{ position: 'absolute', left: `${left}%`, width: `${Math.min(width, 100 - left)}%`, height: 14, top: 2, background: PRIO_COLOR[d.priorite] ?? '#94a3b8', borderRadius: 3, opacity: 0.85 }} />
-                    </div>
+              {/* lignes groupées par affaire */}
+              {ganttByAffaire.map(([code, group]) => (
+                <div key={code}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0 2px', marginTop: 4 }}>
+                    <span className="code-cell" style={{ fontSize: 11 }}>{code}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-strong)' }}>{group.name}</span>
                   </div>
-                );
-              })}
+                  {group.rows.map((d) => {
+                    const s = new Date(d.date_debut!); const e = new Date(d.date_echeance!);
+                    const left = Math.max(0, daysBetween(win.start, s) / win.totalDays) * 100;
+                    const width = Math.max(1.5, (daysBetween(s, e) || 1) / win.totalDays * 100);
+                    const late = d.date_echeance != null && d.date_echeance < today;
+                    return (
+                      <div key={d.id} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid var(--surface)' }}>
+                        <div style={{ width: 220, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11, paddingLeft: 14 }}>
+                          {d.numero ? <span className="code-cell">{d.numero} </span> : null}{d.designation}
+                        </div>
+                        <div style={{ flex: 1, position: 'relative', height: 18 }}>
+                          <div title={`${d.responsable ?? ''} · ${d.priorite}${late ? ' · en retard' : ''}`}
+                            style={{ position: 'absolute', left: `${left}%`, width: `${Math.min(width, 100 - left)}%`, height: 14, top: 2, background: PRIO_COLOR[d.priorite] ?? '#94a3b8', borderRadius: 3, opacity: 0.85, boxShadow: late ? '0 0 0 2px #dc2626' : 'none' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           ) : <p className="muted">Renseignez des dates (début + échéance) dans l’onglet Tableau pour afficher le Gantt.</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+function PlanningKpi({ n, label, color }: { n: number; label: string; color: string }) {
+  return (
+    <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ fontSize: 26, fontWeight: 700, color }}>{n}</div>
+      <div className="muted" style={{ fontSize: 12 }}>{label}</div>
     </div>
   );
 }
