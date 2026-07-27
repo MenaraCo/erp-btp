@@ -330,23 +330,34 @@ export default function DevisListPage() {
           placeholder="Rechercher un devis, affaire…" style={{ flex: 1, maxWidth: 360 }} />
       </div>
 
-      {/* Onglets filtre */}
+      {/* Onglets filtre (avec compteur par statut) */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 0 }}>
-        {FILTER_TABS.map((t) => (
-          <button key={t.key} onClick={() => setFilter(t.key)} style={{
-            padding: '7px 16px', fontSize: 12, background: 'none', border: 'none',
-            borderBottom: filter === t.key ? '2px solid var(--primary)' : '2px solid transparent',
-            color: filter === t.key ? 'var(--primary)' : 'var(--muted)',
-            fontWeight: filter === t.key ? 700 : 400, cursor: 'pointer',
-          }}>
-            {t.label}
-            {t.key === 'all' && list.data && (
-              <span style={{ marginLeft: 5, fontSize: 10, background: 'var(--border)', color: 'var(--muted)', borderRadius: 10, padding: '1px 6px' }}>
-                {list.data.length}
-              </span>
-            )}
-          </button>
-        ))}
+        {FILTER_TABS.map((t) => {
+          const count = !list.data ? null
+            : FILTER_STATUSES[t.key].length === 0
+              ? list.data.length
+              : list.data.filter((d) => FILTER_STATUSES[t.key].includes(d.status)).length;
+          const isActive = filter === t.key;
+          return (
+            <button key={t.key} onClick={() => setFilter(t.key)} style={{
+              padding: '7px 16px', fontSize: 12, background: 'none', border: 'none',
+              borderBottom: isActive ? '2px solid var(--primary)' : '2px solid transparent',
+              color: isActive ? 'var(--primary)' : 'var(--muted)',
+              fontWeight: isActive ? 700 : 400, cursor: 'pointer',
+            }}>
+              {t.label}
+              {count != null && (
+                <span style={{
+                  marginLeft: 5, fontSize: 10, borderRadius: 10, padding: '1px 6px',
+                  background: isActive ? 'var(--primary)' : 'var(--border)',
+                  color: isActive ? '#fff' : 'var(--muted)', fontWeight: 700,
+                }}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Tableau */}
