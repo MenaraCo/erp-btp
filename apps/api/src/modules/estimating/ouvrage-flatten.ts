@@ -22,6 +22,8 @@ export interface RawComponent {
   nature?: Nature;
   unit?: string | null;
   unitCost?: Decimal.Value;
+  prixPublic?: Decimal.Value | null;
+  cadence?: Decimal.Value | null;
 }
 
 export interface RawOuvrage {
@@ -40,6 +42,10 @@ export interface FlatComponent {
   unitCost: string;
   /** quantité par unité d'ouvrage racine (le "ratio") */
   qtyPerUnit: string;
+  /** prix public catalogue (null si inconnu) */
+  prixPublic: string | null;
+  /** cadence (rendement) copiée du composant bibliothèque (null si non renseignée) */
+  cadence: string | null;
 }
 
 export class CycleDetectedError extends Error {
@@ -58,6 +64,8 @@ interface InternalFlat {
   unit: string | null;
   unitCost: Decimal;
   qtyPerUnit: Decimal;
+  prixPublic: string | null;
+  cadence: string | null;
 }
 
 function flattenInternal(
@@ -91,6 +99,8 @@ function flattenInternal(
         unit: c.unit ?? null,
         unitCost: cost,
         qtyPerUnit: qty,
+        prixPublic: c.prixPublic != null ? new Decimal(c.prixPublic).toString() : null,
+        cadence: c.cadence != null ? new Decimal(c.cadence).toString() : null,
       });
       base = base.plus(qty.times(cost));
     } else if (c.kind === 'sub_ouvrage' && c.childOuvrageId) {
@@ -115,6 +125,8 @@ function flattenInternal(
       unit: null,
       unitCost: base.times(rateTotal),
       qtyPerUnit: new Decimal(1),
+      prixPublic: null,
+      cadence: null,
     });
   }
 
@@ -135,5 +147,7 @@ export function flattenOuvrageToResources(
     unit: f.unit,
     unitCost: f.unitCost.toString(),
     qtyPerUnit: f.qtyPerUnit.toString(),
+    prixPublic: f.prixPublic,
+    cadence: f.cadence,
   }));
 }

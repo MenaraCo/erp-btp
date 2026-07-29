@@ -40,6 +40,10 @@ export interface DevisLinePatch {
   pu?: string | number | null;
   perte?: string | number | null;
   nature?: string | null;
+  /** Cadence (rendement, ex. m²/h) — pour la MO, le temps unitaire en découle. */
+  cadence?: string | number | null;
+  /** Prix public catalogue (affiché en regard du déboursé, mention « conv »). */
+  prixPublic?: string | number | null;
   numCustom?: string | null;
   code?: string | null;
   codeAnalytique?: string | null;
@@ -102,6 +106,8 @@ export interface DevisLineInput {
   pu?: string | number | null;
   perte?: string | number | null;
   nature?: string | null;
+  cadence?: string | number | null;
+  prixPublic?: string | number | null;
   sourceOuvrageId?: string | null;
   sourceResourceId?: string | null;
   sortOrder?: number;
@@ -593,16 +599,16 @@ export class DevisService {
             `INSERT INTO devis_line
                (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique,
                 designation, unit, quantity, quantity_formula, pu, pu_vente, pu_vente_force,
-                perte, nature, source_ouvrage_id, source_resource_id,
+                perte, nature, cadence, prix_public, source_ouvrage_id, source_resource_id,
                 sort_order, num_custom, section_type, vendable, base_line_id)
-             VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+             VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
              RETURNING id`,
             [
               tenantId, newVersion.id,
               l['type'], l['code'], l['code_analytique'],
               l['designation'], l['unit'], l['quantity'], l['quantity_formula'],
               l['pu'], l['pu_vente'], l['pu_vente_force'] ?? false,
-              l['perte'], l['nature'],
+              l['perte'], l['nature'], l['cadence'], l['prix_public'],
               l['source_ouvrage_id'], l['source_resource_id'],
               l['sort_order'], l['num_custom'], l['section_type'], l['vendable'] ?? true,
               l['id'], // base_line_id → tracks lineage to previous version
@@ -755,9 +761,9 @@ export class DevisService {
         await em.query(
           `INSERT INTO devis_line
              (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique, designation, unit,
-              quantity, quantity_formula, pu, perte, nature, source_ouvrage_id, source_resource_id, sort_order,
-              vendable, section_type)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+              quantity, quantity_formula, pu, perte, nature, cadence, prix_public,
+              source_ouvrage_id, source_resource_id, sort_order, vendable, section_type)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
           [
             tenantId,
             versionId,
@@ -772,6 +778,8 @@ export class DevisService {
             input.pu != null ? String(input.pu) : null,
             input.perte != null ? String(input.perte) : '0',
             input.nature ?? null,
+            input.cadence != null ? String(input.cadence) : null,
+            input.prixPublic != null ? String(input.prixPublic) : null,
             input.sourceOuvrageId ?? null,
             input.sourceResourceId ?? null,
             input.sortOrder ?? 0,
@@ -803,9 +811,9 @@ export class DevisService {
   private async loadRawOuvrages(em: EntityManager): Promise<Map<string, RawOuvrage>> {
     const ouvrages = await em.query(`SELECT id FROM ouvrage`);
     const components = await em.query(
-      `SELECT oc.parent_ouvrage_id, oc.kind, oc.quantity, oc.rate,
+      `SELECT oc.parent_ouvrage_id, oc.kind, oc.quantity, oc.rate, oc.cadence,
               oc.child_ouvrage_id, oc.child_resource_id,
-              r.code, r.label, r.nature, r.unit, r.unit_cost,
+              r.code, r.label, r.nature, r.unit, r.unit_cost, r.prix_public,
               ca.code AS code_analytique
          FROM ouvrage_component oc
          LEFT JOIN resource r ON r.id = oc.child_resource_id
@@ -830,6 +838,8 @@ export class DevisService {
         nature: c.nature ?? 'material',
         unit: c.unit ?? null,
         unitCost: c.unit_cost ?? 0,
+        prixPublic: c.prix_public ?? null,
+        cadence: c.cadence ?? null,
       });
     }
     return map;
@@ -891,8 +901,9 @@ export class DevisService {
           await em.query(
             `INSERT INTO devis_line
                (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique,
-                designation, unit, quantity, pu, perte, nature, source_resource_id, sort_order, vendable)
-             VALUES ($1,$2,$3,'ressource',$4,$5,$6,$7,$8,$9,0,$10,$11,$12,true) RETURNING *`,
+                designation, unit, quantity, pu, perte, nature, cadence, prix_public,
+                source_resource_id, sort_order, vendable)
+             VALUES ($1,$2,$3,'ressource',$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14,true) RETURNING *`,
             [
               tenantId,
               versionId,
@@ -904,6 +915,8 @@ export class DevisService {
               f.qtyPerUnit,
               f.unitCost,
               f.nature,
+              f.cadence,
+              f.prixPublic,
               f.resourceId,
               i,
             ],
@@ -949,6 +962,8 @@ export class DevisService {
            code = CASE WHEN $9 = '__KEEP__' THEN code ELSE NULLIF($9, '') END,
            code_analytique = CASE WHEN $10 = '__KEEP__' THEN code_analytique ELSE NULLIF($10, '') END,
            sort_order = COALESCE($11, sort_order),
+           cadence = CASE WHEN $12 = '__KEEP__' THEN cadence ELSE NULLIF($12, '')::numeric END,
+           prix_public = CASE WHEN $13 = '__KEEP__' THEN prix_public ELSE NULLIF($13, '')::numeric END,
            updated_at = now()
          WHERE id = $1`,
         [
@@ -963,6 +978,8 @@ export class DevisService {
           patch.code === undefined ? '__KEEP__' : (patch.code ?? ''),
           patch.codeAnalytique === undefined ? '__KEEP__' : (patch.codeAnalytique ?? ''),
           patch.sortOrder != null ? patch.sortOrder : null,
+          patch.cadence === undefined ? '__KEEP__' : (patch.cadence != null ? String(patch.cadence) : ''),
+          patch.prixPublic === undefined ? '__KEEP__' : (patch.prixPublic != null ? String(patch.prixPublic) : ''),
         ],
       );
 
