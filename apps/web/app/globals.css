@@ -805,3 +805,46 @@ table.grid tbody tr:hover {
 /* Spinner (company lookup, async buttons) */
 @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
 .spin { animation: spin 0.8s linear infinite; }
+
+/* ── Volet déboursé : rendu tableau type Excel (cellules texte, filets fins) ── */
+.deb-table input,
+.deb-table select {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 2px 4px !important;
+  font-size: 12px !important;
+  height: 22px;
+}
+.deb-table select { padding-right: 12px !important; }
+.deb-table input:hover,
+.deb-table select:hover { background: #eef2f7 !important; }
+.deb-table input:focus,
+.deb-table select:focus {
+  background: #fff !important;
+  box-shadow: inset 0 0 0 1.5px var(--primary) !important;
+  border-radius: 2px !important;
+}
+.deb-table input::placeholder { color: #cbd5e1; }
+
+/* Lignes de la grille = lignes de tableau : filets fins entre colonnes + entre lignes. */
+.sd-row, .sd-head { position: relative; border-bottom: 1px solid #edf1f6; }
+.sd-row > *:not(.row-actions), .sd-head > * {
+  border-right: 1px solid #f2f5f9;
+  min-height: 24px;
+  display: flex; align-items: center;
+  overflow: hidden;
+}
+.sd-row > *:last-child, .sd-head > *:last-child { border-right: none; }
+.sd-head > * { color: #94a3b8; }
+.sd-row:hover { background: #f8fafc; }
+
+/* Boutons d'action de ligne : masqués, révélés au survol (désencombre). */
+.row-actions {
+  position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; gap: 0;
+  background: linear-gradient(90deg, transparent, #f8fafc 22%, #f8fafc);
+  padding-left: 14px; opacity: 0; pointer-events: none; transition: opacity .1s;
+}
+.sd-row:hover .row-actions { opacity: 1; pointer-events: auto; }
