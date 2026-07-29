@@ -27,6 +27,8 @@ export interface MontageLine {
   quantity: string | null;
   pu: string | null;
   perte: string | null;
+  cadence: string | null;
+  prix_public: string | null;
   nature: string | null;
   section_type: 'option' | 'variante' | null;
   source_ouvrage_id: string | null;
@@ -527,8 +529,19 @@ function Node({
                 )}
                 <input defaultValue={c.designation} disabled={readOnly} title="Désignation" style={{ flex: 1 }}
                   onBlur={(e) => e.target.value !== c.designation && updateLine.mutate({ id: c.id, patch: { designation: e.target.value, syncByCode: true } })} />
-                <input defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio/quantité" style={{ width: 56, textAlign: 'right' }}
+                <input defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio/quantité" style={{ width: 52, textAlign: 'right' }}
                   onBlur={(e) => e.target.value !== cleanNum(c.quantity) && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
+                {/* Cadence (rendement) : pour la MO, la quantité (temps unit.) = 1/cadence. */}
+                {!isSubOuvrage && (
+                  <input defaultValue={cleanNum(c.cadence ?? '')} disabled={readOnly} title="Cadence (rendement) — MO : quantité = 1/cadence" placeholder="cad." style={{ width: 48, textAlign: 'right' }}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v === cleanNum(c.cadence ?? '')) return;
+                      const cad = Number(v.replace(',', '.'));
+                      if (v && cad > 0) updateLine.mutate({ id: c.id, patch: { cadence: v, quantity: (1 / cad).toFixed(6) } });
+                      else updateLine.mutate({ id: c.id, patch: { cadence: null } });
+                    }} />
+                )}
                 <UnitSelect value={c.unit} token={token} readOnly={readOnly}
                   onChange={(v) => updateLine.mutate({ id: c.id, patch: { unit: v || null } })} />
                 <input defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: 44, textAlign: 'right' }}
@@ -537,10 +550,20 @@ function Node({
                   <NatureSelect value={c.nature} readOnly={readOnly}
                     onChange={(v) => updateLine.mutate({ id: c.id, patch: { nature: v || null, syncByCode: true } })} />
                 )}
+                {/* P.U. Public + mention « conv » quand le déboursé en est déduit (coeff. de conversion). */}
+                {!isSubOuvrage && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    <input defaultValue={cleanNum(c.prix_public ?? '')} disabled={readOnly} title="P.U. Public (catalogue)" placeholder="public" style={{ width: 64, textAlign: 'right' }}
+                      onBlur={(e) => e.target.value !== cleanNum(c.prix_public ?? '') && updateLine.mutate({ id: c.id, patch: { prixPublic: e.target.value || null, syncByCode: true } })} />
+                    {c.prix_public != null && c.prix_public !== '' && Number(c.prix_public) !== (Number(c.pu) || 0) && (
+                      <span title="Déboursé déduit du prix public via le coefficient de conversion" style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 700 }}>conv</span>
+                    )}
+                  </span>
+                )}
                 {isSubOuvrage ? (
                   <span style={{ width: 72, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12 }}>{fmtEuro(subUnitPu, decimals)}</span>
                 ) : (
-                  <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
+                  <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 68, textAlign: 'right' }}
                     onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0', syncByCode: true } })} />
                 )}
                 <span style={{ width: 72, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500 }}>{fmtEuro(montant, decimals)}</span>

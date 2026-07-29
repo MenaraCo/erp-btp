@@ -25,6 +25,7 @@ interface DevisLine {
   id: string; parent_line_id: string | null; type: string; code: string | null;
   code_analytique: string | null; designation: string; unit: string | null;
   quantity: string | null; pu: string | null; perte: string | null; nature: string | null;
+  cadence: string | null; prix_public: string | null;
   pu_vente: string | null; pu_vente_force: boolean;
   section_type: 'option' | 'variante' | null; source_ouvrage_id: string | null;
   source_resource_id: string | null;
