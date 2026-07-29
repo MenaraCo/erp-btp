@@ -42,7 +42,7 @@ export interface MontageLine {
  * Unité · Perte · Qté · Cadence · P.U. Public · P.U. Déboursé · Nature · Montant · actions. */
 const SD_GRID: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '16px 20px 62px minmax(56px,1fr) 50px 42px 50px 44px 74px 60px 56px 74px 44px',
+  gridTemplateColumns: '14px 18px 74px minmax(60px,1fr) 44px 36px 46px 40px 62px 54px 50px 72px 112px',
   alignItems: 'center',
   columnGap: 4,
 };
@@ -486,39 +486,43 @@ function Node({
           outline: isLibDrop ? '2px dashed var(--accent)' : undefined,
           opacity: isDragging ? 0.4 : 1,
         }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
-          {!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} crossPanel={{ kind: 'ouvrage', id: line.id, code: line.code ?? '', label: line.designation, unit: line.unit, sourceOuvrageId: line.source_ouvrage_id }} />}
-          {!vente && (
-            <>
-              <TypeBadge type="ouvrage" />
-              <CodeInput value={line.code} readOnly={readOnly} placeholder="Code" title="Code produit" style={{ width: 64 }}
-                onChange={(v) => updateLine.mutate({ id: line.id, patch: { code: v } })} />
-            </>
-          )}
-          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
-          {!readOnly && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
-          <input defaultValue={line.designation} disabled={readOnly} title="Désignation (devis uniquement)" style={{ flex: 1, fontWeight: 500 }}
+        <div style={{ ...SD_GRID, padding: '4px 8px', borderBottom: '1px solid #f1f5f9' }}>
+          <span style={CELL_CTR}>{!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} crossPanel={{ kind: 'ouvrage', id: line.id, code: line.code ?? '', label: line.designation, unit: line.unit, sourceOuvrageId: line.source_ouvrage_id }} />}</span>
+          <span style={CELL_CTR}>{!vente && <TypeBadge type="ouvrage" />}</span>
+          {/* Code cell : numéro hiérarchique (identifiant de l'ouvrage) + override. */}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{line.numero ?? ''}</span>
+            {!readOnly && !vente && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
+          </span>
+          <input defaultValue={line.designation} disabled={readOnly} title="Désignation (devis uniquement)" style={{ width: '100%', minWidth: 0, fontWeight: 600 }}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })} />
-          <button type="button" className="btn-ghost" title="Informations" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
-          <input defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: 52, textAlign: 'right' }}
-            onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
-          <UnitSelect value={line.unit} token={token} readOnly={readOnly}
+          <UnitSelect value={line.unit} token={token} readOnly={readOnly} style={{ width: '100%' }}
             onChange={(v) => updateLine.mutate({ id: line.id, patch: { unit: v || null } })} />
-          {vente && (
-            <PvCell computed={puVente} forced={!!info?.forced} pending={setLinePv.isPending} decimals={decimals}
-              onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
-              onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
-          )}
-          <span style={{ width: 80, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
-          {!readOnly && (
-            <>
-              {!vente && <OuvrageAddMenu parentId={line.id} childCount={comps.length} addLine={addLine} />}
-              <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, '#94a3b8'), fontSize: 13 }}>⧉</button>
-              <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'variante' ? null : 'variante' })} style={togBtn(ouvrSect === 'variante', '#f97316')}>V</button>
-              <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'option' ? null : 'option' })} style={togBtn(ouvrSect === 'option', '#a855f7')}>O</button>
-              <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(line.id)}>✕</button>
-            </>
-          )}
+          <span />{/* Perte (n/a sur l'ouvrage) */}
+          <input defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: '100%', textAlign: 'right' }}
+            onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
+          <span />{/* Cadence */}
+          <span />{/* P.U. Public */}
+          {/* P.U. Déb. unitaire de l'ouvrage (déboursé) OU PV forcé (mode vente). */}
+          {vente
+            ? <PvCell computed={puVente} forced={!!info?.forced} pending={setLinePv.isPending} decimals={decimals}
+                onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
+                onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
+            : <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12 }}>{(Number(line.quantity) || 0) > 0 ? fmtEuro(valueOf(line) / (Number(line.quantity) || 1), decimals) : ''}</span>}
+          <span />{/* Nature */}
+          <span style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
+          <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+            <button type="button" className="btn-ghost" title="Informations" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
+            {!readOnly && (
+              <>
+                {!vente && <OuvrageAddMenu parentId={line.id} childCount={comps.length} addLine={addLine} />}
+                <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, '#94a3b8'), fontSize: 13 }}>⧉</button>
+                <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'variante' ? null : 'variante' })} style={togBtn(ouvrSect === 'variante', '#f97316')}>V</button>
+                <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'option' ? null : 'option' })} style={togBtn(ouvrSect === 'option', '#a855f7')}>O</button>
+                <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(line.id)}>✕</button>
+              </>
+            )}
+          </span>
         </div>
         {/* Sous-détail éditable — colonnes alignées, en-tête par ouvrage (masqué en mode vente). */}
         {!vente && comps.length > 0 && (
