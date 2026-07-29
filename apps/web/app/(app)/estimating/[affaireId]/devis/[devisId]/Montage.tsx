@@ -372,7 +372,9 @@ function Node({
 } & Muts & VenteCtx) {
   const kids = childrenOf(line.id);
   const sect = line.section_type;
-  const pad = depth * 16;
+  // Plus d'indentation par profondeur : tout est aligné sur une seule grille (comme ONAYA).
+  // La hiérarchie reste lisible via le marqueur [T]/[O]/[R], la numérotation et la teinte des titres.
+  const pad = 0;
   const vctx: VenteCtx = {
     vente, valueOf, saleById, setLinePv, decimals, deboursById, onShowInfo,
     libDragActive, libDragOverId, setLibDragOverId, onDropItem, dragCtx, onCopyMove,
@@ -520,7 +522,7 @@ function Node({
         </div>
         {/* Sous-détail éditable — colonnes alignées, en-tête par ouvrage (masqué en mode vente). */}
         {!vente && comps.length > 0 && (
-          <div style={{ ...SD_GRID, padding: '3px 8px 3px 24px', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.4px', color: '#94a3b8', fontWeight: 700, borderBottom: '1px solid #eef2f7' }}>
+          <div style={{ ...SD_GRID, padding: '3px 8px', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.4px', color: '#94a3b8', fontWeight: 700, borderBottom: '1px solid #eef2f7' }}>
             <span /><span />
             <span>Code</span>
             <span>Désignation</span>
@@ -547,7 +549,7 @@ function Node({
           return (
             <Fragment key={c.id}>
               <DropZone beforeLineId={c.id} parentLineId={line.id} dragCtx={dragCtx} />
-              <div style={{ ...SD_GRID, padding: '2px 8px 2px 24px', fontSize: 12, color: '#475569', opacity: dragCtx.dragLineId === c.id ? 0.4 : 1 }}>
+              <div style={{ ...SD_GRID, padding: '2px 8px', fontSize: 12, color: '#475569', opacity: dragCtx.dragLineId === c.id ? 0.4 : 1 }}>
                 <span style={CELL_CTR}>{!readOnly && <DragHandle lineId={c.id} dragCtx={dragCtx} />}</span>
                 <span style={CELL_CTR}><TypeBadge type={c.type} /></span>
                 {!isSubOuvrage
