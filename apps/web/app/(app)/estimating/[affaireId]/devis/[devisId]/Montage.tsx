@@ -38,6 +38,16 @@ export interface MontageLine {
   num_custom?: string | null;
 }
 
+/** Gabarit de colonnes du sous-détail (déboursé) — aligné, ordre : marqueurs · Code · Désignation ·
+ * Unité · Perte · Qté · Cadence · P.U. Public · P.U. Déboursé · Nature · Montant · actions. */
+const SD_GRID: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '16px 20px 62px minmax(56px,1fr) 50px 42px 50px 44px 74px 60px 56px 74px 44px',
+  alignItems: 'center',
+  columnGap: 4,
+};
+const CELL_CTR: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center' };
+
 /** Drag context passed down the tree. Separates internal-reorder drag from library drag. */
 interface DragCtx {
   dragLineId: string | null;
@@ -508,7 +518,23 @@ function Node({
             </>
           )}
         </div>
-        {/* Sous-détail éditable — masqué en mode vente. */}
+        {/* Sous-détail éditable — colonnes alignées, en-tête par ouvrage (masqué en mode vente). */}
+        {!vente && comps.length > 0 && (
+          <div style={{ ...SD_GRID, padding: '3px 8px 3px 24px', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.4px', color: '#94a3b8', fontWeight: 700, borderBottom: '1px solid #eef2f7' }}>
+            <span /><span />
+            <span>Code</span>
+            <span>Désignation</span>
+            <span style={{ textAlign: 'center' }}>Unité</span>
+            <span style={{ textAlign: 'right' }}>Perte</span>
+            <span style={{ textAlign: 'right' }}>Qté</span>
+            <span style={{ textAlign: 'right' }}>Cad.</span>
+            <span style={{ textAlign: 'right' }}>P.U. Public</span>
+            <span style={{ textAlign: 'right' }}>P.U. Déb.</span>
+            <span style={{ textAlign: 'center' }}>Nature</span>
+            <span style={{ textAlign: 'right' }}>Montant</span>
+            <span />
+          </div>
+        )}
         {!vente && comps.map((c) => {
           const cQty = Number(c.quantity) || 0;
           const cPerte = Number(c.perte) || 0;
@@ -517,58 +543,59 @@ function Node({
           const subUnitPu = isSubOuvrage && cQty > 0 ? subDebours / cQty : 0;
           const cPu = isSubOuvrage ? subUnitPu : (Number(c.pu) || 0);
           const montant = cQty * cPu * (1 + cPerte / 100);
+          const showConv = !isSubOuvrage && c.prix_public != null && c.prix_public !== '' && Number(c.prix_public) !== (Number(c.pu) || 0);
           return (
             <Fragment key={c.id}>
               <DropZone beforeLineId={c.id} parentLineId={line.id} dragCtx={dragCtx} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 2px 24px', fontSize: 13, color: '#475569', opacity: dragCtx.dragLineId === c.id ? 0.4 : 1 }}>
-                {!readOnly && <DragHandle lineId={c.id} dragCtx={dragCtx} />}
-                <TypeBadge type={c.type} />
-                {!isSubOuvrage && (
-                  <CodeInput value={c.code_analytique} readOnly={readOnly} placeholder="Analy." title="Code analytique" style={{ width: 68 }}
-                    onChange={(v) => updateLine.mutate({ id: c.id, patch: { codeAnalytique: v } })} />
-                )}
-                <input defaultValue={c.designation} disabled={readOnly} title="Désignation" style={{ flex: 1 }}
+              <div style={{ ...SD_GRID, padding: '2px 8px 2px 24px', fontSize: 12, color: '#475569', opacity: dragCtx.dragLineId === c.id ? 0.4 : 1 }}>
+                <span style={CELL_CTR}>{!readOnly && <DragHandle lineId={c.id} dragCtx={dragCtx} />}</span>
+                <span style={CELL_CTR}><TypeBadge type={c.type} /></span>
+                {!isSubOuvrage
+                  ? <CodeInput value={c.code_analytique} readOnly={readOnly} placeholder="Analy." title="Code analytique" style={{ width: '100%' }}
+                      onChange={(v) => updateLine.mutate({ id: c.id, patch: { codeAnalytique: v } })} />
+                  : <span />}
+                <input defaultValue={c.designation} disabled={readOnly} title="Désignation" style={{ width: '100%', minWidth: 0 }}
                   onBlur={(e) => e.target.value !== c.designation && updateLine.mutate({ id: c.id, patch: { designation: e.target.value, syncByCode: true } })} />
-                <input defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio/quantité" style={{ width: 52, textAlign: 'right' }}
+                <UnitSelect value={c.unit} token={token} readOnly={readOnly} style={{ width: '100%' }}
+                  onChange={(v) => updateLine.mutate({ id: c.id, patch: { unit: v || null } })} />
+                {!isSubOuvrage
+                  ? <input defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: '100%', textAlign: 'right' }}
+                      onBlur={(e) => e.target.value !== cleanNum(c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0', syncByCode: true } })} />
+                  : <span />}
+                <input defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio / quantité" style={{ width: '100%', textAlign: 'right' }}
                   onBlur={(e) => e.target.value !== cleanNum(c.quantity) && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
                 {/* Cadence (rendement) : pour la MO, la quantité (temps unit.) = 1/cadence. */}
-                {!isSubOuvrage && (
-                  <input defaultValue={cleanNum(c.cadence ?? '')} disabled={readOnly} title="Cadence (rendement) — MO : quantité = 1/cadence" placeholder="cad." style={{ width: 48, textAlign: 'right' }}
-                    onBlur={(e) => {
-                      const v = e.target.value.trim();
-                      if (v === cleanNum(c.cadence ?? '')) return;
-                      const cad = Number(v.replace(',', '.'));
-                      if (v && cad > 0) updateLine.mutate({ id: c.id, patch: { cadence: v, quantity: (1 / cad).toFixed(6) } });
-                      else updateLine.mutate({ id: c.id, patch: { cadence: null } });
-                    }} />
-                )}
-                <UnitSelect value={c.unit} token={token} readOnly={readOnly}
-                  onChange={(v) => updateLine.mutate({ id: c.id, patch: { unit: v || null } })} />
-                <input defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: 44, textAlign: 'right' }}
-                  onBlur={(e) => e.target.value !== cleanNum(c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0', syncByCode: true } })} />
-                {!isSubOuvrage && (
-                  <NatureSelect value={c.nature} readOnly={readOnly}
-                    onChange={(v) => updateLine.mutate({ id: c.id, patch: { nature: v || null, syncByCode: true } })} />
-                )}
-                {/* P.U. Public + mention « conv » quand le déboursé en est déduit (coeff. de conversion). */}
-                {!isSubOuvrage && (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                    <input defaultValue={cleanNum(c.prix_public ?? '')} disabled={readOnly} title="P.U. Public (catalogue)" placeholder="public" style={{ width: 64, textAlign: 'right' }}
-                      onBlur={(e) => e.target.value !== cleanNum(c.prix_public ?? '') && updateLine.mutate({ id: c.id, patch: { prixPublic: e.target.value || null, syncByCode: true } })} />
-                    {c.prix_public != null && c.prix_public !== '' && Number(c.prix_public) !== (Number(c.pu) || 0) && (
-                      <span title="Déboursé déduit du prix public via le coefficient de conversion" style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 700 }}>conv</span>
-                    )}
-                  </span>
-                )}
-                {isSubOuvrage ? (
-                  <span style={{ width: 72, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12 }}>{fmtEuro(subUnitPu, decimals)}</span>
-                ) : (
-                  <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 68, textAlign: 'right' }}
-                    onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0', syncByCode: true } })} />
-                )}
-                <span style={{ width: 72, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500 }}>{fmtEuro(montant, decimals)}</span>
-                <button type="button" className="btn-ghost" title="Informations" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
-                {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
+                {!isSubOuvrage
+                  ? <input defaultValue={cleanNum(c.cadence ?? '')} disabled={readOnly} title="Cadence (rendement) — MO : quantité = 1/cadence" placeholder="—" style={{ width: '100%', textAlign: 'right' }}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v === cleanNum(c.cadence ?? '')) return;
+                        const cad = Number(v.replace(',', '.'));
+                        if (v && cad > 0) updateLine.mutate({ id: c.id, patch: { cadence: v, quantity: (1 / cad).toFixed(6) } });
+                        else updateLine.mutate({ id: c.id, patch: { cadence: null } });
+                      }} />
+                  : <span />}
+                {/* P.U. Public + « conv » (déboursé déduit du public via le coefficient). */}
+                {!isSubOuvrage
+                  ? <span style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                      <input defaultValue={cleanNum(c.prix_public ?? '')} disabled={readOnly} title="P.U. Public (catalogue)" placeholder="—" style={{ width: '100%', textAlign: 'right', minWidth: 0 }}
+                        onBlur={(e) => e.target.value !== cleanNum(c.prix_public ?? '') && updateLine.mutate({ id: c.id, patch: { prixPublic: e.target.value || null, syncByCode: true } })} />
+                      {showConv && <span title="Déboursé déduit du prix public via le coefficient de conversion" style={{ fontSize: 8, color: 'var(--accent)', fontWeight: 700 }}>conv</span>}
+                    </span>
+                  : <span />}
+                {isSubOuvrage
+                  ? <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12 }}>{fmtEuro(subUnitPu, decimals)}</span>
+                  : <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="P.U. déboursé" style={{ width: '100%', textAlign: 'right' }}
+                      onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0', syncByCode: true } })} />}
+                {!isSubOuvrage
+                  ? <NatureSelect value={c.nature} readOnly={readOnly} style={{ width: '100%' }}
+                      onChange={(v) => updateLine.mutate({ id: c.id, patch: { nature: v || null, syncByCode: true } })} />
+                  : <span />}
+                <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500 }}>{fmtEuro(montant, decimals)}</span>
+                <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn-ghost" title="Informations" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
+                  {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
+                </span>
               </div>
             </Fragment>
           );
@@ -670,11 +697,12 @@ function SectionActions({ parentId, childCount, depth, addLine, headerColor }: {
   );
 }
 
-function UnitSelect({ value, token, readOnly, onChange }: {
+function UnitSelect({ value, token, readOnly, onChange, style }: {
   value: string | null | undefined;
   token: string | null;
   readOnly: boolean;
   onChange: (v: string) => void;
+  style?: React.CSSProperties;
 }) {
   const { data } = useQuery({
     queryKey: ['params-units'],
@@ -691,7 +719,7 @@ function UnitSelect({ value, token, readOnly, onChange }: {
       disabled={readOnly}
       title="Unité"
       onChange={(e) => onChange(e.target.value)}
-      style={{ width: 60, fontSize: 12, padding: '1px 2px', border: '1px solid #e2e8f0', borderRadius: 4, background: '#f8fafc', color: '#475569', textAlign: 'center', flexShrink: 0 }}
+      style={{ width: 60, fontSize: 12, padding: '1px 2px', border: '1px solid #e2e8f0', borderRadius: 4, background: '#f8fafc', color: '#475569', textAlign: 'center', flexShrink: 0, ...style }}
     >
       <option value="">—</option>
       {current && !knownAbrevs.has(current) && <option value={current}>{current}</option>}
@@ -728,10 +756,11 @@ const NATURE_CHOICES: { value: string; label: string; short: string }[] = [
   { value: 'equipment', label: 'Matériel', short: 'MATL' },
   { value: 'subcontract', label: 'Sous-traitance', short: 'ST' },
 ];
-function NatureSelect({ value, readOnly, onChange }: {
+function NatureSelect({ value, readOnly, onChange, style }: {
   value: string | null | undefined;
   readOnly: boolean;
   onChange: (v: string) => void;
+  style?: React.CSSProperties;
 }) {
   const current = value ?? '';
   return (
@@ -740,7 +769,7 @@ function NatureSelect({ value, readOnly, onChange }: {
       disabled={readOnly}
       title="Nature (ventilation MO / matériaux / matériel / sous-traitance)"
       onChange={(e) => onChange(e.target.value)}
-      style={{ width: 62, fontSize: 12, padding: '1px 2px', border: `1px solid ${current ? '#e2e8f0' : '#f59e0b'}`, borderRadius: 4, background: current ? '#f8fafc' : '#fffbeb', color: '#475569', textAlign: 'center', flexShrink: 0 }}
+      style={{ width: 62, fontSize: 12, padding: '1px 2px', border: `1px solid ${current ? '#e2e8f0' : '#f59e0b'}`, borderRadius: 4, background: current ? '#f8fafc' : '#fffbeb', color: '#475569', textAlign: 'center', flexShrink: 0, ...style }}
     >
       <option value="">—</option>
       {NATURE_CHOICES.map((n) => (
