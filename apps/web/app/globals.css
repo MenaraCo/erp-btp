@@ -830,25 +830,21 @@ table.grid tbody tr:hover {
 
 /* Lignes de la grille = lignes de tableau : filets fins entre colonnes + entre lignes. */
 .sd-row, .sd-head { position: relative; border-bottom: 1px solid #edf1f6; }
-.sd-row > *:not(.row-actions), .sd-head > * {
+.sd-row > *:not(.sd-actions), .sd-head > *:not(.sd-actions) {
   border-right: 1px solid #f2f5f9;
   min-height: 24px;
   display: flex; align-items: center;
   overflow: hidden;
 }
+/* Cellule d'actions : pas d'overflow:hidden (sinon le menu déroulant « + » serait rogné). */
+.sd-actions { min-height: 24px; overflow: visible; }
 .sd-row > *:last-child, .sd-head > *:last-child { border-right: none; }
 .sd-head > * { color: #94a3b8; }
 .sd-row:hover { background: #f8fafc; }
 
-/* Boutons d'action de ligne : masqués, révélés au survol (désencombre). */
-.row-actions {
-  position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
-  display: flex; align-items: center; gap: 0;
-  background: linear-gradient(90deg, transparent, #f8fafc 22%, #f8fafc);
-  padding-left: 14px; opacity: 0; pointer-events: none; transition: opacity .1s;
-}
-.sd-row:hover .row-actions { opacity: 1; pointer-events: auto; }
 
-/* Titres sur la grille : overlay actions au survol (comme les lignes). */
+
+/* Actions de ligne : dernière cellule, estompée par défaut, pleine au survol (toujours cliquable). */
+.sd-actions { opacity: 0.3; transition: opacity .1s; justify-content: flex-end; }
+.sd-row:hover .sd-actions, .sd-title:hover .sd-actions { opacity: 1; }
 .sd-title { position: relative; }
-.sd-title:hover .row-actions { opacity: 1; pointer-events: auto; }

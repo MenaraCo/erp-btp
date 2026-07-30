@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtEuro, fmtNum, cleanNum } from '@/lib/preferences';
@@ -40,12 +41,15 @@ export interface MontageLine {
 }
 
 /** Gabarit de colonnes du sous-détail (déboursé) — aligné, ordre : marqueurs · Code · Désignation ·
- * Unité · Perte · Qté · Cadence · P.U. Public · P.U. Déboursé · Nature · Montant · actions. */
+ * Unité · Perte · Qté · Cadence · P.U. Public · P.U. Déboursé · Montant · actions.
+ * La nature n'est plus une colonne : elle s'édite dans la fiche ressource (double-clic / ⓘ), comme
+ * dans la bibliothèque, pour gagner de la place. */
 const SD_GRID: React.CSSProperties = {
   display: 'grid',
   // 12 colonnes : marqueurs · Code · Désignation · Unité · Perte · Qté · Cadence · P.U. Public ·
-  // P.U. Déb. · Nature · Montant. Les actions sont en overlay (survol), hors grille.
-  gridTemplateColumns: '14px 18px 66px minmax(140px,1fr) 46px 38px 48px 42px 64px 58px 54px 78px',
+  // P.U. Déb. · Montant · Actions. La dernière cellule (actions) reste dans la grille : estompée,
+  // pleine au survol, toujours cliquable (le « + » ne disparaît plus).
+  gridTemplateColumns: '14px 18px 66px minmax(140px,1fr) 46px 38px 48px 42px 64px 58px 78px 116px',
   alignItems: 'stretch',
   columnGap: 0,
 };
@@ -64,8 +68,8 @@ function DeboursHeader() {
       <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Cad.</span>
       <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U. Public</span>
       <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U. Déb.</span>
-      <span style={{ justifyContent: 'center' }}>Nature</span>
       <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Montant</span>
+      <span />
     </div>
   );
 }
@@ -304,6 +308,9 @@ export function Montage({
           components={infoLine.type === 'ouvrage' ? childrenOf(infoLine.id) : []}
           deboursById={deboursById}
           decimals={decimals}
+          token={token}
+          readOnly={readOnly}
+          updateLine={updateLine}
           onClose={() => setInfoLine(null)}
         />
       )}
@@ -449,17 +456,19 @@ function Node({
           </span>
           <input className="title-input" defaultValue={line.designation} disabled={readOnly} title={line.designation}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })}
-            style={{ gridColumn: '4 / 12', fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', width: '100%', minWidth: 0, background: 'transparent', color: ls.color }} />
+            style={{ gridColumn: '4 / 11', fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', width: '100%', minWidth: 0, background: 'transparent', color: ls.color }} />
           <span style={{ display: 'flex', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: ls.color, paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
-          {!readOnly && (
-            <span className="row-actions" style={{ background: `linear-gradient(90deg, transparent, ${ls.bg} 22%, ${ls.bg})` }}>
-              <SectionActions parentId={line.id} childCount={kids.length} depth={depth} addLine={addLine} headerColor={ls.color} />
-              <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, 'rgba(255,255,255,0.5)'), fontSize: 13 }}>⧉</button>
-              <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'variante' ? null : 'variante' })} style={togBtn(sect === 'variante', '#f97316')}>V</button>
-              <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'option' ? null : 'option' })} style={togBtn(sect === 'option', '#a855f7')}>O</button>
-              <button title="Supprimer" className="btn-ghost" onClick={() => deleteLine.mutate(line.id)} style={{ color: ls.color }}>✕</button>
-            </span>
-          )}
+          <span className="sd-actions" style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {!readOnly && (
+              <>
+                <SectionActions parentId={line.id} childCount={kids.length} depth={depth} addLine={addLine} headerColor={ls.color} />
+                <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, 'rgba(255,255,255,0.5)'), fontSize: 13 }}>⧉</button>
+                <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'variante' ? null : 'variante' })} style={togBtn(sect === 'variante', '#f97316')}>V</button>
+                <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'option' ? null : 'option' })} style={togBtn(sect === 'option', '#a855f7')}>O</button>
+                <button title="Supprimer" className="btn-ghost" onClick={() => deleteLine.mutate(line.id)} style={{ color: ls.color }}>✕</button>
+              </>
+            )}
+          </span>
         </div>
         {kids.map((k) => (
           <Fragment key={k.id}>
@@ -534,10 +543,9 @@ function Node({
                 onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
                 onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
             : <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12, paddingRight: 4 }}>{(Number(line.quantity) || 0) > 0 ? fmtEuro(valueOf(line) / (Number(line.quantity) || 1), decimals) : ''}</span>}
-          <span />{/* Nature */}
           <span style={{ width: '100%', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
-          <span className="row-actions" style={{ background: 'linear-gradient(90deg, transparent, #f4f6fa 22%, #f4f6fa)' }}>
-            <button type="button" className="btn-ghost" title="Informations" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
+          <span className="sd-actions" style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <button type="button" className="btn-ghost" title="Informations / modifier" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
             {!readOnly && (
               <>
                 {!vente && <OuvrageAddMenu parentId={line.id} childCount={comps.length} addLine={addLine} />}
@@ -600,13 +608,9 @@ function Node({
                   ? <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12, paddingRight: 4 }}>{fmtEuro(subUnitPu, decimals)}</span>
                   : <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="P.U. déboursé" style={{ width: '100%', textAlign: 'right' }}
                       onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0', syncByCode: true } })} />}
-                {!isSubOuvrage
-                  ? <NatureSelect value={c.nature} readOnly={readOnly} style={{ width: '100%' }}
-                      onChange={(v) => updateLine.mutate({ id: c.id, patch: { nature: v || null, syncByCode: true } })} />
-                  : <span />}
                 <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500, paddingRight: 4 }}>{fmtEuro(montant, decimals)}</span>
-                <span className="row-actions">
-                  <button type="button" className="btn-ghost" title="Informations" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
+                <span className="sd-actions" style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <button type="button" className="btn-ghost" title="Modifier la ressource (nature, code, prix…)" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
                   {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
                 </span>
               </div>
@@ -656,10 +660,6 @@ function Node({
           onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
         <UnitSelect value={line.unit} token={token} readOnly={readOnly}
           onChange={(v) => updateLine.mutate({ id: line.id, patch: { unit: v || null } })} />
-        {!vente && (
-          <NatureSelect value={line.nature} readOnly={readOnly}
-            onChange={(v) => updateLine.mutate({ id: line.id, patch: { nature: v || null, syncByCode: !!line.code } })} />
-        )}
         {vente ? (
           <PvCell computed={puVente} forced={!!info?.forced} pending={setLinePv.isPending} decimals={decimals}
             onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
@@ -705,7 +705,7 @@ function SectionActions({ parentId, childCount, depth, addLine, headerColor }: {
     <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
       <button type="button" title="Ajouter un élément dans cette section"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${headerColor}`, background: 'transparent', color: headerColor, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, opacity: 0.8, flexShrink: 0 }}>+</button>
+        style={{ width: 20, height: 20, borderRadius: 4, border: `1px solid ${headerColor}`, background: 'transparent', color: headerColor, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, opacity: 0.8, flexShrink: 0 }}>+</button>
       {open && (
         <>
           <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
@@ -825,7 +825,7 @@ function OuvrageAddMenu({ parentId, childCount, addLine }: {
     <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
       <button type="button" title="Ajouter un élément dans cet ouvrage"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        style={{ width: 22, height: 22, borderRadius: 4, border: '1px dashed #94a3b8', background: 'transparent', color: '#64748b', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, flexShrink: 0 }}>+</button>
+        style={{ width: 20, height: 20, borderRadius: 4, border: '1px dashed #94a3b8', background: 'transparent', color: '#64748b', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, flexShrink: 0 }}>+</button>
       {open && (
         <>
           <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
@@ -860,36 +860,140 @@ function NumBox({ line, onChange }: { line: MontageLine; onChange: (v: string) =
   );
 }
 
-function LineInfoModal({ line, components, deboursById, decimals, onClose }: {
+/** Fiche de modification d'une ligne de devis — même formulaire que la fiche ressource de la
+ * bibliothèque, mais les modifications ne touchent QUE cette ligne du devis (via updateLine),
+ * jamais la ressource de la bibliothèque société. La nature s'édite ici (plus de colonne). */
+function LineInfoModal({ line, components, deboursById, decimals, token, readOnly, updateLine, onClose }: {
   line: MontageLine; components: MontageLine[];
-  deboursById: Map<string, string>; decimals: number; onClose: () => void;
+  deboursById: Map<string, string>; decimals: number;
+  token: string | null; readOnly: boolean;
+  updateLine: Muts['updateLine'];
+  onClose: () => void;
 }) {
   const isOuvrage = line.type === 'ouvrage';
   const debours = Number(deboursById.get(line.id) ?? 0);
-  const row = (label: string, val: React.ReactNode) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-      <span className="muted">{label}</span><span style={{ fontWeight: 500, textAlign: 'right' }}>{val}</span>
-    </div>
+  const hasCode = !!line.code;
+
+  // État local du formulaire : feedback immédiat + persistance à la validation de chaque champ.
+  const [form, setForm] = useState({
+    code: line.code ?? '',
+    codeAnalytique: line.code_analytique ?? '',
+    designation: line.designation ?? '',
+    unit: line.unit ?? '',
+    nature: line.nature ?? '',
+    quantity: cleanNum(line.quantity),
+    perte: cleanNum(line.perte ?? '0'),
+    cadence: cleanNum(line.cadence ?? ''),
+    pu: cleanNum(line.pu),
+    prixPublic: cleanNum(line.prix_public ?? ''),
+  });
+  type FormKey = keyof typeof form;
+  const set = (k: FormKey, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Commit d'un champ : n'écrit que si la valeur a changé ; syncByCode propage aux lignes de même
+  // code dans ce devis (comme l'édition inline), sans jamais toucher la bibliothèque.
+  const commit = (patch: Record<string, unknown>, sync = false) => {
+    if (readOnly) return;
+    updateLine.mutate({ id: line.id, patch: sync && hasCode ? { ...patch, syncByCode: true } : patch });
+  };
+
+  const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3, display: 'block' };
+  const inputStyle: React.CSSProperties = { width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, background: readOnly ? '#f8fafc' : '#fff' };
+  const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div style={{ flex: 1, minWidth: 0 }}><span style={labelStyle}>{label}</span>{children}</div>
   );
-  return (
+
+  // Portail vers <body> : le panneau du devis a un contexte de transformation qui confinerait un
+  // overlay position:fixed ; le portail garantit un centrage plein écran.
+  return createPortal(
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
       <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 'min(640px, 96vw)', maxHeight: '85vh', overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0 }}>{isOuvrage ? 'Ouvrage' : 'Ressource'} — informations</h2>
+          <h2 style={{ margin: 0 }}>{isOuvrage ? 'Ouvrage' : 'Ressource'} — {readOnly ? 'informations' : 'modifier'}</h2>
           <button className="btn-ghost" onClick={onClose}>✕</button>
         </div>
-        <p className="muted" style={{ marginTop: 2 }}>Informations telles qu&apos;utilisées dans ce devis — sans incidence sur la bibliothèque société.</p>
-        <div style={{ marginTop: 8 }}>
-          {line.numero ? row('Numéro', <span style={{ fontFamily: 'monospace' }}>{line.numero}</span>) : null}
-          {line.code ? row('Code produit', <span style={{ fontFamily: 'monospace' }}>{line.code}</span>) : null}
-          {!isOuvrage && line.code_analytique ? row('Code analytique', <span style={{ fontFamily: 'monospace' }}>{line.code_analytique}</span>) : null}
-          {row('Désignation', line.designation)}
-          {line.unit ? row('Unité', line.unit) : null}
-          {row('Quantité', line.quantity != null ? cleanNum(line.quantity) : '—')}
-          {!isOuvrage ? row('PU déboursé', fmtEuro(line.pu, decimals)) : null}
-          {!isOuvrage && line.perte ? row('Perte', `${line.perte} %`) : null}
-          {row('Déboursé total', fmtEuro(debours, decimals))}
+        <p className="muted" style={{ marginTop: 2 }}>
+          {line.numero ? <>N° <span style={{ fontFamily: 'monospace' }}>{line.numero}</span> — </> : null}
+          Modifie uniquement cette ligne du devis, sans incidence sur la bibliothèque société.
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+          {!isOuvrage && (
+            <div style={{ display: 'flex', gap: 12 }}>
+              <Field label="Code produit">
+                <input defaultValue={form.code} disabled={readOnly} style={{ ...inputStyle, fontFamily: 'monospace' }}
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (line.code ?? '')) { set('code', v); commit({ code: v || null }); } }} />
+              </Field>
+              <Field label="Code analytique">
+                <input defaultValue={form.codeAnalytique} disabled={readOnly} style={{ ...inputStyle, fontFamily: 'monospace' }}
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (line.code_analytique ?? '')) { set('codeAnalytique', v); commit({ codeAnalytique: v || null }); } }} />
+              </Field>
+            </div>
+          )}
+
+          <Field label="Désignation">
+            <input defaultValue={form.designation} disabled={readOnly} style={inputStyle}
+              onBlur={(e) => { const v = e.target.value; if (v !== line.designation) { set('designation', v); commit({ designation: v }, true); } }} />
+          </Field>
+
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Field label="Unité">
+              <UnitSelect value={form.unit} token={token} readOnly={readOnly} style={{ width: '100%', textAlign: 'left' }}
+                onChange={(v) => { set('unit', v); commit({ unit: v || null }); }} />
+            </Field>
+            {!isOuvrage && (
+              <Field label="Nature (ventilation)">
+                <NatureSelect value={form.nature} readOnly={readOnly} style={{ width: '100%', textAlign: 'left' }}
+                  onChange={(v) => { set('nature', v); commit({ nature: v || null }, true); }} />
+              </Field>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Field label={isOuvrage ? 'Quantité' : 'Quantité / ratio'}>
+              <input defaultValue={form.quantity} disabled={readOnly} style={{ ...inputStyle, textAlign: 'right' }}
+                onBlur={(e) => { const v = e.target.value; if (v !== cleanNum(line.quantity)) { set('quantity', v); commit({ quantity: v || '0' }); } }} />
+            </Field>
+            {!isOuvrage && (
+              <>
+                <Field label="Perte %">
+                  <input defaultValue={form.perte} disabled={readOnly} style={{ ...inputStyle, textAlign: 'right' }}
+                    onBlur={(e) => { const v = e.target.value; if (v !== cleanNum(line.perte ?? '0')) { set('perte', v); commit({ perte: v || '0' }, true); } }} />
+                </Field>
+                <Field label="Cadence (rendement)">
+                  <input defaultValue={form.cadence} disabled={readOnly} placeholder="—" style={{ ...inputStyle, textAlign: 'right' }}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v === cleanNum(line.cadence ?? '')) return;
+                      set('cadence', v);
+                      const cad = Number(v.replace(',', '.'));
+                      if (v && cad > 0) commit({ cadence: v, quantity: (1 / cad).toFixed(6) });
+                      else commit({ cadence: null });
+                    }} />
+                </Field>
+              </>
+            )}
+          </div>
+
+          {!isOuvrage && (
+            <div style={{ display: 'flex', gap: 12 }}>
+              <Field label="P.U. déboursé">
+                <input defaultValue={form.pu} disabled={readOnly} style={{ ...inputStyle, textAlign: 'right' }}
+                  onBlur={(e) => { const v = e.target.value; if (v !== cleanNum(line.pu)) { set('pu', v); commit({ pu: v || '0' }, true); } }} />
+              </Field>
+              <Field label="P.U. public (catalogue)">
+                <input defaultValue={form.prixPublic} disabled={readOnly} placeholder="—" style={{ ...inputStyle, textAlign: 'right' }}
+                  onBlur={(e) => { const v = e.target.value; if (v !== cleanNum(line.prix_public ?? '')) { set('prixPublic', v); commit({ prixPublic: v || null }, true); } }} />
+              </Field>
+            </div>
+          )}
         </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16, padding: '10px 12px', background: '#f8fafc', borderRadius: 8, fontWeight: 600 }}>
+          <span className="muted">Déboursé total de la ligne</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtEuro(debours, decimals)}</span>
+        </div>
+
         {isOuvrage && components.length > 0 && (
           <>
             <div className="form-section-title" style={{ marginTop: 16 }}>Sous-détail ({components.length})</div>
@@ -908,8 +1012,15 @@ function LineInfoModal({ line, components, deboursById, decimals, onClose }: {
             </table>
           </>
         )}
+
+        {!readOnly && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={onClose}>Terminé</button>
+          </div>
+        )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -958,7 +1069,7 @@ function CopyMoveModal({ source, allLines, onClose, onDuplicate, onMove }: {
     onClose();
   };
 
-  return (
+  return createPortal(
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
       <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 'min(480px, 96vw)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1004,7 +1115,8 @@ function CopyMoveModal({ source, allLines, onClose, onDuplicate, onMove }: {
           <button type="button" className="btn" onClick={resolve}>{action === 'copy' ? 'Copier' : 'Déplacer'}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1043,5 +1155,5 @@ export function PvCell({ computed, forced, pending, decimals, onForce, onRelease
 }
 
 function togBtn(active: boolean, color: string): React.CSSProperties {
-  return { fontSize: 12, fontWeight: 700, width: 22, height: 22, borderRadius: 4, cursor: 'pointer', border: 'none', background: active ? color : '#f1f5f9', color: active ? '#fff' : '#94a3b8' };
+  return { fontSize: 11, fontWeight: 700, width: 20, height: 20, borderRadius: 4, cursor: 'pointer', border: 'none', background: active ? color : '#f1f5f9', color: active ? '#fff' : '#94a3b8', flexShrink: 0 };
 }
