@@ -52,6 +52,12 @@ export interface DevisLinePatch {
   parentLineId?: string | null;
   /** Propager désignation/pu/perte à toutes les ressources du même devis partageant le même code. */
   syncByCode?: boolean;
+  /** Champs d'achat de la ligne (indépendants de la bibliothèque). */
+  uniteAchat?: string | null;
+  coeffConversion?: string | number | null;
+  supplierId?: string | null;
+  refFournisseur?: string | null;
+  conditionnement?: string | null;
 }
 
 export interface AffairePatch {
@@ -115,6 +121,12 @@ export interface DevisLineInput {
   vendable?: boolean;
   /** marks a titre/sous-titre as option/variante (propagates to descendants). */
   sectionType?: 'option' | 'variante' | null;
+  /** Champs d'achat (copiés de la biblio à l'ajout, éditables dans le devis). */
+  uniteAchat?: string | null;
+  coeffConversion?: string | number | null;
+  supplierId?: string | null;
+  refFournisseur?: string | null;
+  conditionnement?: string | null;
 }
 
 @Injectable()
@@ -409,8 +421,10 @@ export class DevisService {
              (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique,
               designation, unit, quantity, pu, perte, nature,
               source_ouvrage_id, source_resource_id, sort_order, num_custom,
-              section_type, vendable)
-           VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+              section_type, vendable,
+              unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement)
+           VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+                   $18,$19,$20,$21,$22)
            RETURNING id`,
           [
             tenantId, newVersion.id,
@@ -418,6 +432,8 @@ export class DevisService {
             l['designation'], l['unit'], l['quantity'], l['pu'], l['perte'], l['nature'],
             l['source_ouvrage_id'], l['source_resource_id'],
             l['sort_order'], l['num_custom'], l['section_type'], l['vendable'] ?? true,
+            l['unite_achat'], l['coeff_conversion'], l['supplier_id'],
+            l['ref_fournisseur'], l['conditionnement'],
           ],
         ))[0];
         idMap.set(l.id, nl.id);
@@ -600,8 +616,10 @@ export class DevisService {
                (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique,
                 designation, unit, quantity, quantity_formula, pu, pu_vente, pu_vente_force,
                 perte, nature, cadence, prix_public, source_ouvrage_id, source_resource_id,
-                sort_order, num_custom, section_type, vendable, base_line_id)
-             VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+                sort_order, num_custom, section_type, vendable, base_line_id,
+                unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement)
+             VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+                     $24,$25,$26,$27,$28)
              RETURNING id`,
             [
               tenantId, newVersion.id,
@@ -612,6 +630,8 @@ export class DevisService {
               l['source_ouvrage_id'], l['source_resource_id'],
               l['sort_order'], l['num_custom'], l['section_type'], l['vendable'] ?? true,
               l['id'], // base_line_id → tracks lineage to previous version
+              l['unite_achat'], l['coeff_conversion'], l['supplier_id'],
+              l['ref_fournisseur'], l['conditionnement'],
             ],
           ))[0];
           idMap.set(l['id'] as string, nl.id);
@@ -758,16 +778,28 @@ export class DevisService {
       }
 
       // Ressource ajoutée depuis la bibliothèque : hériter automatiquement de sa NATURE
-      // (matériaux / MO / matériel / sous-traitance) et de ses attributs clés lorsqu'ils ne sont
-      // pas fournis. C'est une COPIE de valeurs — la ligne du devis reste découplée de la biblio.
+      // (matériaux / MO / matériel / sous-traitance), de son code analytique et de ses champs
+      // d'achat lorsqu'ils ne sont pas fournis. C'est une COPIE de valeurs — la ligne du devis
+      // reste découplée de la biblio.
       let code = input.code ?? null;
       let unit = input.unit ?? null;
       let nature = input.nature ?? null;
       let prixPublic = input.prixPublic != null ? String(input.prixPublic) : null;
       let pu = input.pu != null ? String(input.pu) : null;
+      let codeAnalytique = input.codeAnalytique ?? null;
+      let uniteAchat = input.uniteAchat ?? null;
+      let coeffConversion = input.coeffConversion != null ? String(input.coeffConversion) : null;
+      let supplierId = input.supplierId ?? null;
+      let refFournisseur = input.refFournisseur ?? null;
+      let conditionnement = input.conditionnement ?? null;
       if (input.sourceResourceId) {
         const res = await em.query(
-          `SELECT code, nature, unit, prix_public, unit_cost FROM resource WHERE id = $1 AND tenant_id = $2`,
+          `SELECT r.code, r.nature, r.unit, r.prix_public, r.unit_cost,
+                  r.unite_achat, r.coeff_conversion, r.supplier_id, r.ref_fournisseur,
+                  r.conditionnement, ac.code AS code_analytique
+             FROM resource r
+             LEFT JOIN analytical_code ac ON ac.id = r.code_analytique_id
+            WHERE r.id = $1 AND r.tenant_id = $2`,
           [input.sourceResourceId, tenantId],
         );
         if (res.length > 0) {
@@ -777,6 +809,13 @@ export class DevisService {
           nature = nature ?? r.nature ?? null;
           prixPublic = prixPublic ?? (r.prix_public != null ? String(r.prix_public) : null);
           pu = pu ?? (r.unit_cost != null ? String(r.unit_cost) : null);
+          codeAnalytique = codeAnalytique ?? r.code_analytique ?? null;
+          uniteAchat = uniteAchat ?? r.unite_achat ?? null;
+          coeffConversion =
+            coeffConversion ?? (r.coeff_conversion != null ? String(r.coeff_conversion) : null);
+          supplierId = supplierId ?? r.supplier_id ?? null;
+          refFournisseur = refFournisseur ?? r.ref_fournisseur ?? null;
+          conditionnement = conditionnement ?? r.conditionnement ?? null;
         }
       }
 
@@ -785,15 +824,17 @@ export class DevisService {
           `INSERT INTO devis_line
              (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique, designation, unit,
               quantity, quantity_formula, pu, perte, nature, cadence, prix_public,
-              source_ouvrage_id, source_resource_id, sort_order, vendable, section_type)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+              source_ouvrage_id, source_resource_id, sort_order, vendable, section_type,
+              unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+                   $21,$22,$23,$24,$25) RETURNING *`,
           [
             tenantId,
             versionId,
             input.parentLineId ?? null,
             input.type,
             code,
-            input.codeAnalytique ?? null,
+            codeAnalytique,
             input.designation,
             unit,
             quantity,
@@ -808,6 +849,11 @@ export class DevisService {
             input.sortOrder ?? 0,
             input.vendable !== false,
             input.sectionType ?? null,
+            uniteAchat,
+            coeffConversion,
+            supplierId,
+            refFournisseur,
+            conditionnement,
           ],
         )
       )[0];
@@ -947,6 +993,22 @@ export class DevisService {
         )[0];
         components.push(child);
       }
+
+      // Les composants copiés héritent aussi des champs d'achat de leur ressource bibliothèque
+      // (unité d'achat, coeff de conversion, distributeur…), nécessaires au Calcul Appro et
+      // éditables ensuite dans le devis sans impacter la bibliothèque.
+      await em.query(
+        `UPDATE devis_line dl SET
+           unite_achat = COALESCE(dl.unite_achat, r.unite_achat),
+           coeff_conversion = COALESCE(dl.coeff_conversion, r.coeff_conversion),
+           supplier_id = COALESCE(dl.supplier_id, r.supplier_id),
+           ref_fournisseur = COALESCE(dl.ref_fournisseur, r.ref_fournisseur),
+           conditionnement = COALESCE(dl.conditionnement, r.conditionnement)
+         FROM resource r
+         WHERE dl.source_resource_id = r.id AND dl.parent_line_id = $1`,
+        [ouvrageLine.id],
+      );
+
       return { ouvrage: ouvrageLine, components };
     });
   }
@@ -987,6 +1049,11 @@ export class DevisService {
            sort_order = COALESCE($11, sort_order),
            cadence = CASE WHEN $12 = '__KEEP__' THEN cadence ELSE NULLIF($12, '')::numeric END,
            prix_public = CASE WHEN $13 = '__KEEP__' THEN prix_public ELSE NULLIF($13, '')::numeric END,
+           unite_achat = CASE WHEN $14 = '__KEEP__' THEN unite_achat ELSE NULLIF($14, '') END,
+           coeff_conversion = CASE WHEN $15 = '__KEEP__' THEN coeff_conversion ELSE NULLIF($15, '')::numeric END,
+           supplier_id = CASE WHEN $16 = '__KEEP__' THEN supplier_id ELSE NULLIF($16, '')::uuid END,
+           ref_fournisseur = CASE WHEN $17 = '__KEEP__' THEN ref_fournisseur ELSE NULLIF($17, '') END,
+           conditionnement = CASE WHEN $18 = '__KEEP__' THEN conditionnement ELSE NULLIF($18, '') END,
            updated_at = now()
          WHERE id = $1`,
         [
@@ -1003,6 +1070,11 @@ export class DevisService {
           patch.sortOrder != null ? patch.sortOrder : null,
           patch.cadence === undefined ? '__KEEP__' : (patch.cadence != null ? String(patch.cadence) : ''),
           patch.prixPublic === undefined ? '__KEEP__' : (patch.prixPublic != null ? String(patch.prixPublic) : ''),
+          patch.uniteAchat === undefined ? '__KEEP__' : (patch.uniteAchat ?? ''),
+          patch.coeffConversion === undefined ? '__KEEP__' : (patch.coeffConversion != null ? String(patch.coeffConversion) : ''),
+          patch.supplierId === undefined ? '__KEEP__' : (patch.supplierId ?? ''),
+          patch.refFournisseur === undefined ? '__KEEP__' : (patch.refFournisseur ?? ''),
+          patch.conditionnement === undefined ? '__KEEP__' : (patch.conditionnement ?? ''),
         ],
       );
 
@@ -1056,12 +1128,16 @@ export class DevisService {
           `INSERT INTO devis_line
              (tenant_id, devis_version_id, parent_line_id, type, designation,
               code, code_analytique, unit, quantity, quantity_formula, pu, perte, nature,
-              source_ouvrage_id, source_resource_id, sort_order, vendable, section_type)
+              source_ouvrage_id, source_resource_id, sort_order, vendable, section_type,
+              cadence, prix_public, unite_achat, coeff_conversion, supplier_id,
+              ref_fournisseur, conditionnement)
            SELECT tenant_id, devis_version_id, $2, type, designation,
               ${keepCode ? 'code' : 'NULL::varchar(64)'},
               ${keepCode ? 'code_analytique' : 'NULL::varchar(64)'},
               unit, quantity, quantity_formula, pu, perte, nature,
-              source_ouvrage_id, source_resource_id, $3, vendable, section_type
+              source_ouvrage_id, source_resource_id, $3, vendable, section_type,
+              cadence, prix_public, unite_achat, coeff_conversion, supplier_id,
+              ref_fournisseur, conditionnement
            FROM devis_line WHERE id = $1
            RETURNING id`,
           [srcId, destParentId, maxRow.n],
@@ -1104,8 +1180,9 @@ export class DevisService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       // Toutes les ressources du devis (biblio ET saisies à la main). Les métadonnées d'achat
-      // (unité d'achat, coeff de conversion, prix public…) viennent de la bibliothèque si la
-      // ressource y est rattachée ; sinon on retombe sur les valeurs de la ligne (code, pu, unité).
+      // (unité d'achat, coeff de conversion, prix public…) sont prises EN PRIORITÉ sur la ligne
+      // du devis — elles y sont copiées à l'ajout puis éditables sans toucher la bibliothèque —
+      // avec repli sur la ressource bibliothèque quand la ligne ne les porte pas.
       const rows: Array<{
         line_id: string;
         resource_id: string | null;
@@ -1125,13 +1202,17 @@ export class DevisService {
       }> = await em.query(
         `SELECT dl.id AS line_id, r.id AS resource_id,
                 COALESCE(r.code, dl.code) AS code, COALESCE(r.label, dl.designation) AS label,
-                COALESCE(r.unit, dl.unit) AS unite_emploi,
-                r.unite_achat, r.coeff_conversion, r.prix_public, r.conditionnement,
-                r.ref_fournisseur, s.code AS fournisseur,
+                COALESCE(dl.unit, r.unit) AS unite_emploi,
+                COALESCE(dl.unite_achat, r.unite_achat) AS unite_achat,
+                COALESCE(dl.coeff_conversion, r.coeff_conversion) AS coeff_conversion,
+                COALESCE(dl.prix_public, r.prix_public) AS prix_public,
+                COALESCE(dl.conditionnement, r.conditionnement) AS conditionnement,
+                COALESCE(dl.ref_fournisseur, r.ref_fournisseur) AS ref_fournisseur,
+                s.code AS fournisseur,
                 dl.quantity, dl.perte, dl.pu, p.quantity AS ouvrage_qty
            FROM devis_line dl
            LEFT JOIN resource r ON r.id = dl.source_resource_id
-           LEFT JOIN supplier s ON s.id = r.supplier_id
+           LEFT JOIN supplier s ON s.id = COALESCE(dl.supplier_id, r.supplier_id)
            LEFT JOIN devis_line p ON p.id = dl.parent_line_id AND p.type = 'ouvrage'
           WHERE dl.devis_version_id = $1 AND dl.type = 'ressource'`,
         [versionId],
