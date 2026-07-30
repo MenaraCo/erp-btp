@@ -848,6 +848,13 @@ table.grid tbody tr:hover {
   box-shadow: inset 0 0 0 1.5px var(--primary) !important;
   border-radius: 2px !important;
 }
+/* Au focus, le fond de l'input passe en blanc : forcer un texte foncé (les titres de
+ * niveau 1 ont un texte blanc sur navy → sinon blanc sur blanc, illisible). */
+.deb-table input:focus {
+  color: #1e293b !important;
+  -webkit-text-fill-color: #1e293b !important;
+  caret-color: var(--primary);
+}
 .deb-table input::placeholder { color: #cbd5e1; }
 
 /* Lignes de la grille = lignes de tableau : filets fins entre colonnes + entre lignes. */
