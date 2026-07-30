@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
@@ -54,6 +54,20 @@ const SD_GRID: React.CSSProperties = {
   columnGap: 0,
 };
 const CELL_CTR: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center' };
+
+/** Entrée dans une cellule → saute à la même colonne de la ligne suivante DE MÊME NIVEAU
+ * (les inputs portent data-cell="<type>:<champ>"). Le blur de la cellule quittée valide la saisie. */
+function focusNextCell(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const cell = e.currentTarget.dataset.cell;
+  const root = e.currentTarget.closest('.deb-table');
+  if (!cell || !root) { e.currentTarget.blur(); return; }
+  const nodes = Array.from(root.querySelectorAll<HTMLInputElement>(`input[data-cell="${cell}"]`));
+  const next = nodes[nodes.indexOf(e.currentTarget) + 1];
+  if (next) { next.focus(); next.select(); }
+  else e.currentTarget.blur();
+}
 
 /** En-tête de colonnes du déboursé (affiché une seule fois, collant en haut du corps). */
 function DeboursHeader() {
@@ -453,7 +467,7 @@ function Node({
                 style={{ width: 34, fontSize: 11, fontFamily: 'monospace', textAlign: 'center', color: ls.color }} />
             )}
           </span>
-          <input className="title-input" defaultValue={line.designation} disabled={readOnly} title={line.designation}
+          <input className="title-input" data-cell="titre:designation" onKeyDown={focusNextCell} defaultValue={line.designation} disabled={readOnly} title={line.designation}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })}
             style={{ gridColumn: '4 / 11', fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', width: '100%', minWidth: 0, background: 'transparent', color: ls.color }} />
           <span style={{ display: 'flex', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: ls.color, paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
@@ -528,12 +542,12 @@ function Node({
             <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{line.numero ?? ''}</span>
             {!readOnly && !vente && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
           </span>
-          <input defaultValue={line.designation} disabled={readOnly} title={line.designation} style={{ width: '100%', minWidth: 0, fontWeight: 600 }}
+          <input data-cell="ouvrage:designation" onKeyDown={focusNextCell} defaultValue={line.designation} disabled={readOnly} title={line.designation} style={{ width: '100%', minWidth: 0, fontWeight: 600 }}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })} />
           <UnitSelect value={line.unit} token={token} readOnly={readOnly} style={{ width: '100%' }}
             onChange={(v) => updateLine.mutate({ id: line.id, patch: { unit: v || null } })} />
           <span />{/* Perte */}
-          <input defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: '100%', textAlign: 'right' }}
+          <input data-cell="ouvrage:quantity" onKeyDown={focusNextCell} defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: '100%', textAlign: 'right' }}
             onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
           <span />{/* Cadence */}
           <span />{/* P.U. Public */}
@@ -576,18 +590,18 @@ function Node({
                   ? <CodeInput value={c.code_analytique} readOnly={readOnly} placeholder="Analy." title="Code analytique" style={{ width: '100%' }}
                       onChange={(v) => updateLine.mutate({ id: c.id, patch: { codeAnalytique: v } })} />
                   : <span />}
-                <input defaultValue={c.designation} disabled={readOnly} title={c.designation} style={{ width: '100%', minWidth: 0 }}
+                <input data-cell="ressource:designation" onKeyDown={focusNextCell} defaultValue={c.designation} disabled={readOnly} title={c.designation} style={{ width: '100%', minWidth: 0 }}
                   onBlur={(e) => e.target.value !== c.designation && updateLine.mutate({ id: c.id, patch: { designation: e.target.value, syncByCode: true } })} />
                 <UnitSelect value={c.unit} token={token} readOnly={readOnly} style={{ width: '100%' }}
                   onChange={(v) => updateLine.mutate({ id: c.id, patch: { unit: v || null } })} />
                 {!isSubOuvrage
-                  ? <input defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: '100%', textAlign: 'right' }}
+                  ? <input data-cell="ressource:perte" onKeyDown={focusNextCell} defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: '100%', textAlign: 'right' }}
                       onBlur={(e) => e.target.value !== cleanNum(c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0', syncByCode: true } })} />
                   : <span />}
-                <input defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio / quantité" style={{ width: '100%', textAlign: 'right' }}
+                <input data-cell="ressource:quantity" onKeyDown={focusNextCell} defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio / quantité" style={{ width: '100%', textAlign: 'right' }}
                   onBlur={(e) => e.target.value !== cleanNum(c.quantity) && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
                 {!isSubOuvrage
-                  ? <input defaultValue={cleanNum(c.cadence ?? '')} disabled={readOnly} title="Cadence (rendement) — MO : quantité = 1/cadence" placeholder="—" style={{ width: '100%', textAlign: 'right' }}
+                  ? <input data-cell="ressource:cadence" onKeyDown={focusNextCell} defaultValue={cleanNum(c.cadence ?? '')} disabled={readOnly} title="Cadence (rendement) — MO : quantité = 1/cadence" placeholder="—" style={{ width: '100%', textAlign: 'right' }}
                       onBlur={(e) => {
                         const v = e.target.value.trim();
                         if (v === cleanNum(c.cadence ?? '')) return;
@@ -598,14 +612,14 @@ function Node({
                   : <span />}
                 {!isSubOuvrage
                   ? <span style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, minWidth: 0 }}>
-                      <input defaultValue={cleanNum(c.prix_public ?? '')} disabled={readOnly} title="P.U. Public (catalogue)" placeholder="—" style={{ width: '100%', textAlign: 'right', minWidth: 0 }}
+                      <input data-cell="ressource:prix_public" onKeyDown={focusNextCell} defaultValue={cleanNum(c.prix_public ?? '')} disabled={readOnly} title="P.U. Public (catalogue)" placeholder="—" style={{ width: '100%', textAlign: 'right', minWidth: 0 }}
                         onBlur={(e) => e.target.value !== cleanNum(c.prix_public ?? '') && updateLine.mutate({ id: c.id, patch: { prixPublic: e.target.value || null, syncByCode: true } })} />
                       {showConv && <span title="Déboursé déduit du prix public via le coefficient de conversion" style={{ fontSize: 8, color: 'var(--accent)', fontWeight: 700 }}>conv</span>}
                     </span>
                   : <span />}
                 {isSubOuvrage
                   ? <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12, paddingRight: 4 }}>{fmtEuro(subUnitPu, decimals)}</span>
-                  : <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="P.U. déboursé" style={{ width: '100%', textAlign: 'right' }}
+                  : <input data-cell="ressource:pu" onKeyDown={focusNextCell} defaultValue={cleanNum(c.pu)} disabled={readOnly} title="P.U. déboursé" style={{ width: '100%', textAlign: 'right' }}
                       onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0', syncByCode: true } })} />}
                 <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500, paddingRight: 4 }}>{fmtEuro(montant, decimals)}</span>
                 <span className="sd-actions" style={{ background: 'linear-gradient(90deg, transparent, #f8fafc 38%, #f8fafc)' }}>
@@ -652,10 +666,10 @@ function Node({
         )}
         <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
         {!readOnly && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
-        <input defaultValue={line.designation} disabled={readOnly} style={{ flex: 1 }}
+        <input data-cell="ressource:designation" onKeyDown={focusNextCell} defaultValue={line.designation} disabled={readOnly} style={{ flex: 1 }}
           onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value, syncByCode: !!line.code } })} />
         <button type="button" className="btn-ghost" title="Informations" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
-        <input defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: 56, textAlign: 'right' }}
+        <input data-cell="ressource:quantity" onKeyDown={focusNextCell} defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: 56, textAlign: 'right' }}
           onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
         <UnitSelect value={line.unit} token={token} readOnly={readOnly}
           onChange={(v) => updateLine.mutate({ id: line.id, patch: { unit: v || null } })} />
@@ -664,7 +678,7 @@ function Node({
             onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
             onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
         ) : (
-          <input defaultValue={cleanNum(line.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
+          <input data-cell="ressource:pu" onKeyDown={focusNextCell} defaultValue={cleanNum(line.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
             onBlur={(e) => e.target.value !== cleanNum(line.pu) && updateLine.mutate({ id: line.id, patch: { pu: e.target.value || '0', syncByCode: !!line.code } })} />
         )}
         <span style={{ width: 80, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
@@ -695,30 +709,58 @@ function acceptDrop(e: React.DragEvent) {
   return e.dataTransfer.types.includes('application/json');
 }
 
+/** Menu « + » : le déroulant est rendu en portail (document.body, position fixe calculée sur le
+ * bouton) pour échapper à l'opacité/au rognage du bandeau d'actions flottant. Il reste donc
+ * toujours visible et cliquable, même quand le curseur quitte la ligne. */
+function AddMenu({ triggerStyle, triggerTitle, children }: {
+  triggerStyle: React.CSSProperties;
+  triggerTitle: string;
+  children: (close: () => void) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const close = () => setOpen(false);
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (open) { setOpen(false); return; }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, r.right - 132) });
+    setOpen(true);
+  };
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+      <button ref={btnRef} type="button" title={triggerTitle} onClick={toggle} style={triggerStyle}>+</button>
+      {open && pos && createPortal(
+        <>
+          <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 3000 }} />
+          <div style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 3001, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(15,23,42,0.18)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {children(close)}
+          </div>
+        </>,
+        document.body,
+      )}
+    </span>
+  );
+}
+
 function SectionActions({ parentId, childCount, depth, addLine, headerColor }: {
   parentId: string; childCount: number; depth: number; headerColor: string;
 } & Pick<Muts, 'addLine'>) {
-  const [open, setOpen] = useState(false);
-  const close = () => setOpen(false);
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-      <button type="button" title="Ajouter un élément dans cette section"
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        style={{ width: 20, height: 20, borderRadius: 4, border: `1px solid ${headerColor}`, background: 'transparent', color: headerColor, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, opacity: 0.8, flexShrink: 0 }}>+</button>
-      {open && (
+    <AddMenu triggerTitle="Ajouter un élément dans cette section"
+      triggerStyle={{ width: 20, height: 20, borderRadius: 4, border: `1px solid ${headerColor}`, background: 'transparent', color: headerColor, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, opacity: 0.8, flexShrink: 0 }}>
+      {(close) => (
         <>
-          <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
-          <div className="deb-menu-open" style={{ position: 'absolute', top: 26, right: 0, zIndex: 200, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 6px 20px rgba(15,23,42,0.15)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <ActionSquare label="O" title="Ajouter un ouvrage libre" color="var(--primary)"
-              onClick={() => { addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: 'Nouvel ouvrage', quantity: '1', sortOrder: childCount }); close(); }} />
-            <ActionSquare label="T" title="Ajouter un texte libre" color="#d97706"
-              onClick={() => { addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount }); close(); }} />
-            <ActionSquare label="S" title={`Ajouter un sous-niveau ${depth + 2}`} color="#64748b"
-              onClick={() => { addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount }); close(); }} />
-          </div>
+          <ActionSquare label="O" title="Ajouter un ouvrage libre" color="var(--primary)"
+            onClick={() => { addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: 'Nouvel ouvrage', quantity: '1', sortOrder: childCount }); close(); }} />
+          <ActionSquare label="T" title="Ajouter un texte libre" color="#d97706"
+            onClick={() => { addLine.mutate({ type: 'texte', parentLineId: parentId, designation: 'Texte libre', sortOrder: childCount }); close(); }} />
+          <ActionSquare label="S" title={`Ajouter un sous-niveau ${depth + 2}`} color="#64748b"
+            onClick={() => { addLine.mutate({ type: 'sous_titre', parentLineId: parentId, designation: 'Sous-titre', sortOrder: childCount }); close(); }} />
         </>
       )}
-    </span>
+    </AddMenu>
   );
 }
 
@@ -818,25 +860,18 @@ function CodeInput({ value, readOnly, placeholder, title, style, onChange }: {
 function OuvrageAddMenu({ parentId, childCount, addLine }: {
   parentId: string; childCount: number;
 } & Pick<Muts, 'addLine'>) {
-  const [open, setOpen] = useState(false);
-  const close = () => setOpen(false);
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-      <button type="button" title="Ajouter un élément dans cet ouvrage"
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        style={{ width: 20, height: 20, borderRadius: 4, border: '1px dashed #94a3b8', background: 'transparent', color: '#64748b', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, flexShrink: 0 }}>+</button>
-      {open && (
+    <AddMenu triggerTitle="Ajouter un élément dans cet ouvrage"
+      triggerStyle={{ width: 20, height: 20, borderRadius: 4, border: '1px dashed #94a3b8', background: 'transparent', color: '#64748b', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, flexShrink: 0 }}>
+      {(close) => (
         <>
-          <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
-          <div className="deb-menu-open" style={{ position: 'absolute', top: 26, right: 0, zIndex: 200, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 6px 20px rgba(15,23,42,0.15)', padding: '8px 10px', display: 'flex', gap: 8 }}>
-            <ActionSquare label="R" title="Ajouter une ressource" color="#64748b"
-              onClick={() => { addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: 'Nouvelle ressource', quantity: '1', pu: '0', sortOrder: childCount }); close(); }} />
-            <ActionSquare label="O" title="Ajouter un sous-ouvrage" color="var(--primary)"
-              onClick={() => { addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: 'Sous-ouvrage', quantity: '1', sortOrder: childCount }); close(); }} />
-          </div>
+          <ActionSquare label="R" title="Ajouter une ressource" color="#64748b"
+            onClick={() => { addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: 'Nouvelle ressource', quantity: '1', pu: '0', sortOrder: childCount }); close(); }} />
+          <ActionSquare label="O" title="Ajouter un sous-ouvrage" color="var(--primary)"
+            onClick={() => { addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: 'Sous-ouvrage', quantity: '1', sortOrder: childCount }); close(); }} />
         </>
       )}
-    </span>
+    </AddMenu>
   );
 }
 

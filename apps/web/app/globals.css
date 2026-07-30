@@ -875,5 +875,4 @@ table.grid tbody tr:hover {
   transition: opacity .12s ease;
 }
 .sd-row:hover .sd-actions,
-.sd-title:hover .sd-actions,
-.sd-actions:has(.deb-menu-open) { opacity: 1; pointer-events: auto; }
+.sd-title:hover .sd-actions { opacity: 1; pointer-events: auto; }
