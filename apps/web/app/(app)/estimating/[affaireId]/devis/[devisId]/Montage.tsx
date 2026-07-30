@@ -50,6 +50,25 @@ const SD_GRID: React.CSSProperties = {
 };
 const CELL_CTR: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center' };
 
+/** En-tête de colonnes du déboursé (affiché une seule fois, collant en haut du corps). */
+function DeboursHeader() {
+  return (
+    <div className="sd-head" style={{ ...SD_GRID, position: 'sticky', top: 0, zIndex: 5, background: '#eef2f7', padding: '3px 6px', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.3px', fontWeight: 700, borderTop: '1px solid #dbe2ea', borderBottom: '1px solid #dbe2ea' }}>
+      <span /><span />
+      <span style={{ paddingLeft: 4 }}>Code</span>
+      <span style={{ paddingLeft: 4 }}>Désignation</span>
+      <span style={{ justifyContent: 'center' }}>Unité</span>
+      <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Perte</span>
+      <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Qté</span>
+      <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Cad.</span>
+      <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U. Public</span>
+      <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U. Déb.</span>
+      <span style={{ justifyContent: 'center' }}>Nature</span>
+      <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Montant</span>
+    </div>
+  );
+}
+
 /** Drag context passed down the tree. Separates internal-reorder drag from library drag. */
 interface DragCtx {
   dragLineId: string | null;
@@ -251,6 +270,7 @@ export function Montage({
         }
       }}
     >
+      {!vente && roots.length > 0 && <DeboursHeader />}
       {roots.map((l) => (
         <Fragment key={l.id}>
           <DropZone beforeLineId={l.id} parentLineId={null} dragCtx={dragCtx} />
@@ -413,28 +433,29 @@ function Node({
           opacity: isDragging ? 0.4 : 1,
         }}
       >
-        <div className={`title-row title-row-${depth}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: ls.bg, color: ls.color, borderRadius: 5 }}>
-          {!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} crossPanel={{ kind: line.type as 'titre' | 'sous_titre', id: line.id, code: line.code ?? '', label: line.designation, unit: null }} />}
-          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: ls.num, minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-            {line.numero ?? ''}
+        <div className={`title-row title-row-${depth} sd-title`} style={{ ...SD_GRID, padding: '3px 6px', background: ls.bg, color: ls.color, borderRadius: 4 }}>
+          <span style={CELL_CTR}>{!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} crossPanel={{ kind: line.type as 'titre' | 'sous_titre', id: line.id, code: line.code ?? '', label: line.designation, unit: null }} />}</span>
+          <span />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+            <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: ls.num, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{line.numero ?? ''}</span>
+            {!readOnly && (
+              <input title="N° personnalisé" placeholder={line.numero ?? 'N°'} defaultValue={line.num_custom ?? ''}
+                onBlur={(e) => (e.target.value || '') !== (line.num_custom ?? '') && updateLine.mutate({ id: line.id, patch: { numCustom: e.target.value } })}
+                style={{ width: 34, fontSize: 11, fontFamily: 'monospace', textAlign: 'center', color: ls.color }} />
+            )}
           </span>
-          {!readOnly && (
-            <input title="N° personnalisé" placeholder={line.numero ?? 'N°'} defaultValue={line.num_custom ?? ''}
-              onBlur={(e) => (e.target.value || '') !== (line.num_custom ?? '') && updateLine.mutate({ id: line.id, patch: { numCustom: e.target.value } })}
-              style={{ width: 48, fontSize: 11, fontFamily: 'monospace', textAlign: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 4, color: ls.color, padding: '2px 4px' }} />
-          )}
-          <input className="title-input" defaultValue={line.designation} disabled={readOnly}
+          <input className="title-input" defaultValue={line.designation} disabled={readOnly} title={line.designation}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })}
-            style={{ fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', flex: 1, border: '1px solid transparent', background: 'transparent', color: ls.color }} />
-          <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: ls.color }}>{fmtV(valueOf(line))}</span>
+            style={{ gridColumn: '4 / 12', fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', width: '100%', minWidth: 0, background: 'transparent', color: ls.color }} />
+          <span style={{ display: 'flex', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: ls.color, paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
           {!readOnly && (
-            <>
+            <span className="row-actions" style={{ background: `linear-gradient(90deg, transparent, ${ls.bg} 22%, ${ls.bg})` }}>
               <SectionActions parentId={line.id} childCount={kids.length} depth={depth} addLine={addLine} headerColor={ls.color} />
               <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, 'rgba(255,255,255,0.5)'), fontSize: 13 }}>⧉</button>
               <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'variante' ? null : 'variante' })} style={togBtn(sect === 'variante', '#f97316')}>V</button>
               <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'option' ? null : 'option' })} style={togBtn(sect === 'option', '#a855f7')}>O</button>
               <button title="Supprimer" className="btn-ghost" onClick={() => deleteLine.mutate(line.id)} style={{ color: ls.color }}>✕</button>
-            </>
+            </span>
           )}
         </div>
         {kids.map((k) => (
@@ -525,22 +546,7 @@ function Node({
             )}
           </span>
         </div>
-        {/* Sous-détail éditable — colonnes alignées, en-tête par ouvrage (masqué en mode vente). */}
-        {!vente && comps.length > 0 && (
-          <div className="sd-head" style={{ ...SD_GRID, padding: '2px 6px', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.3px', fontWeight: 700 }}>
-            <span /><span />
-            <span style={{ paddingLeft: 4 }}>Code</span>
-            <span style={{ paddingLeft: 4 }}>Désignation</span>
-            <span style={{ justifyContent: 'center' }}>Unité</span>
-            <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Perte</span>
-            <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Qté</span>
-            <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Cad.</span>
-            <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U. Public</span>
-            <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U. Déb.</span>
-            <span style={{ justifyContent: 'center' }}>Nature</span>
-            <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Montant</span>
-          </div>
-        )}
+        {/* Sous-détail éditable — colonnes alignées (en-tête unique en haut du corps). */}
         {!vente && comps.map((c) => {
           const cQty = Number(c.quantity) || 0;
           const cPerte = Number(c.perte) || 0;

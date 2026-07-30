@@ -818,8 +818,8 @@ table.grid tbody tr:hover {
   height: 22px;
 }
 .deb-table select { padding-right: 12px !important; }
-.deb-table input:hover,
-.deb-table select:hover { background: #eef2f7 !important; }
+.sd-row input:hover,
+.sd-row select:hover { background: #eef2f7 !important; }
 .deb-table input:focus,
 .deb-table select:focus {
   background: #fff !important;
@@ -848,3 +848,7 @@ table.grid tbody tr:hover {
   padding-left: 14px; opacity: 0; pointer-events: none; transition: opacity .1s;
 }
 .sd-row:hover .row-actions { opacity: 1; pointer-events: auto; }
+
+/* Titres sur la grille : overlay actions au survol (comme les lignes). */
+.sd-title { position: relative; }
+.sd-title:hover .row-actions { opacity: 1; pointer-events: auto; }
