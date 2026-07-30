@@ -98,7 +98,22 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [synthOpen, setSynthOpen] = useState(true);
+  // Synthèse : 3 états — caché (défaut), flottant (popover par-dessus), épinglé (docké, recadre).
+  const [synthPinned, setSynthPinned] = useState(false);
+  const [synthFloatOpen, setSynthFloatOpen] = useState(false);
+  const synthPanelRef = useRef<HTMLElement | null>(null);
+  const synthBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Popover flottant : se ferme au clic en dehors (hors bouton déclencheur et hors panneau).
+  useEffect(() => {
+    if (!synthFloatOpen || synthPinned) return;
+    const onDown = (ev: MouseEvent) => {
+      const t = ev.target as Node;
+      if (synthPanelRef.current?.contains(t) || synthBtnRef.current?.contains(t)) return;
+      setSynthFloatOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [synthFloatOpen, synthPinned]);
 
   const detail = useQuery({
     queryKey: ['devis', devisId],
@@ -504,10 +519,15 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
             {(tab === 'etude' || tab === 'client') && (
               <>
                 {!isSplitOpen && !libraryOpen && (
-                  <button type="button" onClick={() => setSynthOpen((v) => !v)} className="btn-secondary"
-                    title={synthOpen ? 'Masquer le panneau de synthèse (libère la largeur du tableau)' : 'Afficher le panneau de synthèse'}
-                    style={{ fontSize: 11, padding: '3px 10px', marginBottom: 2, background: synthOpen ? undefined : 'var(--primary)', color: synthOpen ? undefined : '#fff' }}>
-                    {synthOpen ? '⇥ Synthèse' : '⇤ Synthèse'}
+                  <button ref={synthBtnRef} type="button"
+                    onClick={() => {
+                      if (synthPinned) { setSynthPinned(false); setSynthFloatOpen(false); }
+                      else setSynthFloatOpen((v) => !v);
+                    }}
+                    className="btn-secondary"
+                    title={synthPinned ? 'Détacher et masquer la synthèse' : synthFloatOpen ? 'Masquer la synthèse' : 'Afficher la synthèse (par-dessus, sans recadrer)'}
+                    style={{ fontSize: 11, padding: '3px 10px', marginBottom: 2, background: (synthPinned || synthFloatOpen) ? 'var(--primary)' : undefined, color: (synthPinned || synthFloatOpen) ? '#fff' : undefined }}>
+                    ▤ Synthèse{synthPinned ? ' 📌' : ''}
                   </button>
                 )}
                 {!isPanel2 && (
@@ -529,7 +549,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
             )}
           </div>
 
-          <div className={`editor-grid${libraryOpen ? ' library-open' : ''}${workspace.splitOpen ? ' split-active' : ''}${!synthOpen ? ' synth-collapsed' : ''}`}>
+          <div className={`editor-grid${libraryOpen ? ' library-open' : ''}${workspace.splitOpen ? ' split-active' : ''}${!libraryOpen && !workspace.splitOpen ? (synthPinned ? ' synth-pinned' : synthFloatOpen ? ' synth-floating' : ' synth-hidden') : ''}`}>
             <div className="editor-main" data-panel="1">
 
               {tab === 'etude' && (
@@ -807,7 +827,19 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
               })()}
             </div>
 
-            <aside className="synthese-panel" data-panel="2">
+            <aside ref={synthPanelRef} className="synthese-panel" data-panel="2">
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginBottom: 8 }}>
+                <button type="button" className="btn-ghost"
+                  title={synthPinned ? 'Détacher : repasse en panneau flottant' : 'Épingler : garder affiché et réajuster la mise en page'}
+                  onClick={() => { if (synthPinned) { setSynthPinned(false); setSynthFloatOpen(true); } else { setSynthPinned(true); setSynthFloatOpen(false); } }}
+                  style={{ fontSize: 11, fontWeight: 600, color: synthPinned ? 'var(--primary)' : 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  📌 {synthPinned ? 'Épinglé' : 'Épingler'}
+                </button>
+                {!synthPinned && (
+                  <button type="button" className="btn-ghost" title="Fermer" onClick={() => setSynthFloatOpen(false)}
+                    style={{ fontSize: 14, lineHeight: 1, color: 'var(--muted)' }}>✕</button>
+                )}
+              </div>
               {(tab === 'etude' || tab === 'apercu') && (
                 <>
                   <div className="form-section-title">Récapitulatif débours</div>

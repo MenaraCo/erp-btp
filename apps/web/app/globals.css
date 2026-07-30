@@ -585,21 +585,28 @@ table.grid tbody tr:hover {
   gap: 16px;
   align-items: start;
   margin-top: 16px;
-  transition: grid-template-columns .28s ease, gap .28s ease;
+  position: relative;
+  transition: grid-template-columns .28s ease;
 }
 
-/* ── Panneau de synthèse replié : glisse et rend toute la largeur au tableau ── */
-.editor-grid.synth-collapsed {
-  grid-template-columns: 1fr 0;
-  gap: 0;
+/* ── Synthèse, 3 états ───────────────────────────────────────────────────────
+   • épinglé  : le panneau reprend sa colonne → la mise en page se réajuste
+   • flottant : descend en surimpression par-dessus le tableau, sans recadrer
+   • caché    : rien (le tableau occupe toute la largeur)                      */
+.editor-grid.synth-pinned { grid-template-columns: 1fr 280px; }
+.editor-grid.synth-floating,
+.editor-grid.synth-hidden { grid-template-columns: 1fr; }
+.editor-grid.synth-hidden .synthese-panel { display: none; }
+.editor-grid.synth-floating .synthese-panel {
+  position: absolute; top: 4px; right: 0; z-index: 45;
+  width: 300px; max-height: 80vh; overflow-y: auto;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.22);
+  border-color: var(--primary);
+  animation: synth-drop .2s ease;
 }
-.editor-grid.synth-collapsed .synthese-panel {
-  opacity: 0;
-  padding: 0;
-  border-width: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transform: translateX(12px);
+@keyframes synth-drop {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .editor-main {
@@ -613,7 +620,6 @@ table.grid tbody tr:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 16px;
-  transition: opacity .2s ease, transform .28s ease;
 }
 
 .synthese-row {
