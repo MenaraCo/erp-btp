@@ -34,6 +34,7 @@ interface DevisLine {
 interface SaleItem {
   id: string; debourse: string; revient: string; pvComputed: string; pv: string;
   forced: boolean; margeBrute: string; margeNette: string; ventilatedFrais: string;
+  debourseByNature?: Record<'labor' | 'material' | 'equipment' | 'subcontract', string>;
 }
 interface SaleSheet {
   items: SaleItem[]; totalDebourse: string; totalRevient: string; pvHorsFrais: string;
@@ -534,6 +535,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                     token={token}
                     lines={(lines.data ?? []) as MontageLine[]}
                     deboursById={new Map((sale.data?.items ?? []).map((i) => [i.id, i.debourse]))}
+                    natureById={new Map((sale.data?.items ?? []).filter((i) => i.debourseByNature).map((i) => [i.id, i.debourseByNature!]))}
                     decimals={prefs.nb_decimales}
                     onChanged={refresh}
                     readOnly={!isLatest}

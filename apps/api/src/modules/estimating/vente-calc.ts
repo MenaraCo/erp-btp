@@ -80,6 +80,8 @@ export interface VenteItemResult {
   margeNette: string;
   section: SectionKind;
   appliedRates: Record<Nature, { fg: string; benefice: string }>;
+  /** Déboursé de la ligne ventilé par nature (brut, hors ventilation des frais). */
+  debourseByNature: Record<Nature, string>;
 }
 
 export interface VenteResult {
@@ -183,6 +185,9 @@ function priceItem(
     margeNette: round2(pv.minus(revient)).toString(),
     section,
     appliedRates,
+    debourseByNature: Object.fromEntries(
+      NATURES.map((n) => [n, round2(effBreakdown[n]).toString()]),
+    ) as Record<Nature, string>,
   };
 }
 

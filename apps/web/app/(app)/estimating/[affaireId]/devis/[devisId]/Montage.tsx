@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { fmtEuro, fmtNum, cleanNum } from '@/lib/preferences';
 
 export interface SaleLineInfo { pv: string; forced: boolean }
+export type NatureBreak = Record<'labor' | 'material' | 'equipment' | 'subcontract', string>;
 
 export interface DragItem {
   kind: 'ouvrage' | 'ressource' | 'titre' | 'sous_titre';
@@ -131,11 +132,12 @@ const SECTION_BG: Record<string, string> = { option: '#faf5ff', variante: '#fff7
 const SECTION_BORDER: Record<string, string> = { option: '#a855f7', variante: '#f97316' };
 
 export function Montage({
-  versionId, token, lines, deboursById, onChanged, readOnly,
+  versionId, token, lines, deboursById, natureById, onChanged, readOnly,
   mode = 'debours', saleById, decimals = 2, acceptDrop = false,
 }: {
   versionId: string; token: string | null; lines: MontageLine[];
-  deboursById: Map<string, string>; onChanged: () => void; readOnly: boolean;
+  deboursById: Map<string, string>; natureById?: Map<string, NatureBreak>;
+  onChanged: () => void; readOnly: boolean;
   mode?: 'debours' | 'vente'; saleById?: Map<string, SaleLineInfo>;
   decimals?: number; acceptDrop?: boolean;
 }) {
@@ -281,7 +283,7 @@ export function Montage({
             deleteLine={deleteLine} setSection={setSection}
             reorderLines={reorderLines} duplicateLine={duplicateLine}
             vente={vente} valueOf={valueOf} saleById={saleById} setLinePv={setLinePv}
-            decimals={decimals} deboursById={deboursById}
+            decimals={decimals} deboursById={deboursById} natureById={natureById}
             onShowInfo={setInfoLine}
             libDragActive={libDragActive} libDragOverId={libDragOverId}
             setLibDragOverId={setLibDragOverId} onDropItem={onDropItem}
@@ -358,6 +360,7 @@ type VenteCtx = {
   setLinePv: ReturnType<typeof useMutation<unknown, Error, { lineId: string; puVente: string | null; force: boolean }>>;
   decimals: number;
   deboursById: Map<string, string>;
+  natureById?: Map<string, NatureBreak>;
   onShowInfo: (l: MontageLine) => void;
   dragCtx: DragCtx;
   onCopyMove: (line: MontageLine) => void;
@@ -383,7 +386,7 @@ function DragHandle({ lineId, dragCtx, crossPanel }: { lineId: string; dragCtx: 
 function Node({
   line, depth, childrenOf, subtree, sectionOf, token, versionId, readOnly,
   addLine, insertOuvrage, updateLine, deleteLine, setSection, reorderLines, duplicateLine,
-  vente, valueOf, saleById, setLinePv, decimals, deboursById, onShowInfo,
+  vente, valueOf, saleById, setLinePv, decimals, deboursById, natureById, onShowInfo,
   libDragActive, libDragOverId, setLibDragOverId, onDropItem,
   dragCtx, onCopyMove,
 }: {
@@ -399,7 +402,7 @@ function Node({
   // La hiérarchie reste lisible via le marqueur [T]/[O]/[R], la numérotation et la teinte des titres.
   const pad = 0;
   const vctx: VenteCtx = {
-    vente, valueOf, saleById, setLinePv, decimals, deboursById, onShowInfo,
+    vente, valueOf, saleById, setLinePv, decimals, deboursById, natureById, onShowInfo,
     libDragActive, libDragOverId, setLibDragOverId, onDropItem, dragCtx, onCopyMove,
   };
   const fmtV = (n: number) => fmtEuro(n, decimals);
@@ -611,6 +614,19 @@ function Node({
           );
         })}
         {!vente && <DropZone beforeLineId={null} parentLineId={line.id} dragCtx={dragCtx} />}
+        {/* Synthèse par ouvrage : répartition du déboursé Travaux directs / Sous-traitance. */}
+        {!vente && comps.length > 0 && natureById?.get(line.id) && (() => {
+          const nb = natureById.get(line.id)!;
+          const directs = Number(nb.labor) + Number(nb.material) + Number(nb.equipment);
+          const st = Number(nb.subcontract);
+          if (directs === 0 && st === 0) return null;
+          return (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, padding: '1px 10px 3px', fontSize: 10, color: '#94a3b8' }}>
+              <span>Travaux directs <b style={{ color: '#475569', fontVariantNumeric: 'tabular-nums' }}>{fmtEuro(directs, decimals)}</b></span>
+              {st > 0 && <span>Sous-traitance <b style={{ color: '#475569', fontVariantNumeric: 'tabular-nums' }}>{fmtEuro(st, decimals)}</b></span>}
+            </div>
+          );
+        })()}
       </div>
     );
   }
