@@ -757,6 +757,29 @@ export class DevisService {
         quantity = computed ? computed.toString() : null;
       }
 
+      // Ressource ajoutée depuis la bibliothèque : hériter automatiquement de sa NATURE
+      // (matériaux / MO / matériel / sous-traitance) et de ses attributs clés lorsqu'ils ne sont
+      // pas fournis. C'est une COPIE de valeurs — la ligne du devis reste découplée de la biblio.
+      let code = input.code ?? null;
+      let unit = input.unit ?? null;
+      let nature = input.nature ?? null;
+      let prixPublic = input.prixPublic != null ? String(input.prixPublic) : null;
+      let pu = input.pu != null ? String(input.pu) : null;
+      if (input.sourceResourceId) {
+        const res = await em.query(
+          `SELECT code, nature, unit, prix_public, unit_cost FROM resource WHERE id = $1 AND tenant_id = $2`,
+          [input.sourceResourceId, tenantId],
+        );
+        if (res.length > 0) {
+          const r = res[0];
+          code = code ?? r.code ?? null;
+          unit = unit ?? r.unit ?? null;
+          nature = nature ?? r.nature ?? null;
+          prixPublic = prixPublic ?? (r.prix_public != null ? String(r.prix_public) : null);
+          pu = pu ?? (r.unit_cost != null ? String(r.unit_cost) : null);
+        }
+      }
+
       return (
         await em.query(
           `INSERT INTO devis_line
@@ -769,17 +792,17 @@ export class DevisService {
             versionId,
             input.parentLineId ?? null,
             input.type,
-            input.code ?? null,
+            code,
             input.codeAnalytique ?? null,
             input.designation,
-            input.unit ?? null,
+            unit,
             quantity,
             input.quantityFormula ?? null,
-            input.pu != null ? String(input.pu) : null,
+            pu,
             input.perte != null ? String(input.perte) : '0',
-            input.nature ?? null,
+            nature,
             input.cadence != null ? String(input.cadence) : null,
-            input.prixPublic != null ? String(input.prixPublic) : null,
+            prixPublic,
             input.sourceOuvrageId ?? null,
             input.sourceResourceId ?? null,
             input.sortOrder ?? 0,

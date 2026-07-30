@@ -29,7 +29,7 @@ const RES_COLUMNS: ResColumn[] = [
   { key: 'code', label: 'Code', sort: 'code', render: (r) => r.code, cls: 'code-cell' },
   { key: 'label', label: 'Désignation', sort: 'label', render: (r) => r.label },
   { key: 'famille', label: 'Famille', sort: 'familleCode', render: (r) => r.familleCode ? `${r.familleCode}` : '—' },
-  { key: 'nature', label: 'Type', sort: 'nature', render: (r) => NATURES.find((n) => n.v === r.nature)?.l ?? r.nature },
+  { key: 'nature', label: 'Nature', sort: 'nature', render: (r) => NATURES.find((n) => n.v === r.nature)?.l ?? r.nature },
   { key: 'unit', label: 'Unité', sort: 'unit', render: (r) => r.unit },
   { key: 'unitCost', label: 'PU Débours', sort: 'unitCost', render: (r, d) => fmtEuro(r.unitCost, d), right: true },
   { key: 'codeAna', label: 'Code ana.', sort: 'codeAnalytiqueCode', render: (r) => r.codeAnalytiqueCode ?? '—' },

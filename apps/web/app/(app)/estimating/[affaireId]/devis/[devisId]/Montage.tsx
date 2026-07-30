@@ -976,7 +976,7 @@ function LineInfoModal({ line, components, deboursById, decimals, token, readOnl
                 onChange={(v) => { set('unit', v); commit({ unit: v || null }); }} />
             </Field>
             {!isOuvrage && (
-              <Field label="Nature (ventilation)">
+              <Field label="Nature">
                 <NatureSelect value={form.nature} readOnly={readOnly} style={{ width: '100%', textAlign: 'left' }}
                   onChange={(v) => { set('nature', v); commit({ nature: v || null }, true); }} />
               </Field>

@@ -190,7 +190,7 @@ export function ResourceModal({ libId, resource, onClose }: {
           <Field label="Code">
             <input className="input" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />
           </Field>
-          <Field label="Type">
+          <Field label="Nature">
             <select className="input" value={f.nature} onChange={(e) => setF({ ...f, nature: e.target.value })}>
               {NATURES.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
             </select>
