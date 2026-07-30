@@ -585,6 +585,21 @@ table.grid tbody tr:hover {
   gap: 16px;
   align-items: start;
   margin-top: 16px;
+  transition: grid-template-columns .28s ease, gap .28s ease;
+}
+
+/* ── Panneau de synthèse replié : glisse et rend toute la largeur au tableau ── */
+.editor-grid.synth-collapsed {
+  grid-template-columns: 1fr 0;
+  gap: 0;
+}
+.editor-grid.synth-collapsed .synthese-panel {
+  opacity: 0;
+  padding: 0;
+  border-width: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateX(12px);
 }
 
 .editor-main {
@@ -598,6 +613,7 @@ table.grid tbody tr:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 16px;
+  transition: opacity .2s ease, transform .28s ease;
 }
 
 .synthese-row {
@@ -836,15 +852,22 @@ table.grid tbody tr:hover {
   display: flex; align-items: center;
   overflow: hidden;
 }
-/* Cellule d'actions : pas d'overflow:hidden (sinon le menu déroulant « + » serait rogné). */
-.sd-actions { min-height: 24px; overflow: visible; }
 .sd-row > *:last-child, .sd-head > *:last-child { border-right: none; }
 .sd-head > * { color: #94a3b8; }
 .sd-row:hover { background: #f8fafc; }
-
-
-
-/* Actions de ligne : dernière cellule, estompée par défaut, pleine au survol (toujours cliquable). */
-.sd-actions { opacity: 0.3; transition: opacity .1s; justify-content: flex-end; }
-.sd-row:hover .sd-actions, .sd-title:hover .sd-actions { opacity: 1; }
 .sd-title { position: relative; }
+
+/* Actions de ligne : bandeau flottant en surimpression à droite. Masqué par défaut (la place est
+ * rendue aux colonnes) ; apparaît au survol de la ligne. Tant qu'un menu déroulant est ouvert
+ * (.deb-menu-open), le bandeau reste visible et cliquable même si le curseur le quitte —
+ * grâce à :has(), le « + » ne s'évapore plus en cours de clic. */
+.sd-actions {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 6;
+  display: flex; align-items: center; justify-content: flex-end; gap: 1px;
+  padding: 0 4px 0 28px;
+  opacity: 0; pointer-events: none;
+  transition: opacity .12s ease;
+}
+.sd-row:hover .sd-actions,
+.sd-title:hover .sd-actions,
+.sd-actions:has(.deb-menu-open) { opacity: 1; pointer-events: auto; }

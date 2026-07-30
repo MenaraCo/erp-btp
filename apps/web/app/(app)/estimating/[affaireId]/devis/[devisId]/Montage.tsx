@@ -46,10 +46,10 @@ export interface MontageLine {
  * dans la bibliothèque, pour gagner de la place. */
 const SD_GRID: React.CSSProperties = {
   display: 'grid',
-  // 12 colonnes : marqueurs · Code · Désignation · Unité · Perte · Qté · Cadence · P.U. Public ·
-  // P.U. Déb. · Montant · Actions. La dernière cellule (actions) reste dans la grille : estompée,
-  // pleine au survol, toujours cliquable (le « + » ne disparaît plus).
-  gridTemplateColumns: '14px 18px 66px minmax(140px,1fr) 46px 38px 48px 42px 64px 58px 78px 116px',
+  // 11 colonnes : marqueurs · Code · Désignation · Unité · Perte · Qté · Cadence · P.U. Public ·
+  // P.U. Déb. · Montant. Les actions sont un bandeau flottant en surimpression (hors grille) :
+  // masquées au repos → toute la largeur va aux colonnes ; visibles au survol.
+  gridTemplateColumns: '14px 18px 66px minmax(140px,1fr) 46px 38px 48px 42px 64px 58px 78px',
   alignItems: 'stretch',
   columnGap: 0,
 };
@@ -69,7 +69,6 @@ function DeboursHeader() {
       <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U. Public</span>
       <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U. Déb.</span>
       <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Montant</span>
-      <span />
     </div>
   );
 }
@@ -458,7 +457,7 @@ function Node({
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })}
             style={{ gridColumn: '4 / 11', fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', width: '100%', minWidth: 0, background: 'transparent', color: ls.color }} />
           <span style={{ display: 'flex', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: ls.color, paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
-          <span className="sd-actions" style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <span className="sd-actions" style={{ background: `linear-gradient(90deg, transparent, ${ls.bg} 38%, ${ls.bg})` }}>
             {!readOnly && (
               <>
                 <SectionActions parentId={line.id} childCount={kids.length} depth={depth} addLine={addLine} headerColor={ls.color} />
@@ -544,7 +543,7 @@ function Node({
                 onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
             : <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12, paddingRight: 4 }}>{(Number(line.quantity) || 0) > 0 ? fmtEuro(valueOf(line) / (Number(line.quantity) || 1), decimals) : ''}</span>}
           <span style={{ width: '100%', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
-          <span className="sd-actions" style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <span className="sd-actions" style={{ background: 'linear-gradient(90deg, transparent, #f4f6fa 38%, #f4f6fa)' }}>
             <button type="button" className="btn-ghost" title="Informations / modifier" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
             {!readOnly && (
               <>
@@ -609,7 +608,7 @@ function Node({
                   : <input defaultValue={cleanNum(c.pu)} disabled={readOnly} title="P.U. déboursé" style={{ width: '100%', textAlign: 'right' }}
                       onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0', syncByCode: true } })} />}
                 <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500, paddingRight: 4 }}>{fmtEuro(montant, decimals)}</span>
-                <span className="sd-actions" style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <span className="sd-actions" style={{ background: 'linear-gradient(90deg, transparent, #f8fafc 38%, #f8fafc)' }}>
                   <button type="button" className="btn-ghost" title="Modifier la ressource (nature, code, prix…)" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
                   {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
                 </span>
@@ -709,7 +708,7 @@ function SectionActions({ parentId, childCount, depth, addLine, headerColor }: {
       {open && (
         <>
           <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
-          <div style={{ position: 'absolute', top: 26, right: 0, zIndex: 200, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 6px 20px rgba(15,23,42,0.15)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="deb-menu-open" style={{ position: 'absolute', top: 26, right: 0, zIndex: 200, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 6px 20px rgba(15,23,42,0.15)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'center' }}>
             <ActionSquare label="O" title="Ajouter un ouvrage libre" color="var(--primary)"
               onClick={() => { addLine.mutate({ type: 'ouvrage', parentLineId: parentId, designation: 'Nouvel ouvrage', quantity: '1', sortOrder: childCount }); close(); }} />
             <ActionSquare label="T" title="Ajouter un texte libre" color="#d97706"
@@ -829,7 +828,7 @@ function OuvrageAddMenu({ parentId, childCount, addLine }: {
       {open && (
         <>
           <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
-          <div style={{ position: 'absolute', top: 26, right: 0, zIndex: 200, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 6px 20px rgba(15,23,42,0.15)', padding: '8px 10px', display: 'flex', gap: 8 }}>
+          <div className="deb-menu-open" style={{ position: 'absolute', top: 26, right: 0, zIndex: 200, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 6px 20px rgba(15,23,42,0.15)', padding: '8px 10px', display: 'flex', gap: 8 }}>
             <ActionSquare label="R" title="Ajouter une ressource" color="#64748b"
               onClick={() => { addLine.mutate({ type: 'ressource', parentLineId: parentId, designation: 'Nouvelle ressource', quantity: '1', pu: '0', sortOrder: childCount }); close(); }} />
             <ActionSquare label="O" title="Ajouter un sous-ouvrage" color="var(--primary)"

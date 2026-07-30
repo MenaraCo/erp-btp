@@ -98,6 +98,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [synthOpen, setSynthOpen] = useState(true);
 
   const detail = useQuery({
     queryKey: ['devis', devisId],
@@ -502,6 +503,13 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
             <div style={{ flex: 1 }} />
             {(tab === 'etude' || tab === 'client') && (
               <>
+                {!isSplitOpen && !libraryOpen && (
+                  <button type="button" onClick={() => setSynthOpen((v) => !v)} className="btn-secondary"
+                    title={synthOpen ? 'Masquer le panneau de synthèse (libère la largeur du tableau)' : 'Afficher le panneau de synthèse'}
+                    style={{ fontSize: 11, padding: '3px 10px', marginBottom: 2, background: synthOpen ? undefined : 'var(--primary)', color: synthOpen ? undefined : '#fff' }}>
+                    {synthOpen ? '⇥ Synthèse' : '⇤ Synthèse'}
+                  </button>
+                )}
                 {!isPanel2 && (
                   <button type="button"
                     onClick={() => {
@@ -521,7 +529,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
             )}
           </div>
 
-          <div className={`editor-grid${libraryOpen ? ' library-open' : ''}${workspace.splitOpen ? ' split-active' : ''}`}>
+          <div className={`editor-grid${libraryOpen ? ' library-open' : ''}${workspace.splitOpen ? ' split-active' : ''}${!synthOpen ? ' synth-collapsed' : ''}`}>
             <div className="editor-main" data-panel="1">
 
               {tab === 'etude' && (
