@@ -2,7 +2,7 @@
 
 import { Fragment, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtEuro, fmtNum, cleanNum } from '@/lib/preferences';
 
@@ -38,6 +38,12 @@ export interface MontageLine {
   sort_order: number;
   numero?: string | null;
   num_custom?: string | null;
+  /** Champs d'achat copiés de la biblio à l'ajout, puis éditables au niveau du devis. */
+  unite_achat?: string | null;
+  coeff_conversion?: string | null;
+  supplier_id?: string | null;
+  ref_fournisseur?: string | null;
+  conditionnement?: string | null;
 }
 
 /** Gabarit de colonnes du sous-détail (déboursé) — aligné, ordre : marqueurs · Code · Désignation ·
@@ -846,6 +852,138 @@ function NatureSelect({ value, readOnly, onChange, style }: {
   );
 }
 
+/** Distributeur de la ligne (référentiel Fournisseurs) — indépendant de la bibliothèque. */
+function SupplierSelect({ value, token, readOnly, onChange }: {
+  value: string; token: string | null; readOnly: boolean; onChange: (v: string) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ['suppliers-all'], enabled: Boolean(token), staleTime: 5 * 60_000,
+    queryFn: () => apiFetch<{ rows: { id: string; code: string; name: string }[] }>('/suppliers?pageSize=300', { token }),
+  });
+  return (
+    <select value={value} disabled={readOnly} onChange={(e) => onChange(e.target.value)}
+      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, background: readOnly ? '#f8fafc' : '#fff' }}>
+      <option value="">— aucun —</option>
+      {(data?.rows ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+    </select>
+  );
+}
+
+interface ParamCode { id: string; code: string; label: string; famille_id: string }
+interface ParamFamille { id: string; code: string; label: string }
+
+/**
+ * Code analytique — liste déroulante alimentée par les Paramètres société. La saisie clavier est
+ * autorisée (datalist), mais la valeur doit exister dans la liste : si le code saisi est inconnu,
+ * on propose de le CRÉER et de l'ajouter au référentiel (POST /params/codes), sinon la saisie est
+ * annulée. Garantit que l'axe analytique reste une référence partagée et cohérente.
+ */
+function CodeAnalytiqueField({ value, token, readOnly, onChange }: {
+  value: string; token: string | null; readOnly: boolean;
+  onChange: (code: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [pending, setPending] = useState<string | null>(null);
+  const codes = useQuery({
+    queryKey: ['params-codes'], enabled: Boolean(token), staleTime: 5 * 60_000,
+    queryFn: () => apiFetch<ParamCode[]>('/params/codes', { token }),
+  });
+  const familles = useQuery({
+    queryKey: ['params-familles'], enabled: Boolean(token), staleTime: 5 * 60_000,
+    queryFn: () => apiFetch<ParamFamille[]>('/params/familles', { token }),
+  });
+  const createCode = useMutation({
+    mutationFn: (body: { familleId: string; code: string; label: string }) =>
+      apiFetch('/params/codes', { method: 'POST', body, token }),
+    onSuccess: (_r, body) => {
+      qc.invalidateQueries({ queryKey: ['params-codes'] });
+      onChange(body.code);
+      setPending(null);
+    },
+  });
+
+  const list = codes.data ?? [];
+  const known = (c: string) => list.some((x) => x.code.toLowerCase() === c.toLowerCase());
+
+  const commit = (raw: string) => {
+    const v = raw.trim();
+    if (v === (value ?? '')) return;
+    if (!v) { onChange(''); return; }
+    const hit = list.find((x) => x.code.toLowerCase() === v.toLowerCase());
+    if (hit) { onChange(hit.code); return; }
+    setPending(v); // inconnu → proposer la création
+  };
+
+  return (
+    <>
+      <input list="params-codes-list" defaultValue={value} disabled={readOnly} key={value}
+        placeholder={list.length ? 'Choisir ou saisir…' : '—'}
+        style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, fontFamily: 'monospace', background: readOnly ? '#f8fafc' : '#fff' }}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(e.currentTarget.value); } }} />
+      <datalist id="params-codes-list">
+        {list.map((c) => <option key={c.id} value={c.code}>{c.label}</option>)}
+      </datalist>
+      {value && !known(value) && list.length > 0 && (
+        <span style={{ fontSize: 10, color: '#b45309' }}>Code hors référentiel</span>
+      )}
+      {pending && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}
+          onClick={() => setPending(null)}>
+          <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 'min(460px, 96vw)' }}>
+            <h3 style={{ marginTop: 0 }}>Code analytique inconnu</h3>
+            <p className="muted" style={{ marginTop: 4 }}>
+              Le code <strong style={{ fontFamily: 'monospace' }}>{pending}</strong> ne figure pas dans les
+              paramètres société. Voulez-vous le créer et l&apos;ajouter à la liste ?
+            </p>
+            <CreateCodeForm
+              code={pending}
+              familles={familles.data ?? []}
+              pending={createCode.isPending}
+              onCancel={() => setPending(null)}
+              onCreate={(familleId, label) => createCode.mutate({ familleId, code: pending, label })}
+            />
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+function CreateCodeForm({ code, familles, pending, onCancel, onCreate }: {
+  code: string; familles: ParamFamille[]; pending: boolean;
+  onCancel: () => void; onCreate: (familleId: string, label: string) => void;
+}) {
+  const [familleId, setFamilleId] = useState(familles[0]?.id ?? '');
+  const [label, setLabel] = useState(code);
+  const inputStyle: React.CSSProperties = { width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13 };
+  return (
+    <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>
+          Famille
+          <select value={familleId} onChange={(e) => setFamilleId(e.target.value)} style={{ ...inputStyle, marginTop: 3 }}>
+            {familles.length === 0 && <option value="">— aucune famille paramétrée —</option>}
+            {familles.map((f) => <option key={f.id} value={f.id}>{f.code} — {f.label}</option>)}
+          </select>
+        </label>
+        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>
+          Libellé
+          <input value={label} onChange={(e) => setLabel(e.target.value)} style={{ ...inputStyle, marginTop: 3 }} />
+        </label>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <button className="btn-secondary" onClick={onCancel}>Annuler</button>
+        <button className="btn btn-primary" disabled={!familleId || !label.trim() || pending}
+          onClick={() => onCreate(familleId, label.trim())}>
+          {pending ? '…' : 'Créer le code'}
+        </button>
+      </div>
+    </>
+  );
+}
+
 function CodeInput({ value, readOnly, placeholder, title, style, onChange }: {
   value: string | null | undefined; readOnly: boolean; placeholder: string;
   title: string; style?: React.CSSProperties; onChange: (v: string) => void;
@@ -920,6 +1058,11 @@ function LineInfoModal({ line, components, deboursById, decimals, token, readOnl
     cadence: cleanNum(line.cadence ?? ''),
     pu: cleanNum(line.pu),
     prixPublic: cleanNum(line.prix_public ?? ''),
+    uniteAchat: line.unite_achat ?? '',
+    coeffConversion: cleanNum(line.coeff_conversion ?? '') || '1',
+    supplierId: line.supplier_id ?? '',
+    refFournisseur: line.ref_fournisseur ?? '',
+    conditionnement: line.conditionnement ?? '',
   });
   type FormKey = keyof typeof form;
   const set = (k: FormKey, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -959,8 +1102,8 @@ function LineInfoModal({ line, components, deboursById, decimals, token, readOnl
                   onBlur={(e) => { const v = e.target.value.trim(); if (v !== (line.code ?? '')) { set('code', v); commit({ code: v || null }); } }} />
               </Field>
               <Field label="Code analytique">
-                <input defaultValue={form.codeAnalytique} disabled={readOnly} style={{ ...inputStyle, fontFamily: 'monospace' }}
-                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (line.code_analytique ?? '')) { set('codeAnalytique', v); commit({ codeAnalytique: v || null }); } }} />
+                <CodeAnalytiqueField value={form.codeAnalytique} token={token} readOnly={readOnly}
+                  onChange={(v) => { set('codeAnalytique', v); commit({ codeAnalytique: v || null }); }} />
               </Field>
             </div>
           )}
@@ -971,7 +1114,7 @@ function LineInfoModal({ line, components, deboursById, decimals, token, readOnl
           </Field>
 
           <div style={{ display: 'flex', gap: 12 }}>
-            <Field label="Unité">
+            <Field label={isOuvrage ? 'Unité' : "Unité d'emploi"}>
               <UnitSelect value={form.unit} token={token} readOnly={readOnly} style={{ width: '100%', textAlign: 'left' }}
                 onChange={(v) => { set('unit', v); commit({ unit: v || null }); }} />
             </Field>
@@ -1020,6 +1163,45 @@ function LineInfoModal({ line, components, deboursById, decimals, token, readOnl
                   onBlur={(e) => { const v = e.target.value; if (v !== cleanNum(line.prix_public ?? '')) { set('prixPublic', v); commit({ prixPublic: v || null }, true); } }} />
               </Field>
             </div>
+          )}
+
+          {/* ── ACHAT & DISTRIBUTEUR (ressource uniquement) ── */}
+          {!isOuvrage && (
+            <>
+              <div className="form-section-title" style={{ marginTop: 4 }}>Achat &amp; distributeur</div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Field label="Distributeur">
+                  <SupplierSelect value={form.supplierId} token={token} readOnly={readOnly}
+                    onChange={(v) => { set('supplierId', v); commit({ supplierId: v || null }); }} />
+                </Field>
+                <Field label="Référence distributeur">
+                  <input defaultValue={form.refFournisseur} disabled={readOnly} style={inputStyle}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v !== (line.ref_fournisseur ?? '')) { set('refFournisseur', v); commit({ refFournisseur: v || null }); } }} />
+                </Field>
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Field label="Conditionnement">
+                  <input defaultValue={form.conditionnement} disabled={readOnly} placeholder="Ex: Sac 25kg, Bidon 10L…" style={inputStyle}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v !== (line.conditionnement ?? '')) { set('conditionnement', v); commit({ conditionnement: v || null }); } }} />
+                </Field>
+                <Field label="Unité d'achat">
+                  <UnitSelect value={form.uniteAchat} token={token} readOnly={readOnly} style={{ width: '100%', textAlign: 'left' }}
+                    onChange={(v) => { set('uniteAchat', v); commit({ uniteAchat: v || null }); }} />
+                </Field>
+              </div>
+              <Field label="Coefficient de conversion">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input defaultValue={form.coeffConversion} disabled={readOnly} inputMode="decimal"
+                    style={{ ...inputStyle, width: 110, flex: 'none', textAlign: 'right' }}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v !== (cleanNum(line.coeff_conversion ?? '') || '1')) { set('coeffConversion', v); commit({ coeffConversion: v || null }); } }} />
+                  {form.uniteAchat && form.unit && Number(form.coeffConversion) > 0 && (
+                    <span className="muted" style={{ fontSize: 11, fontFamily: 'monospace', background: '#f1f5f9', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', flex: 1 }}>
+                      1 {form.uniteAchat} = {fmtNum(form.coeffConversion, decimals)} {form.unit} · 1 {form.unit} = {fmtNum(1 / Number(form.coeffConversion), decimals)} {form.uniteAchat}
+                    </span>
+                  )}
+                </div>
+              </Field>
+            </>
           )}
         </div>
 

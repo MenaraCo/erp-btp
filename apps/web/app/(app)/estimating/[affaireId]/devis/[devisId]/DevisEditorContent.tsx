@@ -30,6 +30,8 @@ interface DevisLine {
   section_type: 'option' | 'variante' | null; source_ouvrage_id: string | null;
   source_resource_id: string | null;
   sort_order: number; numero?: string | null; num_custom?: string | null;
+  unite_achat?: string | null; coeff_conversion?: string | null; supplier_id?: string | null;
+  ref_fournisseur?: string | null; conditionnement?: string | null;
 }
 interface SaleItem {
   id: string; debourse: string; revient: string; pvComputed: string; pv: string;
