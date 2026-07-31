@@ -38,6 +38,8 @@ export interface MontageLine {
   sort_order: number;
   numero?: string | null;
   num_custom?: string | null;
+  /** Type de sous-traitance (défini par devis) auquel la ligne est rattachée. */
+  st_type_id?: string | null;
   /** Champs d'achat copiés de la biblio à l'ajout, puis éditables au niveau du devis. */
   unite_achat?: string | null;
   coeff_conversion?: string | null;
@@ -339,6 +341,7 @@ export function Montage({
           deboursById={deboursById}
           decimals={decimals}
           token={token}
+          versionId={versionId}
           readOnly={readOnly}
           updateLine={updateLine}
           onClose={() => setInfoLine(null)}
@@ -886,6 +889,33 @@ function SupplierSelect({ value, token, readOnly, onChange }: {
   );
 }
 
+/** Types de sous-traitance déclarés sur CE devis (onglet « Coefficients & frais »). */
+interface StType { id: string; code?: string | null; label: string }
+function StTypeSelect({ value, versionId, token, readOnly, onChange }: {
+  value: string; versionId: string; token: string | null; readOnly: boolean;
+  onChange: (v: string) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ['sale-config', versionId], enabled: Boolean(token && versionId), retry: false,
+    queryFn: () => apiFetch<{ stTypes?: StType[] }>(`/versions/${versionId}/sale-sheet/config`, { token }),
+  });
+  const types = data?.stTypes ?? [];
+  return (
+    <>
+      <select value={value} disabled={readOnly || types.length === 0} onChange={(e) => onChange(e.target.value)}
+        style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, background: readOnly ? '#f8fafc' : '#fff' }}>
+        <option value="">— taux de la nature —</option>
+        {types.map((t) => <option key={t.id} value={t.id}>{t.code ? `${t.code} — ` : ''}{t.label}</option>)}
+      </select>
+      {types.length === 0 && (
+        <span className="muted" style={{ fontSize: 10 }}>
+          Aucun type défini — onglet « Coefficients &amp; frais ».
+        </span>
+      )}
+    </>
+  );
+}
+
 interface ParamCode { id: string; code: string; label: string; famille_id: string }
 interface ParamFamille { id: string; code: string; label: string }
 
@@ -1096,10 +1126,10 @@ function NumBox({ line, onChange }: { line: MontageLine; onChange: (v: string) =
 /** Fiche de modification d'une ligne de devis — même formulaire que la fiche ressource de la
  * bibliothèque, mais les modifications ne touchent QUE cette ligne du devis (via updateLine),
  * jamais la ressource de la bibliothèque société. La nature s'édite ici (plus de colonne). */
-function LineInfoModal({ line, components, deboursById, decimals, token, readOnly, updateLine, onClose }: {
+function LineInfoModal({ line, components, deboursById, decimals, token, versionId, readOnly, updateLine, onClose }: {
   line: MontageLine; components: MontageLine[];
   deboursById: Map<string, string>; decimals: number;
-  token: string | null; readOnly: boolean;
+  token: string | null; versionId: string; readOnly: boolean;
   updateLine: Muts['updateLine'];
   onClose: () => void;
 }) {
@@ -1119,6 +1149,7 @@ function LineInfoModal({ line, components, deboursById, decimals, token, readOnl
     cadence: cleanNum(line.cadence ?? ''),
     pu: cleanNum(line.pu),
     prixPublic: cleanNum(line.prix_public ?? ''),
+    stTypeId: line.st_type_id ?? '',
     uniteAchat: line.unite_achat ?? '',
     coeffConversion: cleanNum(line.coeff_conversion ?? '') || '1',
     supplierId: line.supplier_id ?? '',
@@ -1186,6 +1217,14 @@ function LineInfoModal({ line, components, deboursById, decimals, token, readOnl
               </Field>
             )}
           </div>
+
+          {/* Le type de ST n'a de sens que pour une ressource de nature « sous-traitance ». */}
+          {!isOuvrage && form.nature === 'subcontract' && (
+            <Field label="Type de sous-traitance">
+              <StTypeSelect value={form.stTypeId} versionId={versionId} token={token} readOnly={readOnly}
+                onChange={(v) => { set('stTypeId', v); commit({ stTypeId: v || null }); }} />
+            </Field>
+          )}
 
           <div style={{ display: 'flex', gap: 12 }}>
             <Field label={isOuvrage ? 'Quantité' : 'Quantité / ratio'}>

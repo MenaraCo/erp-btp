@@ -48,9 +48,11 @@ const NATURE_LABELS: Record<Nat, string> = {
   labor: "Main d'œuvre", material: 'Matériaux', equipment: 'Matériel', subcontract: 'Sous-traitance',
 };
 interface FraisRow { designation: string; type: 'pct' | 'fixe'; valeur: string }
+interface StType { id: string; code?: string | null; label: string; tauxFg: string; tauxBenefice: string }
 interface SaleConfig {
   configured: boolean;
   byNature: Record<Nat, { tauxFg: string; tauxBenefice: string }> | null;
+  stTypes?: StType[];
   remise: { type: 'pct' | 'fixe'; valeur: string } | null;
   tvaRate: string | null;
   fraisAnnexes: { designation: string; type: 'pct' | 'fixe'; valeur: string }[];
@@ -183,6 +185,8 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     equipment: { fg: '10', ben: '10' }, subcontract: { fg: '5', ben: '5' },
   });
   const [remise, setRemise] = useState<{ type: 'pct' | 'fixe'; valeur: string }>({ type: 'pct', valeur: '0' });
+  // B.1 — types de sous-traitance propres à CE devis (chacun ses FG/bénéfice).
+  const [stTypes, setStTypes] = useState<StType[]>([]);
   const [tva, setTva] = useState('20');
   const tvaPrefsApplied = useRef(false);
   useEffect(() => {
@@ -203,6 +207,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
             equipment: { tauxFg: coef.equipment.fg, tauxBenefice: coef.equipment.ben },
             subcontract: { tauxFg: coef.subcontract.fg, tauxBenefice: coef.subcontract.ben },
           },
+          stTypes: stTypes.filter((t) => t.label.trim()),
           remise: { type: remise.type, valeur: remise.valeur || '0' },
           tvaRate: String((Number(tva) || 0) / 100),
         },
@@ -367,6 +372,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
         equipment: { fg: b.equipment.tauxFg, ben: b.equipment.tauxBenefice },
         subcontract: { fg: b.subcontract.tauxFg, ben: b.subcontract.tauxBenefice },
       });
+      setStTypes(cfg.stTypes ?? []);
       if (cfg.remise) setRemise({ type: cfg.remise.type, valeur: String(Number(cfg.remise.valeur)) });
       if (cfg.tvaRate) setTva(String(Number(cfg.tvaRate) * 100));
     } else {
@@ -604,6 +610,52 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                         })}
                       </tbody>
                     </table>
+
+                    {/* B.1 — types de sous-traitance propres à ce devis (chacun ses FG/bénéfice) */}
+                    <div className="form-section-title" style={{ marginTop: 4 }}>Types de sous-traitance</div>
+                    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+                      Définissez ici les sous-traitances de ce devis (ex. « ST Moyens », « ST Compétence »).
+                      Chaque type porte ses propres FG % et bénéfice %. Une ressource de nature
+                      « Sous-traitance » sans type suit les taux de la nature ci-dessus.
+                    </p>
+                    <table className="grid" style={{ marginBottom: 8 }}>
+                      <thead><tr><th>Libellé</th><th style={{ width: 90 }}>Code</th><th style={{ textAlign: 'right', width: 90 }}>FG %</th><th style={{ textAlign: 'right', width: 90 }}>Bénéfice %</th><th style={{ textAlign: 'right', width: 80 }}>Coeff.</th><th style={{ width: 40 }} /></tr></thead>
+                      <tbody>
+                        {stTypes.length === 0 && (
+                          <tr><td colSpan={6} className="muted" style={{ fontSize: 12 }}>Aucun type — la sous-traitance suit les taux de la nature.</td></tr>
+                        )}
+                        {stTypes.map((t, i) => {
+                          const k = (1 + Number(t.tauxFg) / 100) * (1 + Number(t.tauxBenefice) / 100);
+                          const upd = (patch: Partial<StType>) =>
+                            setStTypes(stTypes.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                          return (
+                            <tr key={t.id}>
+                              <td><input style={{ width: '100%' }} value={t.label} placeholder="ST Moyens"
+                                onChange={(ev) => upd({ label: ev.target.value })} /></td>
+                              <td><input style={{ width: '100%' }} value={t.code ?? ''} placeholder="STM"
+                                onChange={(ev) => upd({ code: ev.target.value })} /></td>
+                              <td style={{ textAlign: 'right' }}><input style={{ width: 64, textAlign: 'right' }} value={t.tauxFg}
+                                onChange={(ev) => upd({ tauxFg: ev.target.value })} /></td>
+                              <td style={{ textAlign: 'right' }}><input style={{ width: 64, textAlign: 'right' }} value={t.tauxBenefice}
+                                onChange={(ev) => upd({ tauxBenefice: ev.target.value })} /></td>
+                              <td style={{ textAlign: 'right' }} className="muted">{k.toFixed(3)}</td>
+                              <td style={{ textAlign: 'right' }}>
+                                <button type="button" className="btn-ghost" title="Supprimer ce type"
+                                  onClick={() => setStTypes(stTypes.filter((_, j) => j !== i))}>✕</button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <button type="button" className="btn-secondary" style={{ marginBottom: 12 }} disabled={!isLatest}
+                      onClick={() => setStTypes([...stTypes, {
+                        id: `st${Date.now().toString(36)}`, code: '', label: '',
+                        tauxFg: coef.subcontract.fg, tauxBenefice: coef.subcontract.ben,
+                      }])}>
+                      + Type de sous-traitance
+                    </button>
+
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                       <div className="field" style={{ marginBottom: 0 }}>
                         <label>TVA</label>

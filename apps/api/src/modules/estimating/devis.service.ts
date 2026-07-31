@@ -52,6 +52,8 @@ export interface DevisLinePatch {
   parentLineId?: string | null;
   /** Propager désignation/pu/perte à toutes les ressources du même devis partageant le même code. */
   syncByCode?: boolean;
+  /** Type de sous-traitance du devis auquel rattacher la ligne (nature = subcontract). */
+  stTypeId?: string | null;
   /** Champs d'achat de la ligne (indépendants de la bibliothèque). */
   uniteAchat?: string | null;
   coeffConversion?: string | number | null;
@@ -1054,6 +1056,7 @@ export class DevisService {
            supplier_id = CASE WHEN $16 = '__KEEP__' THEN supplier_id ELSE NULLIF($16, '')::uuid END,
            ref_fournisseur = CASE WHEN $17 = '__KEEP__' THEN ref_fournisseur ELSE NULLIF($17, '') END,
            conditionnement = CASE WHEN $18 = '__KEEP__' THEN conditionnement ELSE NULLIF($18, '') END,
+           st_type_id = CASE WHEN $19 = '__KEEP__' THEN st_type_id ELSE NULLIF($19, '') END,
            updated_at = now()
          WHERE id = $1`,
         [
@@ -1075,6 +1078,7 @@ export class DevisService {
           patch.supplierId === undefined ? '__KEEP__' : (patch.supplierId ?? ''),
           patch.refFournisseur === undefined ? '__KEEP__' : (patch.refFournisseur ?? ''),
           patch.conditionnement === undefined ? '__KEEP__' : (patch.conditionnement ?? ''),
+          patch.stTypeId === undefined ? '__KEEP__' : (patch.stTypeId ?? ''),
         ],
       );
 

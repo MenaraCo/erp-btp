@@ -51,7 +51,13 @@ export type SectionKind = 'main' | 'option' | 'variante';
 
 export interface VenteItemInput {
   id: string;
-  debourseByNature: Partial<Record<Nature, Decimal.Value>>;
+  debourseByNature?: Partial<Record<Nature, Decimal.Value>>;
+  /**
+   * Déboursé de sous-traitance ventilé par TYPE de ST (types définis par devis, ex. « moyens »,
+   * « compétence »). Chaque type porte ses propres FG/bénéfice. Une ligne de ST sans type
+   * reste dans debourseByNature.subcontract et suit les taux de la nature.
+   */
+  debourseBySt?: Partial<Record<string, Decimal.Value>>;
   vendable: boolean;
   /** explicit PV override (memorised, line-level "pv forcé") */
   forcedPv?: Decimal.Value | null;
@@ -61,6 +67,8 @@ export interface VenteItemInput {
 
 export interface SaleCoefficients {
   byNature: Record<Nature, NatureSaleRate>;
+  /** Taux propres à chaque TYPE de sous-traitance (clé = id du type, défini par devis). */
+  stRates?: Record<string, NatureSaleRate>;
   fraisAnnexes?: FraisAnnexe[];
   remise?: Remise | null;
   tvaRate: Decimal.Value;
@@ -80,8 +88,12 @@ export interface VenteItemResult {
   margeNette: string;
   section: SectionKind;
   appliedRates: Record<Nature, { fg: string; benefice: string }>;
-  /** Déboursé de la ligne ventilé par nature (brut, hors ventilation des frais). */
+  /** Déboursé de la ligne ventilé par nature (la sous-traitance agrège tous les types de ST). */
   debourseByNature: Record<Nature, string>;
+  /** Déboursé ventilé par type de sous-traitance (vide si le devis n'en définit pas). */
+  debourseBySt?: Record<string, string>;
+  /** Taux appliqués à chaque type de ST, pour traçabilité. */
+  appliedStRates?: Record<string, { fg: string; benefice: string }>;
 }
 
 export interface VenteResult {
@@ -110,10 +122,10 @@ function round2(value: Decimal): Decimal {
   return value.toDecimalPlaces(PV_SCALE, Decimal.ROUND_HALF_UP);
 }
 
-function toBreakdown(input: Partial<Record<Nature, Decimal.Value>>): NatureBreakdown {
+function toBreakdown(input: Partial<Record<Nature, Decimal.Value>> | undefined): NatureBreakdown {
   const b = zeroBreakdown();
   for (const n of NATURES) {
-    if (input[n] != null) {
+    if (input?.[n] != null) {
       b[n] = new Decimal(input[n] as Decimal.Value);
     }
   }
@@ -122,6 +134,31 @@ function toBreakdown(input: Partial<Record<Nature, Decimal.Value>>): NatureBreak
 
 function sum(b: NatureBreakdown): Decimal {
   return NATURES.reduce((acc, n) => acc.plus(b[n]), new Decimal(0));
+}
+
+/**
+ * Déboursé de sous-traitance par type. Un type absent du paramétrage du devis retombe sur les
+ * taux de la nature « subcontract » : on ne perd jamais de déboursé (règle #3).
+ */
+type StBreakdown = Record<string, Decimal>;
+
+function toStBreakdown(input: Partial<Record<string, Decimal.Value>> | undefined): StBreakdown {
+  const b: StBreakdown = {};
+  for (const [k, v] of Object.entries(input ?? {})) {
+    if (v != null) {
+      b[k] = new Decimal(v as Decimal.Value);
+    }
+  }
+  return b;
+}
+
+function sumSt(b: StBreakdown): Decimal {
+  return Object.values(b).reduce((acc, v) => acc.plus(v), new Decimal(0));
+}
+
+/** Taux applicables à un type de ST, avec repli sur la nature « sous-traitance ». */
+function stRateOf(coeffs: SaleCoefficients, typeId: string): NatureSaleRate {
+  return coeffs.stRates?.[typeId] ?? coeffs.byNature.subcontract ?? { tauxFg: 0, tauxBenefice: 0 };
 }
 
 /** Frais annexes amount: pct items apply to the PV hors frais, fixe items are added as-is. */
@@ -145,6 +182,7 @@ function computeRemise(remise: Remise | null | undefined, pvDevis: Decimal): Dec
 function priceItem(
   input: VenteItemInput,
   effBreakdown: NatureBreakdown,
+  effSt: StBreakdown,
   ownDebourse: Decimal,
   coeffs: SaleCoefficients,
   section: SectionKind,
@@ -153,19 +191,26 @@ function priceItem(
   let revient = new Decimal(0);
   let pvComputed = new Decimal(0);
   const appliedRates = {} as Record<Nature, { fg: string; benefice: string }>;
+  const appliedStRates: Record<string, { fg: string; benefice: string }> = {};
 
-  for (const n of NATURES) {
-    const rate = coeffs.byNature[n] ?? { tauxFg: 0, tauxBenefice: 0 };
+  const applyRate = (eff: Decimal, rate: NatureSaleRate) => {
     const fg = new Decimal(rate.tauxFg);
     const ben = new Decimal(rate.tauxBenefice);
-    appliedRates[n] = { fg: fg.toString(), benefice: ben.toString() };
-
-    const eff = effBreakdown[n];
     const revientN = eff.times(new Decimal(1).plus(fg.dividedBy(100)));
     const pvN = revientN.times(new Decimal(1).plus(ben.dividedBy(100)));
     debourse = debourse.plus(eff);
     revient = revient.plus(revientN);
     pvComputed = pvComputed.plus(pvN);
+    return { fg: fg.toString(), benefice: ben.toString() };
+  };
+
+  for (const n of NATURES) {
+    const rate = coeffs.byNature[n] ?? { tauxFg: 0, tauxBenefice: 0 };
+    appliedRates[n] = applyRate(effBreakdown[n], rate);
+  }
+  // Chaque type de sous-traitance suit SES propres taux (repli sur la nature « subcontract »).
+  for (const [typeId, eff] of Object.entries(effSt)) {
+    appliedStRates[typeId] = applyRate(eff, stRateOf(coeffs, typeId));
   }
 
   const ventilatedFrais = debourse.minus(ownDebourse);
@@ -173,6 +218,7 @@ function priceItem(
   const forced = input.forcedPv != null;
   const pv = forced ? round2(new Decimal(input.forcedPv as Decimal.Value)) : pvComputed;
 
+  const stTotal = sumSt(effSt);
   return {
     id: input.id,
     debourse: round2(debourse).toString(),
@@ -185,9 +231,18 @@ function priceItem(
     margeNette: round2(pv.minus(revient)).toString(),
     section,
     appliedRates,
+    // La ligne « sous-traitance » agrège les types de ST : les consommateurs existants
+    // (récap déboursé, synthèse par ouvrage) restent justes sans changement.
     debourseByNature: Object.fromEntries(
-      NATURES.map((n) => [n, round2(effBreakdown[n]).toString()]),
+      NATURES.map((n) => [
+        n,
+        round2(n === 'subcontract' ? effBreakdown[n].plus(stTotal) : effBreakdown[n]).toString(),
+      ]),
     ) as Record<Nature, string>,
+    debourseBySt: Object.fromEntries(
+      Object.entries(effSt).map(([k, v]) => [k, round2(v).toString()]),
+    ),
+    appliedStRates,
   };
 }
 
@@ -200,6 +255,7 @@ export function computeFeuilleDeVente(
   const prepared = items.map((it) => ({
     input: it,
     breakdown: toBreakdown(it.debourseByNature),
+    st: toStBreakdown(it.debourseBySt),
     section: it.section ?? 'main',
   }));
 
@@ -210,16 +266,22 @@ export function computeFeuilleDeVente(
 
   // Per-nature frais totals from non-vendable MAIN items, ventilated pro rata over vendable déboursé.
   const fraisByNature = zeroBreakdown();
+  const fraisBySt: StBreakdown = {};
   for (const p of main) {
     if (!p.input.vendable) {
       for (const n of NATURES) {
         fraisByNature[n] = fraisByNature[n].plus(p.breakdown[n]);
       }
+      // Les frais de sous-traitance restent rattachés à LEUR type : la part ventilée sera
+      // margée aux taux de ce type, pas à ceux de la nature générique.
+      for (const [k, v] of Object.entries(p.st)) {
+        fraisBySt[k] = (fraisBySt[k] ?? new Decimal(0)).plus(v);
+      }
     }
   }
-  const fraisTotal = sum(fraisByNature);
+  const fraisTotal = sum(fraisByNature).plus(sumSt(fraisBySt));
   const vendableDebourseTotal = vendable.reduce(
-    (acc, p) => acc.plus(sum(p.breakdown)),
+    (acc, p) => acc.plus(sum(p.breakdown)).plus(sumSt(p.st)),
     new Decimal(0),
   );
 
@@ -229,7 +291,7 @@ export function computeFeuilleDeVente(
   let pvHorsFrais = new Decimal(0);
 
   for (const p of vendable) {
-    const ownDebourse = sum(p.breakdown);
+    const ownDebourse = sum(p.breakdown).plus(sumSt(p.st));
     const share =
       vendableDebourseTotal.isZero() || fraisTotal.isZero()
         ? new Decimal(0)
@@ -238,7 +300,11 @@ export function computeFeuilleDeVente(
     for (const n of NATURES) {
       eff[n] = p.breakdown[n].plus(fraisByNature[n].times(share));
     }
-    const r = priceItem(p.input, eff, ownDebourse, coeffs, 'main');
+    const effSt: StBreakdown = { ...p.st };
+    for (const [k, v] of Object.entries(fraisBySt)) {
+      effSt[k] = (effSt[k] ?? new Decimal(0)).plus(v.times(share));
+    }
+    const r = priceItem(p.input, eff, effSt, ownDebourse, coeffs, 'main');
     results.push(r);
     totalDebourse = totalDebourse.plus(r.debourse);
     totalRevient = totalRevient.plus(r.revient);
@@ -249,8 +315,8 @@ export function computeFeuilleDeVente(
   let optionsPvHt = new Decimal(0);
   let variantesPvHt = new Decimal(0);
   for (const p of extras) {
-    const own = sum(p.breakdown);
-    const r = priceItem(p.input, p.breakdown, own, coeffs, p.section);
+    const own = sum(p.breakdown).plus(sumSt(p.st));
+    const r = priceItem(p.input, p.breakdown, p.st, own, coeffs, p.section);
     results.push(r);
     if (p.section === 'option') {
       optionsPvHt = optionsPvHt.plus(r.pv);

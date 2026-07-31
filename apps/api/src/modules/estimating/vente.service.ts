@@ -25,8 +25,19 @@ import {
   computeFeuilleDeVente,
 } from './vente-calc';
 
+export interface StTypeInput {
+  /** identifiant stable du type au sein du devis (slug ou uuid) */
+  id: string;
+  code?: string | null;
+  label: string;
+  tauxFg: number | string;
+  tauxBenefice: number | string;
+}
+
 export interface SaleSheetInput {
   byNature: Record<Nature, { tauxFg: number | string; tauxBenefice: number | string }>;
+  /** Types de sous-traitance définis POUR CE DEVIS (chacun ses FG/bénéfice). */
+  stTypes?: StTypeInput[];
   remise?: { type: FraisType; valeur: number | string } | null;
   tvaRate?: number | string;
 }
@@ -65,15 +76,25 @@ export class VenteService {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertVersion(em, versionId);
       const coefficients = JSON.stringify(this.normalizeByNature(input.byNature));
+      const stTypes = JSON.stringify(
+        (input.stTypes ?? []).map((t) => ({
+          id: t.id,
+          code: t.code ?? null,
+          label: t.label,
+          tauxFg: String(t.tauxFg ?? 0),
+          tauxBenefice: String(t.tauxBenefice ?? 0),
+        })),
+      );
       const remiseType = input.remise?.type ?? 'pct';
       const remiseValeur = input.remise?.valeur ?? 0;
       return (
         await em.query(
           `INSERT INTO sale_sheet
-             (tenant_id, devis_version_id, coefficients, tva_rate, remise_type, remise_valeur)
-           VALUES ($1, $2, $3::jsonb, $4, $5, $6)
+             (tenant_id, devis_version_id, coefficients, st_types, tva_rate, remise_type, remise_valeur)
+           VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7)
            ON CONFLICT (devis_version_id)
            DO UPDATE SET coefficients = EXCLUDED.coefficients,
+                         st_types = EXCLUDED.st_types,
                          tva_rate = EXCLUDED.tva_rate,
                          remise_type = EXCLUDED.remise_type,
                          remise_valeur = EXCLUDED.remise_valeur,
@@ -83,6 +104,7 @@ export class VenteService {
             tenantId,
             versionId,
             coefficients,
+            stTypes,
             String(input.tvaRate ?? 0.2),
             remiseType,
             String(remiseValeur),
@@ -144,12 +166,14 @@ export class VenteService {
         [versionId],
       );
       const rows = await em.query(
-        `SELECT coefficients, tva_rate, remise_type, remise_valeur
+        `SELECT coefficients, st_types, tva_rate, remise_type, remise_valeur
            FROM sale_sheet WHERE devis_version_id = $1`,
         [versionId],
       );
       if (rows.length === 0) {
-        return { configured: false, byNature: null, remise: null, tvaRate: null, fraisAnnexes };
+        return {
+          configured: false, byNature: null, stTypes: [], remise: null, tvaRate: null, fraisAnnexes,
+        };
       }
       const c = rows[0];
       const byNature = {} as Record<Nature, NatureSaleRate>;
@@ -160,6 +184,7 @@ export class VenteService {
       return {
         configured: true,
         byNature,
+        stTypes: c.st_types ?? [],
         remise: { type: c.remise_type as FraisType, valeur: String(c.remise_valeur) },
         tvaRate: String(c.tva_rate),
         fraisAnnexes,
@@ -222,6 +247,7 @@ export class VenteService {
       source_resource_id: string | null;
       nature: Nature | null;
       resource_nature: Nature | null;
+      st_type_id: string | null;
       quantity: string | null;
       pu: string | null;
       perte: string | null;
@@ -231,7 +257,7 @@ export class VenteService {
       section_type: 'option' | 'variante' | null;
     }> = await em.query(
       `SELECT dl.id, dl.parent_line_id, dl.type, dl.source_ouvrage_id, dl.source_resource_id,
-              dl.nature, r.nature AS resource_nature,
+              dl.nature, r.nature AS resource_nature, dl.st_type_id,
               dl.quantity, dl.pu, dl.perte, dl.pu_vente, dl.pu_vente_force, dl.vendable, dl.section_type
          FROM devis_line dl
          LEFT JOIN resource r ON r.id = dl.source_resource_id
@@ -295,6 +321,28 @@ export class VenteService {
     ) => {
       bucket[nature] = new Decimal(bucket[nature] ?? 0).plus(amount).toString();
     };
+    // Sous-traitance TYPÉE : le déboursé part dans son propre seau (taux du type), sinon il
+    // reste dans la nature « subcontract » (repli sur les taux de la nature).
+    const addSt = (
+      bucket: Partial<Record<string, string>>,
+      typeId: string,
+      amount: Decimal,
+    ) => {
+      bucket[typeId] = new Decimal(bucket[typeId] ?? 0).plus(amount).toString();
+    };
+    const routeDebourse = (
+      byNature: Partial<Record<Nature, string>>,
+      bySt: Partial<Record<string, string>>,
+      line: { nature: Nature | null; resource_nature: Nature | null; st_type_id: string | null },
+      nature: Nature,
+      amount: Decimal,
+    ) => {
+      if (nature === 'subcontract' && line.st_type_id) {
+        addSt(bySt, line.st_type_id, amount);
+      } else {
+        addNature(byNature, nature, amount);
+      }
+    };
     const effQty = (l: (typeof lines)[number], ouvrageQty: Decimal) =>
       ouvrageQty
         .times(new Decimal(l.quantity ?? 0))
@@ -312,6 +360,7 @@ export class VenteService {
       }
       const qty = new Decimal(l.quantity ?? 0);
       const debourseByNature: Partial<Record<Nature, string>> = {};
+      const debourseBySt: Partial<Record<string, string>> = {};
 
       if (l.type === 'ouvrage') {
         const children = childrenByParent.get(l.id) ?? [];
@@ -320,7 +369,8 @@ export class VenteService {
           for (const c of children) {
             if (c.type === 'ressource') {
               const nature: Nature = c.nature ?? c.resource_nature ?? 'material';
-              addNature(debourseByNature, nature, new Decimal(c.pu ?? 0).times(effQty(c, qty)));
+              routeDebourse(debourseByNature, debourseBySt, c, nature,
+                new Decimal(c.pu ?? 0).times(effQty(c, qty)));
             } else if (c.type === 'ouvrage') {
               // sub-ouvrage : contribution = unit_breakdown × parent_qty × child_qty × (1+perte)
               const sub = computeUnitBreakdown(c);
@@ -338,7 +388,8 @@ export class VenteService {
       } else {
         // ressource autonome (sous un titre) : pu × qty × (1+perte)
         const nature: Nature = l.nature ?? l.resource_nature ?? 'material';
-        addNature(debourseByNature, nature, new Decimal(l.pu ?? 0).times(effQty(l, new Decimal(1))));
+        routeDebourse(debourseByNature, debourseBySt, l, nature,
+          new Decimal(l.pu ?? 0).times(effQty(l, new Decimal(1))));
       }
 
       const forcedPv =
@@ -350,6 +401,7 @@ export class VenteService {
         id: l.id,
         vendable: l.vendable,
         debourseByNature,
+        debourseBySt,
         forcedPv,
         section: resolveSection(l),
       });
@@ -375,7 +427,7 @@ export class VenteService {
     );
 
     const rows = await em.query(
-      `SELECT coefficients, tva_rate, remise_type, remise_valeur
+      `SELECT coefficients, st_types, tva_rate, remise_type, remise_valeur
          FROM sale_sheet WHERE devis_version_id = $1`,
       [versionId],
     );
@@ -391,9 +443,17 @@ export class VenteService {
         tauxBenefice: String(r.tauxBenefice ?? 0),
       };
     }
+    // Taux propres à chaque type de sous-traitance déclaré sur CE devis.
+    const stRates = Object.fromEntries(
+      (c.st_types ?? []).map((t: { id: string; tauxFg?: string; tauxBenefice?: string }) => [
+        t.id,
+        { tauxFg: String(t.tauxFg ?? 0), tauxBenefice: String(t.tauxBenefice ?? 0) },
+      ]),
+    ) as Record<string, NatureSaleRate>;
     const remiseValeur = new Decimal(c.remise_valeur ?? 0);
     return {
       byNature,
+      stRates,
       fraisAnnexes,
       remise: remiseValeur.isZero()
         ? null

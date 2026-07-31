@@ -172,4 +172,82 @@ describe('vente-calc — feuille de vente', () => {
     expect(res.tva).toBe('78');
     expect(res.totalTtc).toBe('468');
   });
+
+  /* ─────────── B.1 — types de sous-traitance (définis par devis) ─────────── */
+
+  it("B.1 — chaque type de sous-traitance applique SES propres FG et bénéfice", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'A', vendable: true, debourseBySt: { moyens: '1000' } },
+        { id: 'B', vendable: true, debourseBySt: { competence: '1000' } },
+      ],
+      coeffs({
+        stRates: {
+          moyens: rate('10', '5'), // 1000 → 1100 → 1155
+          competence: rate('20', '10'), // 1000 → 1200 → 1320
+        },
+      }),
+    );
+    expect(res.items.find((i) => i.id === 'A')!.revient).toBe('1100');
+    expect(res.items.find((i) => i.id === 'A')!.pv).toBe('1155');
+    expect(res.items.find((i) => i.id === 'B')!.revient).toBe('1200');
+    expect(res.items.find((i) => i.id === 'B')!.pv).toBe('1320');
+    expect(res.pvHorsFrais).toBe('2475');
+  });
+
+  it("B.1 — une ligne ST sans type retombe sur les taux de la nature « sous-traitance »", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { subcontract: '1000' } }],
+      coeffs({
+        byNature: {
+          labor: rate('0', '0'), material: rate('0', '0'), equipment: rate('0', '0'),
+          subcontract: rate('30', '0'), // 1000 → 1300
+        },
+        stRates: { moyens: rate('10', '5') },
+      }),
+    );
+    expect(res.items[0].revient).toBe('1300');
+    expect(res.items[0].pv).toBe('1300');
+  });
+
+  it("B.1 — un type inconnu retombe sur les taux « sous-traitance » (pas de perte de déboursé)", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseBySt: { inexistant: '500' } }],
+      coeffs({
+        byNature: {
+          labor: rate('0', '0'), material: rate('0', '0'), equipment: rate('0', '0'),
+          subcontract: rate('10', '0'),
+        },
+        stRates: { moyens: rate('50', '50') },
+      }),
+    );
+    expect(res.items[0].debourse).toBe('500');
+    expect(res.items[0].revient).toBe('550');
+  });
+
+  it("B.1 — la ventilation des frais garde le type de ST (marge au bon taux)", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'FRAIS', vendable: false, debourseBySt: { moyens: '100' } },
+        { id: 'A', vendable: true, debourseBySt: { moyens: '900' } },
+      ],
+      coeffs({ stRates: { moyens: rate('0', '10') } }),
+    );
+    // tout le déboursé (900 + 100 ventilés) est margé au taux « moyens »
+    expect(res.items.find((i) => i.id === 'A')!.debourse).toBe('1000');
+    expect(res.items.find((i) => i.id === 'A')!.ventilatedFrais).toBe('100');
+    expect(res.items.find((i) => i.id === 'A')!.pv).toBe('1100');
+    expect(res.totalDebourse).toBe('1000'); // la ventilation conserve le déboursé
+  });
+
+  it("B.1 — le récapitulatif par nature agrège les types de ST (compatibilité déboursé)", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { material: '200', subcontract: '50' }, debourseBySt: { moyens: '300', competence: '150' } }],
+      coeffs({ stRates: { moyens: rate('0', '0'), competence: rate('0', '0') } }),
+    );
+    expect(res.items[0].debourseByNature.subcontract).toBe('500'); // 50 + 300 + 150
+    expect(res.items[0].debourseByNature.material).toBe('200');
+    expect(res.items[0].debourseBySt!.moyens).toBe('300');
+    expect(res.items[0].debourseBySt!.competence).toBe('150');
+  });
 });
