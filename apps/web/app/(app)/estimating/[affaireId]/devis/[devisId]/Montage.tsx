@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
@@ -905,8 +905,32 @@ function CodeAnalytiqueField({ value, token, readOnly, onChange }: {
   const list = codes.data ?? [];
   const known = (c: string) => list.some((x) => x.code.toLowerCase() === c.toLowerCase());
 
+  // Combobox maison : le <datalist> natif tronque la liste et ne se fait pas défiler.
+  // Ici : panneau en portail, défilement complet, filtrage sur code ET libellé, clavier.
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value);
+  const [hi, setHi] = useState(0);
+  const boxRef = useRef<HTMLInputElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => { setQuery(value); }, [value]);
+
+  const place = () => {
+    const r = boxRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 260) });
+  };
+  const openList = () => { place(); setHi(0); setOpen(true); };
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? list.filter((c) => c.code.toLowerCase().includes(q) || c.label.toLowerCase().includes(q))
+    : list;
+
+  const pick = (c: ParamCode) => { setQuery(c.code); setOpen(false); if (c.code !== value) onChange(c.code); };
+
   const commit = (raw: string) => {
     const v = raw.trim();
+    setOpen(false);
     if (v === (value ?? '')) return;
     if (!v) { onChange(''); return; }
     const hit = list.find((x) => x.code.toLowerCase() === v.toLowerCase());
@@ -916,14 +940,34 @@ function CodeAnalytiqueField({ value, token, readOnly, onChange }: {
 
   return (
     <>
-      <input list="params-codes-list" defaultValue={value} disabled={readOnly} key={value}
+      <input ref={boxRef} value={query} disabled={readOnly}
         placeholder={list.length ? 'Choisir ou saisir…' : '—'}
         style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, fontFamily: 'monospace', background: readOnly ? '#f8fafc' : '#fff' }}
-        onBlur={(e) => commit(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(e.currentTarget.value); } }} />
-      <datalist id="params-codes-list">
-        {list.map((c) => <option key={c.id} value={c.code}>{c.label}</option>)}
-      </datalist>
+        onChange={(e) => { setQuery(e.target.value); setHi(0); if (!open) openList(); else place(); }}
+        onFocus={openList}
+        onBlur={(e) => { setTimeout(() => commit(e.target.value), 120); }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); if (!open) openList(); else setHi((i) => Math.min(i + 1, filtered.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((i) => Math.max(i - 1, 0)); }
+          else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (open && filtered[hi]) pick(filtered[hi]);
+            else commit(e.currentTarget.value);
+          } else if (e.key === 'Escape') { setOpen(false); setQuery(value); }
+        }} />
+      {open && pos && filtered.length > 0 && createPortal(
+        <div style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width, maxHeight: 280, overflowY: 'auto', zIndex: 1200, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 10px 30px rgba(15,23,42,0.18)' }}
+          onMouseDown={(e) => e.preventDefault() /* garde le focus : le blur ne doit pas annuler le clic */}>
+          {filtered.map((c, i) => (
+            <div key={c.id} onClick={() => pick(c)} onMouseEnter={() => setHi(i)}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 10px', cursor: 'pointer', fontSize: 12, background: i === hi ? '#eef2f7' : undefined }}>
+              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--primary)' }}>{c.code}</span>
+              <span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.label}</span>
+            </div>
+          ))}
+        </div>,
+        document.body,
+      )}
       {value && !known(value) && list.length > 0 && (
         <span style={{ fontSize: 10, color: '#b45309' }}>Code hors référentiel</span>
       )}
