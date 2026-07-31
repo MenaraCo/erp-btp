@@ -250,4 +250,77 @@ describe('vente-calc — feuille de vente', () => {
     expect(res.items[0].debourseBySt!.moyens).toBe('300');
     expect(res.items[0].debourseBySt!.competence).toBe('150');
   });
+
+  /* ─────────── B.2 — frais ventilés Part Propre / Sous-traitance ─────────── */
+
+  it("B.2 — frais « part propre » : répartis sur la part propre uniquement", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'FRAIS', vendable: false, ventilationBase: 'propre', debourseByNature: { material: '100' } },
+        { id: 'PROPRE', vendable: true, debourseByNature: { labor: '400' } },
+        { id: 'ST', vendable: true, debourseByNature: { subcontract: '600' } },
+      ],
+      coeffs(),
+    );
+    // 100 % des frais vont sur la ligne « part propre », rien sur la sous-traitance
+    expect(res.items.find((i) => i.id === 'PROPRE')!.ventilatedFrais).toBe('100');
+    expect(res.items.find((i) => i.id === 'ST')!.ventilatedFrais).toBe('0');
+    expect(res.totalDebourse).toBe('1100'); // la ventilation conserve le déboursé
+  });
+
+  it("B.2 — frais « sous-traitance » : répartis sur la ST uniquement", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'FRAIS', vendable: false, ventilationBase: 'st', debourseByNature: { material: '90' } },
+        { id: 'PROPRE', vendable: true, debourseByNature: { labor: '400' } },
+        { id: 'ST', vendable: true, debourseBySt: { moyens: '600' } },
+      ],
+      coeffs({ stRates: { moyens: rate('0', '0') } }),
+    );
+    expect(res.items.find((i) => i.id === 'ST')!.ventilatedFrais).toBe('90');
+    expect(res.items.find((i) => i.id === 'PROPRE')!.ventilatedFrais).toBe('0');
+    expect(res.totalDebourse).toBe('1090');
+  });
+
+  it("B.2 — répartition PRORATA à l'intérieur de la base choisie", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'FRAIS', vendable: false, ventilationBase: 'propre', debourseByNature: { material: '300' } },
+        { id: 'A', vendable: true, debourseByNature: { labor: '100' } },
+        { id: 'B', vendable: true, debourseByNature: { material: '200' } },
+        { id: 'ST', vendable: true, debourseByNature: { subcontract: '900' } },
+      ],
+      coeffs(),
+    );
+    // 300 répartis sur 300 de part propre : 1/3 pour A, 2/3 pour B
+    expect(res.items.find((i) => i.id === 'A')!.ventilatedFrais).toBe('100');
+    expect(res.items.find((i) => i.id === 'B')!.ventilatedFrais).toBe('200');
+    expect(res.items.find((i) => i.id === 'ST')!.ventilatedFrais).toBe('0');
+  });
+
+  it("B.2 — sans clé précisée : comportement historique (prorata du déboursé total)", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'FRAIS', vendable: false, debourseByNature: { material: '100' } },
+        { id: 'PROPRE', vendable: true, debourseByNature: { labor: '400' } },
+        { id: 'ST', vendable: true, debourseByNature: { subcontract: '600' } },
+      ],
+      coeffs(),
+    );
+    expect(res.items.find((i) => i.id === 'PROPRE')!.ventilatedFrais).toBe('40');
+    expect(res.items.find((i) => i.id === 'ST')!.ventilatedFrais).toBe('60');
+  });
+
+  it("B.2 — base absente : repli sur le déboursé total (aucun frais perdu)", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'FRAIS', vendable: false, ventilationBase: 'st', debourseByNature: { material: '50' } },
+        { id: 'PROPRE', vendable: true, debourseByNature: { labor: '450' } },
+      ],
+      coeffs(),
+    );
+    // aucune sous-traitance vendable : les frais retombent sur l'ensemble
+    expect(res.items.find((i) => i.id === 'PROPRE')!.ventilatedFrais).toBe('50');
+    expect(res.totalDebourse).toBe('500');
+  });
 });

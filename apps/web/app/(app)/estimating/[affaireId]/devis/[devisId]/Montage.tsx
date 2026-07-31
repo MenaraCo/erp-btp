@@ -40,6 +40,10 @@ export interface MontageLine {
   num_custom?: string | null;
   /** Type de sous-traitance (défini par devis) auquel la ligne est rattachée. */
   st_type_id?: string | null;
+  /** false = ligne de FRAIS : son déboursé est ventilé sur les lignes vendables. */
+  vendable?: boolean;
+  /** Assiette de ventilation des frais : 'propre' | 'st' | 'all'. */
+  ventilation_base?: 'propre' | 'st' | 'all' | null;
   /** Champs d'achat copiés de la biblio à l'ajout, puis éditables au niveau du devis. */
   unite_achat?: string | null;
   coeff_conversion?: string | null;
@@ -496,6 +500,7 @@ function Node({
             {!readOnly && (
               <>
                 <SectionActions parentId={line.id} childCount={kids.length} depth={depth} addLine={addLine} headerColor={ls.color} />
+                {!vente && <FraisMenu line={line} updateLine={updateLine} color={ls.color} />}
                 <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, 'rgba(255,255,255,0.5)'), fontSize: 13 }}>⧉</button>
                 <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'variante' ? null : 'variante' })} style={togBtn(sect === 'variante', '#f97316')}>V</button>
                 <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: sect === 'option' ? null : 'option' })} style={togBtn(sect === 'option', '#a855f7')}>O</button>
@@ -583,6 +588,7 @@ function Node({
             {!readOnly && (
               <>
                 {!vente && <OuvrageAddMenu parentId={line.id} childCount={comps.length} addLine={addLine} />}
+                {!vente && <FraisMenu line={line} updateLine={updateLine} color="#94a3b8" />}
                 <button title="Copier / Déplacer" onClick={() => onCopyMove(line)} style={{ ...togBtn(false, '#94a3b8'), fontSize: 13 }}>⧉</button>
                 <button title="Variante" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'variante' ? null : 'variante' })} style={togBtn(ouvrSect === 'variante', '#f97316')}>V</button>
                 <button title="Option" onClick={() => setSection.mutate({ id: line.id, sectionType: ouvrSect === 'option' ? null : 'option' })} style={togBtn(ouvrSect === 'option', '#a855f7')}>O</button>
@@ -738,9 +744,10 @@ function acceptDrop(e: React.DragEvent) {
 /** Menu « + » : le déroulant est rendu en portail (document.body, position fixe calculée sur le
  * bouton) pour échapper à l'opacité/au rognage du bandeau d'actions flottant. Il reste donc
  * toujours visible et cliquable, même quand le curseur quitte la ligne. */
-function AddMenu({ triggerStyle, triggerTitle, children }: {
+function AddMenu({ triggerStyle, triggerTitle, triggerLabel = '+', children }: {
   triggerStyle: React.CSSProperties;
   triggerTitle: string;
+  triggerLabel?: string;
   children: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -756,7 +763,7 @@ function AddMenu({ triggerStyle, triggerTitle, children }: {
   };
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-      <button ref={btnRef} type="button" title={triggerTitle} onClick={toggle} style={triggerStyle}>+</button>
+      <button ref={btnRef} type="button" title={triggerTitle} onClick={toggle} style={triggerStyle}>{triggerLabel}</button>
       {open && pos && createPortal(
         <>
           <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 3000 }} />
@@ -767,6 +774,49 @@ function AddMenu({ triggerStyle, triggerTitle, children }: {
         document.body,
       )}
     </span>
+  );
+}
+
+/**
+ * Marque une ligne comme FRAIS (non vendable) et choisit l'assiette de ventilation :
+ * part propre (MO/matériaux/matériel), sous-traitance, ou tout le déboursé.
+ * Une ligne vendable normale reste le cas par défaut.
+ */
+function FraisMenu({ line, updateLine, color }: {
+  line: MontageLine; color: string;
+} & Pick<Muts, 'updateLine'>) {
+  const isFrais = line.vendable === false;
+  const base = line.ventilation_base ?? 'all';
+  const label = !isFrais ? 'F' : base === 'propre' ? 'FP' : base === 'st' ? 'FS' : 'F*';
+  const choices: { v: 'propre' | 'st' | 'all'; l: string; t: string }[] = [
+    { v: 'propre', l: 'FP', t: 'Frais ventilés sur la part propre (MO / matériaux / matériel)' },
+    { v: 'st', l: 'FS', t: 'Frais ventilés sur la sous-traitance' },
+    { v: 'all', l: 'F*', t: 'Frais ventilés sur tout le déboursé' },
+  ];
+  return (
+    <AddMenu
+      triggerLabel={label}
+      triggerTitle={isFrais ? `Ligne de frais — ventilation : ${base}` : 'Marquer comme ligne de frais (ventilée)'}
+      triggerStyle={{
+        width: 24, height: 20, borderRadius: 4,
+        border: `1px solid ${isFrais ? '#0ea5e9' : color}`,
+        background: isFrais ? '#0ea5e9' : 'transparent',
+        color: isFrais ? '#fff' : color,
+        fontSize: 10, fontWeight: 700, cursor: 'pointer', display: 'inline-flex',
+        alignItems: 'center', justifyContent: 'center', lineHeight: 1, flexShrink: 0,
+      }}>
+      {(close) => (
+        <>
+          {choices.map((c) => (
+            <ActionSquare key={c.v} label={c.l} title={c.t}
+              color={isFrais && base === c.v ? '#0ea5e9' : '#64748b'}
+              onClick={() => { updateLine.mutate({ id: line.id, patch: { vendable: false, ventilationBase: c.v } }); close(); }} />
+          ))}
+          <ActionSquare label="€" title="Ligne vendable (annuler « frais »)" color="#16a34a"
+            onClick={() => { updateLine.mutate({ id: line.id, patch: { vendable: true, ventilationBase: null } }); close(); }} />
+        </>
+      )}
+    </AddMenu>
   );
 }
 

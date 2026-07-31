@@ -54,6 +54,10 @@ export interface DevisLinePatch {
   syncByCode?: boolean;
   /** Type de sous-traitance du devis auquel rattacher la ligne (nature = subcontract). */
   stTypeId?: string | null;
+  /** Assiette de ventilation d'une ligne de frais : 'propre' | 'st' | 'all'. */
+  ventilationBase?: string | null;
+  /** false = ligne de FRAIS (non vendable) : son déboursé est ventilé sur les lignes vendables. */
+  vendable?: boolean;
   /** Champs d'achat de la ligne (indépendants de la bibliothèque). */
   uniteAchat?: string | null;
   coeffConversion?: string | number | null;
@@ -424,9 +428,10 @@ export class DevisService {
               designation, unit, quantity, pu, perte, nature,
               source_ouvrage_id, source_resource_id, sort_order, num_custom,
               section_type, vendable,
-              unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement)
+              unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement,
+              st_type_id, ventilation_base)
            VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-                   $18,$19,$20,$21,$22)
+                   $18,$19,$20,$21,$22,$23,$24)
            RETURNING id`,
           [
             tenantId, newVersion.id,
@@ -436,6 +441,7 @@ export class DevisService {
             l['sort_order'], l['num_custom'], l['section_type'], l['vendable'] ?? true,
             l['unite_achat'], l['coeff_conversion'], l['supplier_id'],
             l['ref_fournisseur'], l['conditionnement'],
+            l['st_type_id'], l['ventilation_base'],
           ],
         ))[0];
         idMap.set(l.id, nl.id);
@@ -619,9 +625,10 @@ export class DevisService {
                 designation, unit, quantity, quantity_formula, pu, pu_vente, pu_vente_force,
                 perte, nature, cadence, prix_public, source_ouvrage_id, source_resource_id,
                 sort_order, num_custom, section_type, vendable, base_line_id,
-                unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement)
+                unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement,
+                st_type_id, ventilation_base)
              VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
-                     $24,$25,$26,$27,$28)
+                     $24,$25,$26,$27,$28,$29,$30)
              RETURNING id`,
             [
               tenantId, newVersion.id,
@@ -634,6 +641,7 @@ export class DevisService {
               l['id'], // base_line_id → tracks lineage to previous version
               l['unite_achat'], l['coeff_conversion'], l['supplier_id'],
               l['ref_fournisseur'], l['conditionnement'],
+              l['st_type_id'], l['ventilation_base'],
             ],
           ))[0];
           idMap.set(l['id'] as string, nl.id);
@@ -1057,6 +1065,8 @@ export class DevisService {
            ref_fournisseur = CASE WHEN $17 = '__KEEP__' THEN ref_fournisseur ELSE NULLIF($17, '') END,
            conditionnement = CASE WHEN $18 = '__KEEP__' THEN conditionnement ELSE NULLIF($18, '') END,
            st_type_id = CASE WHEN $19 = '__KEEP__' THEN st_type_id ELSE NULLIF($19, '') END,
+           ventilation_base = CASE WHEN $20 = '__KEEP__' THEN ventilation_base ELSE NULLIF($20, '') END,
+           vendable = COALESCE($21, vendable),
            updated_at = now()
          WHERE id = $1`,
         [
@@ -1079,6 +1089,8 @@ export class DevisService {
           patch.refFournisseur === undefined ? '__KEEP__' : (patch.refFournisseur ?? ''),
           patch.conditionnement === undefined ? '__KEEP__' : (patch.conditionnement ?? ''),
           patch.stTypeId === undefined ? '__KEEP__' : (patch.stTypeId ?? ''),
+          patch.ventilationBase === undefined ? '__KEEP__' : (patch.ventilationBase ?? ''),
+          patch.vendable ?? null,
         ],
       );
 
@@ -1134,14 +1146,14 @@ export class DevisService {
               code, code_analytique, unit, quantity, quantity_formula, pu, perte, nature,
               source_ouvrage_id, source_resource_id, sort_order, vendable, section_type,
               cadence, prix_public, unite_achat, coeff_conversion, supplier_id,
-              ref_fournisseur, conditionnement)
+              ref_fournisseur, conditionnement, st_type_id, ventilation_base)
            SELECT tenant_id, devis_version_id, $2, type, designation,
               ${keepCode ? 'code' : 'NULL::varchar(64)'},
               ${keepCode ? 'code_analytique' : 'NULL::varchar(64)'},
               unit, quantity, quantity_formula, pu, perte, nature,
               source_ouvrage_id, source_resource_id, $3, vendable, section_type,
               cadence, prix_public, unite_achat, coeff_conversion, supplier_id,
-              ref_fournisseur, conditionnement
+              ref_fournisseur, conditionnement, st_type_id, ventilation_base
            FROM devis_line WHERE id = $1
            RETURNING id`,
           [srcId, destParentId, maxRow.n],

@@ -48,6 +48,7 @@ export interface Remise {
 }
 
 export type SectionKind = 'main' | 'option' | 'variante';
+export type VentilationBase = 'propre' | 'st' | 'all';
 
 export interface VenteItemInput {
   id: string;
@@ -59,6 +60,14 @@ export interface VenteItemInput {
    */
   debourseBySt?: Partial<Record<string, Decimal.Value>>;
   vendable: boolean;
+  /**
+   * Base de ventilation d'une ligne de FRAIS (non vendable), à la manière d'ONAYA :
+   *  - 'propre' : les frais ne pèsent que sur la part propre (MO / matériaux / matériel)
+   *  - 'st'     : ils ne pèsent que sur la sous-traitance
+   *  - 'all'    : sur l'ensemble du déboursé (défaut, comportement historique)
+   * Si la base choisie est absente du devis, on retombe sur l'ensemble : aucun frais perdu.
+   */
+  ventilationBase?: VentilationBase;
   /** explicit PV override (memorised, line-level "pv forcé") */
   forcedPv?: Decimal.Value | null;
   /** option/variante are priced but excluded from the contract total; default 'main' */
@@ -264,26 +273,51 @@ export function computeFeuilleDeVente(
   const extras = prepared.filter((p) => p.section !== 'main');
   const vendable = main.filter((p) => p.input.vendable);
 
-  // Per-nature frais totals from non-vendable MAIN items, ventilated pro rata over vendable déboursé.
-  const fraisByNature = zeroBreakdown();
-  const fraisBySt: StBreakdown = {};
-  for (const p of main) {
-    if (!p.input.vendable) {
-      for (const n of NATURES) {
-        fraisByNature[n] = fraisByNature[n].plus(p.breakdown[n]);
-      }
-      // Les frais de sous-traitance restent rattachés à LEUR type : la part ventilée sera
-      // margée aux taux de ce type, pas à ceux de la nature générique.
-      for (const [k, v] of Object.entries(p.st)) {
-        fraisBySt[k] = (fraisBySt[k] ?? new Decimal(0)).plus(v);
-      }
-    }
+  // « Part propre » = MO + matériaux + matériel ; « ST » = sous-traitance (nature + types).
+  const PROPRE: Nature[] = ['labor', 'material', 'equipment'];
+  const basePropre = (p: (typeof prepared)[number]) =>
+    PROPRE.reduce((acc, n) => acc.plus(p.breakdown[n]), new Decimal(0));
+  const baseSt = (p: (typeof prepared)[number]) =>
+    p.breakdown.subcontract.plus(sumSt(p.st));
+  const baseOf = (p: (typeof prepared)[number], b: VentilationBase) =>
+    b === 'propre' ? basePropre(p) : b === 'st' ? baseSt(p) : basePropre(p).plus(baseSt(p));
+
+  // Frais (lignes non vendables) regroupés PAR BASE de ventilation : chaque groupe se répartit
+  // sur sa propre assiette (part propre / ST / tout), au prorata à l'intérieur de celle-ci.
+  const BASES: VentilationBase[] = ['propre', 'st', 'all'];
+  const fraisGroups = new Map<
+    VentilationBase,
+    { byNature: NatureBreakdown; bySt: StBreakdown; total: Decimal }
+  >();
+  for (const b of BASES) {
+    fraisGroups.set(b, { byNature: zeroBreakdown(), bySt: {}, total: new Decimal(0) });
   }
-  const fraisTotal = sum(fraisByNature).plus(sumSt(fraisBySt));
-  const vendableDebourseTotal = vendable.reduce(
-    (acc, p) => acc.plus(sum(p.breakdown)).plus(sumSt(p.st)),
-    new Decimal(0),
-  );
+  for (const p of main) {
+    if (p.input.vendable) continue;
+    const b = p.input.ventilationBase ?? 'all';
+    const g = fraisGroups.get(b)!;
+    for (const n of NATURES) {
+      g.byNature[n] = g.byNature[n].plus(p.breakdown[n]);
+    }
+    // Les frais de sous-traitance restent rattachés à LEUR type : la part ventilée sera
+    // margée aux taux de ce type, pas à ceux de la nature générique.
+    for (const [k, v] of Object.entries(p.st)) {
+      g.bySt[k] = (g.bySt[k] ?? new Decimal(0)).plus(v);
+    }
+    g.total = g.total.plus(sum(p.breakdown)).plus(sumSt(p.st));
+  }
+
+  // Assiette de chaque base ; si elle est vide (ex. frais « ST » mais aucune sous-traitance
+  // vendable), on retombe sur l'assiette totale pour ne perdre aucun frais.
+  const denomOf = new Map<VentilationBase, { denom: Decimal; effective: VentilationBase }>();
+  const denomAll = vendable.reduce((acc, p) => acc.plus(baseOf(p, 'all')), new Decimal(0));
+  for (const b of BASES) {
+    const d = vendable.reduce((acc, p) => acc.plus(baseOf(p, b)), new Decimal(0));
+    denomOf.set(b, d.isZero() ? { denom: denomAll, effective: 'all' } : { denom: d, effective: b });
+  }
+
+  const fraisTotal = BASES.reduce((acc, b) => acc.plus(fraisGroups.get(b)!.total), new Decimal(0));
+  const vendableDebourseTotal = denomAll;
 
   const results: VenteItemResult[] = [];
   let totalDebourse = new Decimal(0);
@@ -292,17 +326,25 @@ export function computeFeuilleDeVente(
 
   for (const p of vendable) {
     const ownDebourse = sum(p.breakdown).plus(sumSt(p.st));
-    const share =
-      vendableDebourseTotal.isZero() || fraisTotal.isZero()
-        ? new Decimal(0)
-        : ownDebourse.dividedBy(vendableDebourseTotal);
     const eff = zeroBreakdown();
     for (const n of NATURES) {
-      eff[n] = p.breakdown[n].plus(fraisByNature[n].times(share));
+      eff[n] = p.breakdown[n];
     }
     const effSt: StBreakdown = { ...p.st };
-    for (const [k, v] of Object.entries(fraisBySt)) {
-      effSt[k] = (effSt[k] ?? new Decimal(0)).plus(v.times(share));
+    // Chaque groupe de frais se répartit au prorata de la part de CETTE ligne dans son assiette.
+    for (const b of BASES) {
+      const g = fraisGroups.get(b)!;
+      if (g.total.isZero()) continue;
+      const { denom, effective } = denomOf.get(b)!;
+      if (denom.isZero()) continue;
+      const share = baseOf(p, effective).dividedBy(denom);
+      if (share.isZero()) continue;
+      for (const n of NATURES) {
+        eff[n] = eff[n].plus(g.byNature[n].times(share));
+      }
+      for (const [k, v] of Object.entries(g.bySt)) {
+        effSt[k] = (effSt[k] ?? new Decimal(0)).plus(v.times(share));
+      }
     }
     const r = priceItem(p.input, eff, effSt, ownDebourse, coeffs, 'main');
     results.push(r);

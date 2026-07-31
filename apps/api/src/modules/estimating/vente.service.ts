@@ -248,6 +248,7 @@ export class VenteService {
       nature: Nature | null;
       resource_nature: Nature | null;
       st_type_id: string | null;
+      ventilation_base: 'propre' | 'st' | 'all' | null;
       quantity: string | null;
       pu: string | null;
       perte: string | null;
@@ -257,7 +258,7 @@ export class VenteService {
       section_type: 'option' | 'variante' | null;
     }> = await em.query(
       `SELECT dl.id, dl.parent_line_id, dl.type, dl.source_ouvrage_id, dl.source_resource_id,
-              dl.nature, r.nature AS resource_nature, dl.st_type_id,
+              dl.nature, r.nature AS resource_nature, dl.st_type_id, dl.ventilation_base,
               dl.quantity, dl.pu, dl.perte, dl.pu_vente, dl.pu_vente_force, dl.vendable, dl.section_type
          FROM devis_line dl
          LEFT JOIN resource r ON r.id = dl.source_resource_id
@@ -402,6 +403,7 @@ export class VenteService {
         vendable: l.vendable,
         debourseByNature,
         debourseBySt,
+        ventilationBase: l.ventilation_base ?? undefined,
         forcedPv,
         section: resolveSection(l),
       });
