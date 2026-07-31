@@ -37,11 +37,13 @@ interface SaleItem {
   id: string; debourse: string; revient: string; pvComputed: string; pv: string;
   forced: boolean; margeBrute: string; margeNette: string; ventilatedFrais: string;
   debourseByNature?: Record<'labor' | 'material' | 'equipment' | 'subcontract', string>;
+  debourseBySt?: Record<string, string>;
 }
 interface SaleSheet {
   items: SaleItem[]; totalDebourse: string; totalRevient: string; pvHorsFrais: string;
   fraisAnnexes: string; pvDevis: string; remise: string; totalPvHt: string;
   margeBrute: string; margeNette: string; coeffGlobalReel: string; tva: string; totalTtc: string;
+  pvImposeApplied?: boolean; coeffAjustement?: string;
 }
 type Nat = 'labor' | 'material' | 'equipment' | 'subcontract';
 const NATURE_LABELS: Record<Nat, string> = {
@@ -715,6 +717,123 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                   </form>
                 </div>
               )}
+
+              {/* B.4 — récapitulatif de la feuille de vente : déboursé → revient → PV, par nature
+                  ET par type de sous-traitance, avec marges et coefficients réels. */}
+              {tab === 'coeffs' && sale.data && (() => {
+                const items = sale.data.items ?? [];
+                const main = items.filter((i) => !('section' in i) || (i as { section?: string }).section === 'main');
+                const nats: Nat[] = ['labor', 'material', 'equipment', 'subcontract'];
+                const debParNature = (n: Nat) =>
+                  main.reduce((acc, i) => acc + Number(i.debourseByNature?.[n] ?? 0), 0);
+                // types de ST : agrégés depuis les lignes (clé = id du type déclaré sur le devis)
+                const stIds = Array.from(new Set(main.flatMap((i) => Object.keys(i.debourseBySt ?? {}))));
+                const debParSt = (id: string) =>
+                  main.reduce((acc, i) => acc + Number(i.debourseBySt?.[id] ?? 0), 0);
+                const labelSt = (id: string) => {
+                  const t = stTypes.find((x) => x.id === id);
+                  return t ? `${t.code ? t.code + ' — ' : ''}${t.label}` : `Sous-traitance « ${id} »`;
+                };
+                const cascade = (deb: number, fg: string, ben: string) => {
+                  const revient = deb * (1 + Number(fg) / 100);
+                  return { revient, pv: revient * (1 + Number(ben) / 100) };
+                };
+                const rows: { label: string; deb: number; fg: string; ben: string }[] = [
+                  ...nats
+                    .filter((n) => n !== 'subcontract' || debParNature(n) > 0.005)
+                    .map((n) => ({ label: NATURE_LABELS[n], deb: debParNature(n), fg: coef[n].fg, ben: coef[n].ben })),
+                  ...stIds.map((id) => {
+                    const t = stTypes.find((x) => x.id === id);
+                    return {
+                      label: labelSt(id), deb: debParSt(id),
+                      fg: t?.tauxFg ?? coef.subcontract.fg, ben: t?.tauxBenefice ?? coef.subcontract.ben,
+                    };
+                  }),
+                ].filter((r) => r.deb > 0.005);
+                // Les lignes par nature sont indicatives (recalculées) ; le TOTAL reprend les
+                // chiffres du moteur, seuls faisant foi (arrondis par ligne, PV imposé…).
+                const totDeb = Number(sale.data.totalDebourse);
+                const totRev = Number(sale.data.totalRevient);
+                const totPv = Number(sale.data.pvHorsFrais);
+                return (
+                  <div className="card" style={{ marginTop: 16 }}>
+                    <h2 style={{ margin: 0 }}>Feuille de vente — récapitulatif</h2>
+                    <p className="muted" style={{ marginTop: 4 }}>
+                      Déboursé → prix de revient → prix de vente, par nature et par type de sous-traitance.
+                      Les frais de chantier sont déjà ventilés dans ces montants.
+                    </p>
+                    <table className="grid" style={{ marginTop: 8 }}>
+                      <thead>
+                        <tr>
+                          <th>Poste</th>
+                          <th style={{ textAlign: 'right' }}>Déboursé</th>
+                          <th style={{ textAlign: 'right' }}>FG %</th>
+                          <th style={{ textAlign: 'right' }}>Prix de revient</th>
+                          <th style={{ textAlign: 'right' }}>Bén. %</th>
+                          <th style={{ textAlign: 'right' }}>Prix de vente</th>
+                          <th style={{ textAlign: 'right' }}>Coeff.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.length === 0 && (
+                          <tr><td colSpan={7} className="muted">Aucun déboursé — construisez le devis dans l&apos;onglet Étude de prix.</td></tr>
+                        )}
+                        {rows.map((r) => {
+                          const c = cascade(r.deb, r.fg, r.ben);
+                          return (
+                            <tr key={r.label}>
+                              <td>{r.label}</td>
+                              <td style={{ textAlign: 'right' }}>{e(r.deb)}</td>
+                              <td style={{ textAlign: 'right' }} className="muted">{r.fg}</td>
+                              <td style={{ textAlign: 'right' }}>{e(c.revient)}</td>
+                              <td style={{ textAlign: 'right' }} className="muted">{r.ben}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 600 }}>{e(c.pv)}</td>
+                              <td style={{ textAlign: 'right' }} className="muted">
+                                {r.deb > 0 ? (c.pv / r.deb).toFixed(3) : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {rows.length > 0 && (
+                          <tr style={{ fontWeight: 700, borderTop: '2px solid var(--border)' }}>
+                            <td>Total</td>
+                            <td style={{ textAlign: 'right' }}>{e(totDeb)}</td>
+                            <td />
+                            <td style={{ textAlign: 'right' }}>{e(totRev)}</td>
+                            <td />
+                            <td style={{ textAlign: 'right' }}>{e(totPv)}</td>
+                            <td style={{ textAlign: 'right' }}>{totDeb > 0 ? (totPv / totDeb).toFixed(3) : '—'}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginTop: 14 }}>
+                      {[
+                        { l: 'PV hors frais', v: e(sale.data.pvHorsFrais) },
+                        { l: 'Frais annexes', v: e(sale.data.fraisAnnexes) },
+                        { l: 'Remise', v: e(sale.data.remise) },
+                        { l: 'Total HT', v: e(sale.data.totalPvHt) },
+                        { l: 'Marge brute', v: `${e(sale.data.margeBrute)}${marginPct(sale.data.margeBrute, sale.data.totalPvHt)}` },
+                        { l: 'Marge nette', v: `${e(sale.data.margeNette)}${marginPct(sale.data.margeNette, sale.data.totalPvHt)}` },
+                      ].map((k) => (
+                        <div key={k.l} style={{ background: 'var(--surface)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
+                          <div className="label" style={{ marginBottom: 2 }}>{k.l}</div>
+                          <div style={{ fontWeight: 700, fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{k.v}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {sale.data.pvImposeApplied && (
+                      <p style={{ marginTop: 12, padding: '8px 12px', background: '#fff7ed', border: '1px solid var(--accent)', borderRadius: 6, fontSize: 12 }}>
+                        <strong>PV imposé appliqué</strong> — les lignes non forcées ont été ajustées d&apos;un
+                        coefficient <strong>×{sale.data.coeffAjustement}</strong> pour atteindre le total demandé.
+                        Le déboursé et le prix de revient sont inchangés : seule la marge s&apos;ajuste.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {tab === 'coeffs' && (
                 <div className="card" style={{ marginTop: 16 }}>

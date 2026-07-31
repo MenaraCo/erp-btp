@@ -327,6 +327,38 @@ export function Montage({
         </Fragment>
       ))}
       <DropZone beforeLineId={null} parentLineId={null} dragCtx={dragCtx} />
+
+      {/* Pied de tableau : total général, aligné sur la grille (déboursé HT ou PV HT). */}
+      {roots.length > 0 && (() => {
+        const total = roots.reduce((sum, l) => sum + valueOf(l), 0);
+        // En déboursé, on rappelle la répartition travaux directs / sous-traitance.
+        let directs = 0;
+        let st = 0;
+        if (!vente && natureById) {
+          for (const [, nb] of natureById) {
+            directs += Number(nb.labor) + Number(nb.material) + Number(nb.equipment);
+            st += Number(nb.subcontract);
+          }
+        }
+        return (
+          <div className="sd-row sd-total" style={{ ...(vente ? SD_GRID_VENTE : SD_GRID), padding: '0 6px', marginTop: 4 }}>
+            <span /><span /><span />
+            <span style={{ gridColumn: '4 / 11', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', fontSize: 11 }}>
+              {vente ? 'Total prix de vente HT' : 'Total déboursé HT'}
+              {!vente && (directs > 0 || st > 0) && (
+                <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, opacity: 0.75, marginLeft: 10, fontSize: 10 }}>
+                  travaux directs {fmtEuro(directs, decimals)} · sous-traitance {fmtEuro(st, decimals)}
+                </span>
+              )}
+            </span>
+            <span style={{ justifyContent: 'flex-end', fontWeight: 800, fontVariantNumeric: 'tabular-nums', paddingRight: 4 }}>
+              {fmtEuro(total, decimals)}
+            </span>
+            {vente && <span />}
+          </div>
+        );
+      })()}
+
       {!readOnly && (
         <button className="btn" style={{ marginTop: 8 }}
           onClick={() => addLine.mutate({ type: 'titre', designation: 'Nouveau titre', sortOrder: roots.reduce((m, r) => Math.max(m, r.sort_order), -1) + 1 })}>

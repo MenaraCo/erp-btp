@@ -894,3 +894,14 @@ table.grid tbody tr:hover {
 }
 .sd-row:hover .sd-actions-col,
 .sd-title:hover .sd-actions-col { opacity: 1; }
+
+/* Pied de tableau du montage : total général, visuellement détaché des lignes. */
+.sd-row.sd-total {
+  background: var(--primary);
+  color: #fff;
+  border-radius: 4px;
+  border-bottom: none;
+  min-height: 28px;
+}
+.sd-row.sd-total > * { border-right: none !important; }
+.sd-row.sd-total:hover { background: var(--primary); }
