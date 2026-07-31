@@ -59,6 +59,12 @@ const SD_GRID: React.CSSProperties = {
   alignItems: 'stretch',
   columnGap: 0,
 };
+/** En mode VENTE, le P.U. est saisissable : les actions prennent leur PROPRE colonne (au lieu du
+ * bandeau flottant) pour ne jamais recouvrir la cellule de prix. */
+const SD_GRID_VENTE: React.CSSProperties = {
+  ...SD_GRID,
+  gridTemplateColumns: '14px 18px 66px minmax(140px,1fr) 46px 38px 48px 42px 64px 58px 78px 124px',
+};
 const CELL_CTR: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center' };
 
 /** Entrée dans une cellule → saute à la même colonne de la ligne suivante DE MÊME NIVEAU
@@ -468,7 +474,7 @@ function Node({
           opacity: isDragging ? 0.4 : 1,
         }}
       >
-        <div className={`title-row title-row-${depth} sd-title`} style={{ ...SD_GRID, padding: '3px 6px', background: ls.bg, color: ls.color, borderRadius: 4 }}>
+        <div className={`title-row title-row-${depth} sd-title`} style={{ ...(vente ? SD_GRID_VENTE : SD_GRID), padding: '3px 6px', background: ls.bg, color: ls.color, borderRadius: 4 }}>
           <span style={CELL_CTR}>{!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} crossPanel={{ kind: line.type as 'titre' | 'sous_titre', id: line.id, code: line.code ?? '', label: line.designation, unit: null }} />}</span>
           <span />
           <span style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
@@ -483,7 +489,7 @@ function Node({
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })}
             style={{ gridColumn: '4 / 11', fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', width: '100%', minWidth: 0, background: 'transparent', color: ls.color }} />
           <span style={{ display: 'flex', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: ls.color, paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
-          <span className="sd-actions" style={{ background: `linear-gradient(90deg, transparent, ${ls.bg} 38%, ${ls.bg})` }}>
+          <span className={vente ? 'sd-actions-col' : 'sd-actions'} style={vente ? undefined : { background: `linear-gradient(90deg, transparent, ${ls.bg} 38%, ${ls.bg})` }}>
             {!readOnly && (
               <>
                 <SectionActions parentId={line.id} childCount={kids.length} depth={depth} addLine={addLine} headerColor={ls.color} />
@@ -547,7 +553,7 @@ function Node({
           outline: isLibDrop ? '2px dashed var(--accent)' : undefined,
           opacity: isDragging ? 0.4 : 1,
         }}>
-        <div className="sd-row" style={{ ...SD_GRID, padding: '0 6px', background: '#f4f6fa', fontWeight: 500 }}>
+        <div className="sd-row" style={{ ...(vente ? SD_GRID_VENTE : SD_GRID), padding: '0 6px', background: '#f4f6fa', fontWeight: 500 }}>
           <span style={CELL_CTR}>{!readOnly && <DragHandle lineId={line.id} dragCtx={dragCtx} crossPanel={{ kind: 'ouvrage', id: line.id, code: line.code ?? '', label: line.designation, unit: line.unit, sourceOuvrageId: line.source_ouvrage_id }} />}</span>
           <span style={CELL_CTR}>{!vente && <TypeBadge type="ouvrage" />}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
@@ -569,7 +575,7 @@ function Node({
                 onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
             : <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12, paddingRight: 4 }}>{(Number(line.quantity) || 0) > 0 ? fmtEuro(valueOf(line) / (Number(line.quantity) || 1), decimals) : ''}</span>}
           <span style={{ width: '100%', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
-          <span className="sd-actions" style={{ background: 'linear-gradient(90deg, transparent, #f4f6fa 38%, #f4f6fa)' }}>
+          <span className={vente ? 'sd-actions-col' : 'sd-actions'} style={vente ? undefined : { background: 'linear-gradient(90deg, transparent, #f4f6fa 38%, #f4f6fa)' }}>
             <button type="button" className="btn-ghost" title="Informations / modifier" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
             {!readOnly && (
               <>

@@ -859,7 +859,7 @@ table.grid tbody tr:hover {
 
 /* Lignes de la grille = lignes de tableau : filets fins entre colonnes + entre lignes. */
 .sd-row, .sd-head { position: relative; border-bottom: 1px solid #edf1f6; }
-.sd-row > *:not(.sd-actions), .sd-head > *:not(.sd-actions) {
+.sd-row > *:not(.sd-actions):not(.sd-actions-col), .sd-head > *:not(.sd-actions):not(.sd-actions-col) {
   border-right: 1px solid #f2f5f9;
   min-height: 24px;
   display: flex; align-items: center;
@@ -883,3 +883,14 @@ table.grid tbody tr:hover {
 }
 .sd-row:hover .sd-actions,
 .sd-title:hover .sd-actions { opacity: 1; pointer-events: auto; }
+
+/* Variante « colonne dédiée » (mode Devis client) : les actions occupent leur propre cellule
+ * de la grille — elles ne recouvrent donc JAMAIS le P.U. de vente, qui reste saisissable.
+ * Discrètes au repos, pleines au survol de la ligne. */
+.sd-actions-col {
+  display: flex; align-items: center; justify-content: flex-end; gap: 1px;
+  min-height: 24px; overflow: visible; padding-left: 6px;
+  opacity: 0.35; transition: opacity .12s ease;
+}
+.sd-row:hover .sd-actions-col,
+.sd-title:hover .sd-actions-col { opacity: 1; }
