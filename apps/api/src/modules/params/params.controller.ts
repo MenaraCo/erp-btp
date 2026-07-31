@@ -3,11 +3,15 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
+  NotFoundException,
   Param,
   Patch,
   Post,
   Put,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import {
   CodeInput,
@@ -44,6 +48,32 @@ export class ParamsController {
   @RequiresPermission('estimating.devis.write')
   updateCompany(@Param('id') id: string, @Body() body: CompanyInfoInput) {
     return this.params.updateCompany(id, body);
+  }
+
+  /* ---- Logo d'entreprise (éditions) ---- */
+
+  @Get('company/logo')
+  @RequiresPermission('estimating.devis.read')
+  @Header('Cache-Control', 'no-cache')
+  async getCompanyLogo(@Res() res: Response) {
+    const logo = await this.params.getCompanyLogo();
+    if (!logo) {
+      throw new NotFoundException('Aucun logo enregistré.');
+    }
+    res.setHeader('Content-Type', logo.mime);
+    res.send(logo.data);
+  }
+
+  @Put('company/:id/logo')
+  @RequiresPermission('estimating.devis.write')
+  setCompanyLogo(@Param('id') id: string, @Body() body: { data: string; mime: string }) {
+    return this.params.setCompanyLogo(id, body?.data, body?.mime);
+  }
+
+  @Delete('company/:id/logo')
+  @RequiresPermission('estimating.devis.write')
+  deleteCompanyLogo(@Param('id') id: string) {
+    return this.params.deleteCompanyLogo(id);
   }
 
   /* ===================== PRÉFÉRENCES ===================== */

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
@@ -285,8 +285,66 @@ export class ParamsService {
          ON CONFLICT (tenant_id, code) DO NOTHING`,
         [tenantId],
       );
-      const rows = await em.query(`SELECT * FROM company ORDER BY code ASC LIMIT 1`);
+      // On exclut logo_data (base64, potentiellement lourd) : il a ses propres endpoints.
+      const rows = await em.query(
+        `SELECT id, tenant_id, code, name, legal_form, siren, siret, vat_number, vat_intra,
+                rcs, capital, address, postal_code, city, phone, email,
+                logo_mime, (logo_data IS NOT NULL) AS has_logo, created_at, updated_at
+           FROM company ORDER BY code ASC LIMIT 1`,
+      );
       return rows[0] ?? null;
+    });
+  }
+
+  /** Logo d'entreprise pour les éditions — renvoie le binaire décodé, ou null. */
+  async getCompanyLogo(): Promise<{ data: Buffer; mime: string } | null> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT logo_data, logo_mime FROM company
+          WHERE logo_data IS NOT NULL ORDER BY code ASC LIMIT 1`,
+      );
+      if (rows.length === 0) return null;
+      return {
+        data: Buffer.from(rows[0].logo_data, 'base64'),
+        mime: rows[0].logo_mime ?? 'image/png',
+      };
+    });
+  }
+
+  /** Enregistre le logo (base64). PNG/JPEG uniquement, 1 Mo maximum. */
+  async setCompanyLogo(id: string, data: string, mime: string) {
+    const tenantId = this.context.requireTenantId();
+    const clean = (data ?? '').replace(/^data:[^;]+;base64,/, '');
+    if (!clean) {
+      throw new BadRequestException('Image manquante.');
+    }
+    if (!['image/png', 'image/jpeg'].includes(mime)) {
+      throw new BadRequestException('Format non supporté : utilisez un PNG ou un JPEG.');
+    }
+    // 4 caractères base64 = 3 octets ; on borne à 1 Mo pour rester raisonnable en base.
+    if (Math.floor((clean.length * 3) / 4) > 1024 * 1024) {
+      throw new BadRequestException('Logo trop volumineux (1 Mo maximum).');
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertExists(em, 'company', id);
+      await em.query(
+        `UPDATE company SET logo_data = $2, logo_mime = $3, updated_at = now() WHERE id = $1`,
+        [id, clean, mime],
+      );
+      return { ok: true };
+    });
+  }
+
+  async deleteCompanyLogo(id: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertExists(em, 'company', id);
+      await em.query(
+        `UPDATE company SET logo_data = NULL, logo_mime = NULL, updated_at = now() WHERE id = $1`,
+        [id],
+      );
+      return { ok: true };
     });
   }
 

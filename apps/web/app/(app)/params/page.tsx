@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2, Save, ChevronUp } from 'lucide-react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useTheme, type AppTheme } from '@/lib/theme';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
@@ -76,7 +76,7 @@ const NAT_OPTS = [
   { v: 'subcontract', l: 'Sous-traitance' },
 ];
 const natLabel = (v: string) => NAT_OPTS.find((n) => n.v === v)?.l ?? v;
-interface Company { id: string; code: string; name: string; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
+interface Company { id: string; code: string; name: string; has_logo?: boolean; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
 interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
 /* ─────────── tabs ─────────── */
@@ -125,6 +125,89 @@ export default function ParamsPage() {
   );
 }
 
+/* ─────────── Logo d'entreprise (éditions PDF) ─────────── */
+
+function CompanyLogo({ companyId, hasLogo, token }: { companyId: string; hasLogo: boolean; token: string }) {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Cache-buster : l'URL doit changer après un remplacement, sinon le navigateur garde l'ancien.
+  const [stamp, setStamp] = useState(() => Date.now());
+
+  const upload = async (file: File) => {
+    setErr(null);
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setErr('Utilisez un fichier PNG ou JPEG.'); return;
+    }
+    if (file.size > 1024 * 1024) {
+      setErr('Logo trop volumineux (1 Mo maximum).'); return;
+    }
+    setBusy(true);
+    try {
+      const data = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1] ?? '');
+        r.onerror = () => reject(new Error('Lecture impossible'));
+        r.readAsDataURL(file);
+      });
+      await apiFetch(`/params/company/${companyId}/logo`, { method: 'PUT', body: { data, mime: file.type }, token });
+      setStamp(Date.now());
+      qc.invalidateQueries({ queryKey: ['params-company'] });
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Envoi impossible.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await apiFetch(`/params/company/${companyId}/logo`, { method: 'DELETE', token });
+      qc.invalidateQueries({ queryKey: ['params-company'] });
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Suppression impossible.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
+      <div style={{
+        width: 150, height: 64, border: '1px dashed var(--border-strong)', borderRadius: 6,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+        background: 'var(--surface)', flexShrink: 0,
+      }}>
+        {hasLogo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`/api-proxy/params/company/logo?v=${stamp}`} alt="Logo de l'entreprise"
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+        ) : (
+          <span className="muted" style={{ fontSize: 10 }}>Aucun logo</span>
+        )}
+      </div>
+      <div>
+        <div className="label" style={{ marginBottom: 4 }}>Logo (éditions PDF)</div>
+        <p className="muted" style={{ fontSize: 11, margin: '0 0 8px' }}>
+          Affiché en haut de vos devis. PNG ou JPEG, 1 Mo maximum.
+        </p>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label className="btn-secondary" style={{ cursor: busy ? 'wait' : 'pointer' }}>
+            {busy ? '…' : hasLogo ? 'Remplacer' : 'Choisir un fichier'}
+            <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={busy}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} />
+          </label>
+          {hasLogo && (
+            <button type="button" className="btn-ghost" disabled={busy} onClick={remove}>Retirer</button>
+          )}
+        </div>
+        {err && <p style={{ color: 'var(--danger)', fontSize: 11, margin: '6px 0 0' }}>{err}</p>}
+      </div>
+    </div>
+  );
+}
+
 /* ─────────── Entreprise ─────────── */
 
 function TabEntreprise({ token }: { token: string }) {
@@ -149,6 +232,7 @@ function TabEntreprise({ token }: { token: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <Card title="Votre entreprise">
+        <CompanyLogo companyId={company.id} hasLogo={Boolean(company.has_logo)} token={token} />
         <div style={{ marginBottom: 8, maxWidth: 460 }}>
           <CompanySearch
             onSelect={(c) => setForm((prev) => ({
