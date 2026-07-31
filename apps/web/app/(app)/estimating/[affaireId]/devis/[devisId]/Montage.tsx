@@ -642,7 +642,12 @@ function Node({
                 <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500, paddingRight: 4 }}>{fmtEuro(montant, decimals)}</span>
                 <span className="sd-actions" style={{ background: 'linear-gradient(90deg, transparent, #f8fafc 38%, #f8fafc)' }}>
                   <button type="button" className="btn-ghost" title="Modifier la ressource (nature, code, prix…)" onClick={() => onShowInfo(c)} style={infoBtn}>ⓘ</button>
-                  {!readOnly && <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>}
+                  {!readOnly && (
+                    <>
+                      <button title="Copier / Déplacer" onClick={() => onCopyMove(c)} style={{ ...togBtn(false, '#94a3b8'), fontSize: 13 }}>⧉</button>
+                      <button className="btn-ghost" title="Supprimer" onClick={() => deleteLine.mutate(c.id)}>✕</button>
+                    </>
+                  )}
                 </span>
               </div>
             </Fragment>
@@ -1312,8 +1317,10 @@ function CopyMoveModal({ source, allLines, onClose, onDuplicate, onMove }: {
   };
   collectSubtree(source.id);
 
+  // Une ressource peut être copiée/déplacée dans un autre OUVRAGE (sous-détail) mais aussi
+  // directement sous un TITRE / SOUS-TITRE (ressource posée au niveau du corps du devis).
   const validParentTypes: string[] =
-    source.type === 'ressource' ? ['ouvrage'] :
+    source.type === 'ressource' ? ['ouvrage', 'titre', 'sous_titre'] :
     source.type === 'ouvrage' ? ['titre', 'sous_titre'] :
     ['titre', 'sous_titre'];
 
