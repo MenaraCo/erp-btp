@@ -597,7 +597,12 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                   <p className="muted" style={{ marginTop: 0 }}>
                     Déboursé × (1 + FG %) = prix de revient, puis × (1 + Bénéfice %) = prix de vente.
                   </p>
-                  <form onSubmit={(ev) => { ev.preventDefault(); setErr(null); setSale.mutate(); }}>
+                  <form onSubmit={(ev) => {
+                    ev.preventDefault(); setErr(null);
+                    // Une seule validation pour toute la feuille : coefficients + frais annexes.
+                    setSale.mutate();
+                    setFraisAnnexes.mutate();
+                  }}>
                     <table className="grid" style={{ marginBottom: 12 }}>
                       <thead><tr><th>Nature</th><th style={{ textAlign: 'right' }}>FG %</th><th style={{ textAlign: 'right' }}>Bénéfice %</th><th style={{ textAlign: 'right' }}>Coeff.</th></tr></thead>
                       <tbody>
@@ -703,6 +708,48 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                       le déboursé et le prix de revient ne changent pas, seule la marge s&apos;ajuste.
                     </p>
 
+                    <div className="form-section-title" style={{ marginTop: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Frais annexes</span>
+                      <button className="btn-secondary" type="button" disabled={!isLatest}
+                        style={{ textTransform: 'none', letterSpacing: 0 }}
+                        onClick={() => setFrais([...frais, { designation: '', type: 'pct', valeur: '0' }])}>+ Poste</button>
+                    </div>
+                    {frais.length === 0 ? (
+                      <p className="muted" style={{ marginTop: 0, marginBottom: 12, fontSize: 12 }}>
+                        Aucun poste. Ex : compte prorata (% du PV) ou installation de chantier (montant fixe).
+                      </p>
+                    ) : (
+                      <>
+                        <table className="grid" style={{ marginBottom: 6 }}>
+                          <thead><tr><th>Désignation</th><th style={{ width: 130 }}>Type</th><th style={{ textAlign: 'right', width: 110 }}>Valeur</th><th style={{ width: 40 }} /></tr></thead>
+                          <tbody>
+                            {frais.map((f, i) => (
+                              <tr key={i}>
+                                <td><input style={{ width: '100%' }} value={f.designation}
+                                  onChange={(ev) => setFrais(frais.map((x, j) => j === i ? { ...x, designation: ev.target.value } : x))} /></td>
+                                <td>
+                                  <select value={f.type} onChange={(ev) => setFrais(frais.map((x, j) => j === i ? { ...x, type: ev.target.value as 'pct' | 'fixe' } : x))}>
+                                    <option value="pct">% du PV</option><option value="fixe">Fixe</option>
+                                  </select>
+                                </td>
+                                <td style={{ textAlign: 'right' }}><input style={{ width: 80, textAlign: 'right' }} value={f.valeur}
+                                  onChange={(ev) => setFrais(frais.map((x, j) => j === i ? { ...x, valeur: ev.target.value } : x))} /></td>
+                                <td style={{ textAlign: 'right' }}>
+                                  <button className="btn-ghost" type="button" title="Retirer ce poste"
+                                    onClick={() => setFrais(frais.filter((_, j) => j !== i))}>✕</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {sale.data && (
+                          <p className="muted" style={{ marginTop: 0, marginBottom: 12, fontSize: 11 }}>
+                            Total frais appliqué : <strong>{e(sale.data.fraisAnnexes)}</strong>
+                          </p>
+                        )}
+                      </>
+                    )}
+
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                       <div className="field" style={{ marginBottom: 0 }}>
                         <label>TVA</label>
@@ -712,7 +759,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                           ))}
                         </select>
                       </div>
-                      <button className="btn" type="submit" disabled={setSale.isPending || !isLatest}>Appliquer</button>
+                      <button className="btn" type="submit" disabled={setSale.isPending || setFraisAnnexes.isPending || !isLatest}>Appliquer</button>
                     </div>
                   </form>
                 </div>
@@ -834,42 +881,6 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                   </div>
                 );
               })()}
-
-              {tab === 'coeffs' && (
-                <div className="card" style={{ marginTop: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h2 style={{ margin: 0 }}>Frais annexes</h2>
-                    <button className="btn" type="button" disabled={!isLatest} onClick={() => setFrais([...frais, { designation: '', type: 'pct', valeur: '0' }])}>+ Poste</button>
-                  </div>
-                  {frais.length === 0 ? (
-                    <p className="muted">Aucun poste. Ex : compte prorata (% du PV) ou installation de chantier (montant fixe).</p>
-                  ) : (
-                    <form onSubmit={(ev) => { ev.preventDefault(); setErr(null); setFraisAnnexes.mutate(); }}>
-                      <table className="grid" style={{ marginBottom: 12 }}>
-                        <thead><tr><th>Désignation</th><th>Type</th><th style={{ textAlign: 'right' }}>Valeur</th><th /></tr></thead>
-                        <tbody>
-                          {frais.map((f, i) => (
-                            <tr key={i}>
-                              <td><input style={{ width: '100%' }} value={f.designation}
-                                onChange={(ev) => setFrais(frais.map((x, j) => j === i ? { ...x, designation: ev.target.value } : x))} /></td>
-                              <td>
-                                <select value={f.type} onChange={(ev) => setFrais(frais.map((x, j) => j === i ? { ...x, type: ev.target.value as 'pct' | 'fixe' } : x))}>
-                                  <option value="pct">% du PV</option><option value="fixe">Fixe</option>
-                                </select>
-                              </td>
-                              <td style={{ textAlign: 'right' }}><input style={{ width: 80, textAlign: 'right' }} value={f.valeur}
-                                onChange={(ev) => setFrais(frais.map((x, j) => j === i ? { ...x, valeur: ev.target.value } : x))} /></td>
-                              <td><button className="btn" type="button" onClick={() => setFrais(frais.filter((_, j) => j !== i))}>✕</button></td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <button className="btn" type="submit" disabled={setFraisAnnexes.isPending}>Enregistrer les frais</button>
-                      {sale.data && <span className="muted" style={{ marginLeft: 12 }}>Total frais appliqué : {e(sale.data.fraisAnnexes)}</span>}
-                    </form>
-                  )}
-                </div>
-              )}
 
               {tab === 'client' && (
                 <div className="card" style={{ marginTop: 16 }}>
