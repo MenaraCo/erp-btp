@@ -38,6 +38,10 @@ export interface SaleSheetInput {
   byNature: Record<Nature, { tauxFg: number | string; tauxBenefice: number | string }>;
   /** Types de sous-traitance définis POUR CE DEVIS (chacun ses FG/bénéfice). */
   stTypes?: StTypeInput[];
+  /** Arrondi commercial du PV de ligne : pas (0 = aucun) et sens. */
+  arrondi?: { pas: number | string; mode?: 'proche' | 'sup' | 'inf' } | null;
+  /** PV total imposé (hors frais annexes et remise) ; null = pas d'imposition. */
+  pvImpose?: number | string | null;
   remise?: { type: FraisType; valeur: number | string } | null;
   tvaRate?: number | string;
 }
@@ -90,14 +94,18 @@ export class VenteService {
       return (
         await em.query(
           `INSERT INTO sale_sheet
-             (tenant_id, devis_version_id, coefficients, st_types, tva_rate, remise_type, remise_valeur)
-           VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7)
+             (tenant_id, devis_version_id, coefficients, st_types, tva_rate, remise_type,
+              remise_valeur, arrondi_pas, arrondi_mode, pv_impose)
+           VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8, $9, $10)
            ON CONFLICT (devis_version_id)
            DO UPDATE SET coefficients = EXCLUDED.coefficients,
                          st_types = EXCLUDED.st_types,
                          tva_rate = EXCLUDED.tva_rate,
                          remise_type = EXCLUDED.remise_type,
                          remise_valeur = EXCLUDED.remise_valeur,
+                         arrondi_pas = EXCLUDED.arrondi_pas,
+                         arrondi_mode = EXCLUDED.arrondi_mode,
+                         pv_impose = EXCLUDED.pv_impose,
                          updated_at = now()
            RETURNING *`,
           [
@@ -108,6 +116,9 @@ export class VenteService {
             String(input.tvaRate ?? 0.2),
             remiseType,
             String(remiseValeur),
+            String(input.arrondi?.pas ?? 0),
+            input.arrondi?.mode ?? 'proche',
+            input.pvImpose != null && String(input.pvImpose) !== '' ? String(input.pvImpose) : null,
           ],
         )
       )[0];
@@ -166,13 +177,15 @@ export class VenteService {
         [versionId],
       );
       const rows = await em.query(
-        `SELECT coefficients, st_types, tva_rate, remise_type, remise_valeur
+        `SELECT coefficients, st_types, tva_rate, remise_type, remise_valeur,
+                arrondi_pas, arrondi_mode, pv_impose
            FROM sale_sheet WHERE devis_version_id = $1`,
         [versionId],
       );
       if (rows.length === 0) {
         return {
-          configured: false, byNature: null, stTypes: [], remise: null, tvaRate: null, fraisAnnexes,
+          configured: false, byNature: null, stTypes: [], remise: null, tvaRate: null,
+          arrondi: null, pvImpose: null, fraisAnnexes,
         };
       }
       const c = rows[0];
@@ -185,6 +198,8 @@ export class VenteService {
         configured: true,
         byNature,
         stTypes: c.st_types ?? [],
+        arrondi: { pas: String(c.arrondi_pas ?? 0), mode: c.arrondi_mode ?? 'proche' },
+        pvImpose: c.pv_impose != null ? String(c.pv_impose) : null,
         remise: { type: c.remise_type as FraisType, valeur: String(c.remise_valeur) },
         tvaRate: String(c.tva_rate),
         fraisAnnexes,
@@ -429,7 +444,8 @@ export class VenteService {
     );
 
     const rows = await em.query(
-      `SELECT coefficients, st_types, tva_rate, remise_type, remise_valeur
+      `SELECT coefficients, st_types, tva_rate, remise_type, remise_valeur,
+              arrondi_pas, arrondi_mode, pv_impose
          FROM sale_sheet WHERE devis_version_id = $1`,
       [versionId],
     );
@@ -456,6 +472,11 @@ export class VenteService {
     return {
       byNature,
       stRates,
+      arrondi:
+        c.arrondi_pas != null && Number(c.arrondi_pas) > 0
+          ? { pas: String(c.arrondi_pas), mode: (c.arrondi_mode ?? 'proche') as 'proche' | 'sup' | 'inf' }
+          : null,
+      pvImpose: c.pv_impose != null ? String(c.pv_impose) : null,
       fraisAnnexes,
       remise: remiseValeur.isZero()
         ? null

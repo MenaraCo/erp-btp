@@ -49,6 +49,13 @@ export interface Remise {
 
 export type SectionKind = 'main' | 'option' | 'variante';
 export type VentilationBase = 'propre' | 'st' | 'all';
+export type ArrondiMode = 'proche' | 'sup' | 'inf';
+
+/** Arrondi commercial du PV de ligne : pas (0.01, 1, 5, 10…) et sens. */
+export interface ArrondiRule {
+  pas: Decimal.Value;
+  mode?: ArrondiMode;
+}
 
 export interface VenteItemInput {
   id: string;
@@ -80,6 +87,13 @@ export interface SaleCoefficients {
   stRates?: Record<string, NatureSaleRate>;
   fraisAnnexes?: FraisAnnexe[];
   remise?: Remise | null;
+  /** Arrondi appliqué au PV CALCULÉ de chaque ligne (un PV forcé reste tel quel). */
+  arrondi?: ArrondiRule | null;
+  /**
+   * PV total imposé (hors frais annexes et remise). Les lignes NON forcées sont ajustées au
+   * prorata pour atteindre ce total ; les lignes au PV forcé sont conservées telles quelles.
+   */
+  pvImpose?: Decimal.Value | null;
   tvaRate: Decimal.Value;
 }
 
@@ -119,6 +133,10 @@ export interface VenteResult {
   margeBrute: string;
   margeNette: string;
   coeffGlobalReel: string;
+  /** true si un PV imposé a pu être appliqué */
+  pvImposeApplied?: boolean;
+  /** coefficient d'ajustement appliqué aux lignes non forcées pour atteindre le PV imposé */
+  coeffAjustement?: string;
   /** PV des options (hors total principal) */
   optionsPvHt: string;
   /** PV des variantes (hors total principal) */
@@ -168,6 +186,17 @@ function sumSt(b: StBreakdown): Decimal {
 /** Taux applicables à un type de ST, avec repli sur la nature « sous-traitance ». */
 function stRateOf(coeffs: SaleCoefficients, typeId: string): NatureSaleRate {
   return coeffs.stRates?.[typeId] ?? coeffs.byNature.subcontract ?? { tauxFg: 0, tauxBenefice: 0 };
+}
+
+/** Arrondit une valeur au pas demandé (0 ou absent = pas d'arrondi). */
+function applyArrondi(value: Decimal, rule: ArrondiRule | null | undefined): Decimal {
+  if (!rule) return value;
+  const pas = new Decimal(rule.pas ?? 0);
+  if (pas.lessThanOrEqualTo(0)) return value;
+  const q = value.dividedBy(pas);
+  const rounded =
+    rule.mode === 'sup' ? q.ceil() : rule.mode === 'inf' ? q.floor() : q.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  return rounded.times(pas);
 }
 
 /** Frais annexes amount: pct items apply to the PV hors frais, fixe items are added as-is. */
@@ -225,7 +254,10 @@ function priceItem(
   const ventilatedFrais = debourse.minus(ownDebourse);
   pvComputed = round2(pvComputed);
   const forced = input.forcedPv != null;
-  const pv = forced ? round2(new Decimal(input.forcedPv as Decimal.Value)) : pvComputed;
+  // Un PV forcé est une décision explicite : on ne lui applique pas l'arrondi commercial.
+  const pv = forced
+    ? round2(new Decimal(input.forcedPv as Decimal.Value))
+    : round2(applyArrondi(pvComputed, coeffs.arrondi));
 
   const stTotal = sumSt(effSt);
   return {
@@ -368,6 +400,41 @@ export function computeFeuilleDeVente(
   }
 
   pvHorsFrais = round2(pvHorsFrais);
+
+  // ── PV imposé : on ajuste au prorata les lignes NON forcées pour atteindre le total voulu.
+  // Les lignes au PV forcé sont des décisions explicites : elles restent intactes et le
+  // solde est absorbé par les autres. Déboursé et prix de revient ne bougent pas.
+  let pvImposeApplied = false;
+  let coeffAjustement = '1';
+  const target = coeffs.pvImpose != null ? new Decimal(coeffs.pvImpose) : null;
+  if (target != null) {
+    const mainResults = results.filter((r) => r.section === 'main');
+    const forcedTotal = mainResults
+      .filter((r) => r.forced)
+      .reduce((acc, r) => acc.plus(new Decimal(r.pv)), new Decimal(0));
+    const freeResults = mainResults.filter((r) => !r.forced);
+    const freeTotal = freeResults.reduce((acc, r) => acc.plus(new Decimal(r.pv)), new Decimal(0));
+    const remaining = target.minus(forcedTotal);
+    if (!freeTotal.isZero()) {
+      const k = remaining.dividedBy(freeTotal);
+      coeffAjustement = k.toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toString();
+      let running = new Decimal(0);
+      freeResults.forEach((r, i) => {
+        // La dernière ligne absorbe le résidu d'arrondi : le total colle exactement à la cible.
+        const raw = new Decimal(r.pv).times(k);
+        const pv = i === freeResults.length - 1 ? remaining.minus(running) : round2(raw);
+        running = running.plus(pv);
+        const debourse = new Decimal(r.debourse);
+        const revient = new Decimal(r.revient);
+        r.pv = round2(pv).toString();
+        r.margeBrute = round2(pv.minus(debourse)).toString();
+        r.margeNette = round2(pv.minus(revient)).toString();
+      });
+      pvHorsFrais = round2(target);
+      pvImposeApplied = true;
+    }
+  }
+
   const fraisAnnexesMt = round2(computeFraisAnnexes(coeffs.fraisAnnexes ?? [], pvHorsFrais));
   const pvDevis = pvHorsFrais.plus(fraisAnnexesMt);
   const remiseMt = round2(computeRemise(coeffs.remise, pvDevis));
@@ -391,6 +458,8 @@ export function computeFeuilleDeVente(
     margeBrute: round2(pvNet.minus(totalDebourse)).toString(),
     margeNette: round2(pvNet.minus(totalRevient)).toString(),
     coeffGlobalReel: coeffGlobalReel.toString(),
+    pvImposeApplied,
+    coeffAjustement,
     optionsPvHt: round2(optionsPvHt).toString(),
     variantesPvHt: round2(variantesPvHt).toString(),
     tva: tva.toString(),

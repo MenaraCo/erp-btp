@@ -53,6 +53,8 @@ interface SaleConfig {
   configured: boolean;
   byNature: Record<Nat, { tauxFg: string; tauxBenefice: string }> | null;
   stTypes?: StType[];
+  arrondi?: { pas: string; mode: 'proche' | 'sup' | 'inf' } | null;
+  pvImpose?: string | null;
   remise: { type: 'pct' | 'fixe'; valeur: string } | null;
   tvaRate: string | null;
   fraisAnnexes: { designation: string; type: 'pct' | 'fixe'; valeur: string }[];
@@ -187,6 +189,9 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
   const [remise, setRemise] = useState<{ type: 'pct' | 'fixe'; valeur: string }>({ type: 'pct', valeur: '0' });
   // B.1 — types de sous-traitance propres à CE devis (chacun ses FG/bénéfice).
   const [stTypes, setStTypes] = useState<StType[]>([]);
+  // B.3 — arrondi commercial du PV de ligne + PV total imposé.
+  const [arrondi, setArrondi] = useState<{ pas: string; mode: 'proche' | 'sup' | 'inf' }>({ pas: '0', mode: 'proche' });
+  const [pvImpose, setPvImpose] = useState('');
   const [tva, setTva] = useState('20');
   const tvaPrefsApplied = useRef(false);
   useEffect(() => {
@@ -208,6 +213,8 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
             subcontract: { tauxFg: coef.subcontract.fg, tauxBenefice: coef.subcontract.ben },
           },
           stTypes: stTypes.filter((t) => t.label.trim()),
+          arrondi: { pas: arrondi.pas || '0', mode: arrondi.mode },
+          pvImpose: pvImpose.trim() === '' ? null : pvImpose,
           remise: { type: remise.type, valeur: remise.valeur || '0' },
           tvaRate: String((Number(tva) || 0) / 100),
         },
@@ -373,6 +380,8 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
         subcontract: { fg: b.subcontract.tauxFg, ben: b.subcontract.tauxBenefice },
       });
       setStTypes(cfg.stTypes ?? []);
+      if (cfg.arrondi) setArrondi({ pas: String(Number(cfg.arrondi.pas)), mode: cfg.arrondi.mode });
+      setPvImpose(cfg.pvImpose != null ? String(Number(cfg.pvImpose)) : '');
       if (cfg.remise) setRemise({ type: cfg.remise.type, valeur: String(Number(cfg.remise.valeur)) });
       if (cfg.tvaRate) setTva(String(Number(cfg.tvaRate) * 100));
     } else {
@@ -655,6 +664,42 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                       }])}>
                       + Type de sous-traitance
                     </button>
+
+                    <div className="form-section-title" style={{ marginTop: 4 }}>Arrondi &amp; prix imposé</div>
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Arrondi du PV</label>
+                        <select className="input" style={{ width: 150 }} value={arrondi.pas} disabled={!isLatest}
+                          onChange={(ev) => setArrondi({ ...arrondi, pas: ev.target.value })}>
+                          <option value="0">Aucun (au centime)</option>
+                          <option value="0.05">5 centimes</option>
+                          <option value="0.5">50 centimes</option>
+                          <option value="1">À l&apos;euro</option>
+                          <option value="5">5 €</option>
+                          <option value="10">10 €</option>
+                          <option value="100">100 €</option>
+                        </select>
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Sens</label>
+                        <select className="input" style={{ width: 130 }} value={arrondi.mode} disabled={!isLatest || arrondi.pas === '0'}
+                          onChange={(ev) => setArrondi({ ...arrondi, mode: ev.target.value as 'proche' | 'sup' | 'inf' })}>
+                          <option value="proche">Au plus proche</option>
+                          <option value="sup">Supérieur</option>
+                          <option value="inf">Inférieur</option>
+                        </select>
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>PV total imposé (HT)</label>
+                        <input className="input" style={{ width: 150, textAlign: 'right' }} placeholder="— libre —"
+                          value={pvImpose} disabled={!isLatest} onChange={(ev) => setPvImpose(ev.target.value)} />
+                      </div>
+                    </div>
+                    <p className="muted" style={{ marginTop: -6, marginBottom: 12, fontSize: 11 }}>
+                      L&apos;arrondi s&apos;applique au PV calculé de chaque ligne (un PV forcé est conservé tel quel).
+                      Le PV imposé ajuste au prorata les lignes non forcées pour atteindre exactement ce total —
+                      le déboursé et le prix de revient ne changent pas, seule la marge s&apos;ajuste.
+                    </p>
 
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                       <div className="field" style={{ marginBottom: 0 }}>

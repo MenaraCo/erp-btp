@@ -323,4 +323,74 @@ describe('vente-calc — feuille de vente', () => {
     expect(res.items.find((i) => i.id === 'PROPRE')!.ventilatedFrais).toBe('50');
     expect(res.totalDebourse).toBe('500');
   });
+
+  /* ─────────── B.3 — arrondis et PV imposé global ─────────── */
+
+  it("B.3 — arrondi du PV de ligne au pas choisi (proche / supérieur / inférieur)", () => {
+    const run = (pas: string, mode: 'proche' | 'sup' | 'inf') =>
+      computeFeuilleDeVente(
+        [{ id: 'A', vendable: true, debourseByNature: { material: '1234.56' } }],
+        coeffs({ arrondi: { pas, mode } }),
+      ).items[0].pv;
+    expect(run('10', 'proche')).toBe('1230');
+    expect(run('10', 'sup')).toBe('1240');
+    expect(run('10', 'inf')).toBe('1230');
+    expect(run('1', 'proche')).toBe('1235');
+    expect(run('5', 'sup')).toBe('1235');
+  });
+
+  it("B.3 — sans arrondi paramétré, le PV garde ses centimes", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { material: '1234.56' } }],
+      coeffs(),
+    );
+    expect(res.items[0].pv).toBe('1234.56');
+  });
+
+  it("B.3 — PV imposé global : les lignes sont ajustées au prorata", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'A', vendable: true, debourseByNature: { material: '400' } },
+        { id: 'B', vendable: true, debourseByNature: { material: '600' } },
+      ],
+      coeffs({ pvImpose: '1200' }),
+    );
+    expect(res.pvHorsFrais).toBe('1200');
+    expect(res.items.find((i) => i.id === 'A')!.pv).toBe('480'); // 400 × 1.2
+    expect(res.items.find((i) => i.id === 'B')!.pv).toBe('720'); // 600 × 1.2
+    expect(res.pvImposeApplied).toBe(true);
+    expect(res.coeffAjustement).toBe('1.2');
+  });
+
+  it("B.3 — PV imposé : une ligne au PV forcé n'est pas réajustée, le reste absorbe", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'FORCE', vendable: true, debourseByNature: { material: '400' }, forcedPv: '500' },
+        { id: 'LIBRE', vendable: true, debourseByNature: { material: '600' } },
+      ],
+      coeffs({ pvImpose: '1200' }),
+    );
+    // la ligne forcée garde 500 ; les 700 restants vont sur la ligne libre
+    expect(res.items.find((i) => i.id === 'FORCE')!.pv).toBe('500');
+    expect(res.items.find((i) => i.id === 'LIBRE')!.pv).toBe('700');
+    expect(res.pvHorsFrais).toBe('1200');
+  });
+
+  it("B.3 — PV imposé : le déboursé et le prix de revient ne bougent pas, la marge s'ajuste", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { material: '1000' } }],
+      coeffs({
+        byNature: {
+          labor: rate('0', '0'), material: rate('10', '0'), equipment: rate('0', '0'),
+          subcontract: rate('0', '0'),
+        },
+        pvImpose: '1500',
+      }),
+    );
+    expect(res.totalDebourse).toBe('1000');
+    expect(res.totalRevient).toBe('1100');
+    expect(res.items[0].pv).toBe('1500');
+    expect(res.items[0].margeBrute).toBe('500'); // 1500 − 1000
+    expect(res.items[0].margeNette).toBe('400'); // 1500 − 1100
+  });
 });
