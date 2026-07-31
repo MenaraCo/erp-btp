@@ -321,10 +321,15 @@ export function Montage({
           + Titre
         </button>
       )}
-      {infoLine && (
+      {infoLine && (() => {
+        // Toujours repartir de la ligne À JOUR (infoLine est un instantané pris au clic :
+        // après une modification, il serait périmé et la fiche réafficherait l'ancienne valeur).
+        const fresh = lines.find((l) => l.id === infoLine.id) ?? infoLine;
+        return (
         <LineInfoModal
-          line={infoLine}
-          components={infoLine.type === 'ouvrage' ? childrenOf(infoLine.id) : []}
+          key={`${fresh.id}:${fresh.quantity}:${fresh.pu}:${fresh.perte}:${fresh.unit}:${fresh.nature}:${fresh.code_analytique}`}
+          line={fresh}
+          components={fresh.type === 'ouvrage' ? childrenOf(fresh.id) : []}
           deboursById={deboursById}
           decimals={decimals}
           token={token}
@@ -332,7 +337,8 @@ export function Montage({
           updateLine={updateLine}
           onClose={() => setInfoLine(null)}
         />
-      )}
+        );
+      })()}
       {copyMoveSource && (
         <CopyMoveModal
           source={copyMoveSource}
@@ -473,7 +479,7 @@ function Node({
                 style={{ width: 34, fontSize: 11, fontFamily: 'monospace', textAlign: 'center', color: ls.color }} />
             )}
           </span>
-          <input className="title-input" data-cell="titre:designation" onKeyDown={focusNextCell} defaultValue={line.designation} disabled={readOnly} title={line.designation}
+          <input className="title-input" data-cell="titre:designation" onKeyDown={focusNextCell} key={line.designation} defaultValue={line.designation} disabled={readOnly} title={line.designation}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })}
             style={{ gridColumn: '4 / 11', fontWeight: line.type === 'titre' ? 700 : 600, textTransform: line.type === 'titre' ? 'uppercase' : 'none', width: '100%', minWidth: 0, background: 'transparent', color: ls.color }} />
           <span style={{ display: 'flex', justifyContent: 'flex-end', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: ls.color, paddingRight: 4 }}>{fmtV(valueOf(line))}</span>
@@ -548,12 +554,12 @@ function Node({
             <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{line.numero ?? ''}</span>
             {!readOnly && !vente && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
           </span>
-          <input data-cell="ouvrage:designation" onKeyDown={focusNextCell} defaultValue={line.designation} disabled={readOnly} title={line.designation} style={{ width: '100%', minWidth: 0, fontWeight: 600 }}
+          <input data-cell="ouvrage:designation" onKeyDown={focusNextCell} key={line.designation} defaultValue={line.designation} disabled={readOnly} title={line.designation} style={{ width: '100%', minWidth: 0, fontWeight: 600 }}
             onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value } })} />
           <UnitSelect value={line.unit} token={token} readOnly={readOnly} style={{ width: '100%' }}
             onChange={(v) => updateLine.mutate({ id: line.id, patch: { unit: v || null } })} />
           <span />{/* Perte */}
-          <input data-cell="ouvrage:quantity" onKeyDown={focusNextCell} defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: '100%', textAlign: 'right' }}
+          <input data-cell="ouvrage:quantity" onKeyDown={focusNextCell} key={cleanNum(line.quantity)} defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: '100%', textAlign: 'right' }}
             onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
           <span />{/* Cadence */}
           <span />{/* P.U. Public */}
@@ -596,18 +602,18 @@ function Node({
                   ? <CodeInput value={c.code_analytique} readOnly={readOnly} placeholder="Analy." title="Code analytique" style={{ width: '100%' }}
                       onChange={(v) => updateLine.mutate({ id: c.id, patch: { codeAnalytique: v } })} />
                   : <span />}
-                <input data-cell="ressource:designation" onKeyDown={focusNextCell} defaultValue={c.designation} disabled={readOnly} title={c.designation} style={{ width: '100%', minWidth: 0 }}
+                <input data-cell="ressource:designation" onKeyDown={focusNextCell} key={c.designation} defaultValue={c.designation} disabled={readOnly} title={c.designation} style={{ width: '100%', minWidth: 0 }}
                   onBlur={(e) => e.target.value !== c.designation && updateLine.mutate({ id: c.id, patch: { designation: e.target.value, syncByCode: true } })} />
                 <UnitSelect value={c.unit} token={token} readOnly={readOnly} style={{ width: '100%' }}
                   onChange={(v) => updateLine.mutate({ id: c.id, patch: { unit: v || null } })} />
                 {!isSubOuvrage
-                  ? <input data-cell="ressource:perte" onKeyDown={focusNextCell} defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: '100%', textAlign: 'right' }}
+                  ? <input data-cell="ressource:perte" onKeyDown={focusNextCell} key={cleanNum(c.perte ?? '0')} defaultValue={cleanNum(c.perte ?? '0')} disabled={readOnly} title="Perte %" style={{ width: '100%', textAlign: 'right' }}
                       onBlur={(e) => e.target.value !== cleanNum(c.perte ?? '0') && updateLine.mutate({ id: c.id, patch: { perte: e.target.value || '0', syncByCode: true } })} />
                   : <span />}
-                <input data-cell="ressource:quantity" onKeyDown={focusNextCell} defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio / quantité" style={{ width: '100%', textAlign: 'right' }}
+                <input data-cell="ressource:quantity" onKeyDown={focusNextCell} key={cleanNum(c.quantity)} defaultValue={cleanNum(c.quantity)} disabled={readOnly} title="Ratio / quantité" style={{ width: '100%', textAlign: 'right' }}
                   onBlur={(e) => e.target.value !== cleanNum(c.quantity) && updateLine.mutate({ id: c.id, patch: { quantity: e.target.value || '0' } })} />
                 {!isSubOuvrage
-                  ? <input data-cell="ressource:cadence" onKeyDown={focusNextCell} defaultValue={cleanNum(c.cadence ?? '')} disabled={readOnly} title="Cadence (rendement) — MO : quantité = 1/cadence" placeholder="—" style={{ width: '100%', textAlign: 'right' }}
+                  ? <input data-cell="ressource:cadence" onKeyDown={focusNextCell} key={cleanNum(c.cadence ?? '')} defaultValue={cleanNum(c.cadence ?? '')} disabled={readOnly} title="Cadence (rendement) — MO : quantité = 1/cadence" placeholder="—" style={{ width: '100%', textAlign: 'right' }}
                       onBlur={(e) => {
                         const v = e.target.value.trim();
                         if (v === cleanNum(c.cadence ?? '')) return;
@@ -618,14 +624,14 @@ function Node({
                   : <span />}
                 {!isSubOuvrage
                   ? <span style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, minWidth: 0 }}>
-                      <input data-cell="ressource:prix_public" onKeyDown={focusNextCell} defaultValue={cleanNum(c.prix_public ?? '')} disabled={readOnly} title="P.U. Public (catalogue)" placeholder="—" style={{ width: '100%', textAlign: 'right', minWidth: 0 }}
+                      <input data-cell="ressource:prix_public" onKeyDown={focusNextCell} key={cleanNum(c.prix_public ?? '')} defaultValue={cleanNum(c.prix_public ?? '')} disabled={readOnly} title="P.U. Public (catalogue)" placeholder="—" style={{ width: '100%', textAlign: 'right', minWidth: 0 }}
                         onBlur={(e) => e.target.value !== cleanNum(c.prix_public ?? '') && updateLine.mutate({ id: c.id, patch: { prixPublic: e.target.value || null, syncByCode: true } })} />
                       {showConv && <span title="Déboursé déduit du prix public via le coefficient de conversion" style={{ fontSize: 8, color: 'var(--accent)', fontWeight: 700 }}>conv</span>}
                     </span>
                   : <span />}
                 {isSubOuvrage
                   ? <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#64748b', fontSize: 12, paddingRight: 4 }}>{fmtEuro(subUnitPu, decimals)}</span>
-                  : <input data-cell="ressource:pu" onKeyDown={focusNextCell} defaultValue={cleanNum(c.pu)} disabled={readOnly} title="P.U. déboursé" style={{ width: '100%', textAlign: 'right' }}
+                  : <input data-cell="ressource:pu" onKeyDown={focusNextCell} key={cleanNum(c.pu)} defaultValue={cleanNum(c.pu)} disabled={readOnly} title="P.U. déboursé" style={{ width: '100%', textAlign: 'right' }}
                       onBlur={(e) => e.target.value !== cleanNum(c.pu) && updateLine.mutate({ id: c.id, patch: { pu: e.target.value || '0', syncByCode: true } })} />}
                 <span style={{ width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', color: '#334155', fontWeight: 500, paddingRight: 4 }}>{fmtEuro(montant, decimals)}</span>
                 <span className="sd-actions" style={{ background: 'linear-gradient(90deg, transparent, #f8fafc 38%, #f8fafc)' }}>
@@ -672,10 +678,10 @@ function Node({
         )}
         <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{line.numero ?? ''}</span>
         {!readOnly && <NumBox line={line} onChange={(v) => updateLine.mutate({ id: line.id, patch: { numCustom: v } })} />}
-        <input data-cell="ressource:designation" onKeyDown={focusNextCell} defaultValue={line.designation} disabled={readOnly} style={{ flex: 1 }}
+        <input data-cell="ressource:designation" onKeyDown={focusNextCell} key={line.designation} defaultValue={line.designation} disabled={readOnly} style={{ flex: 1 }}
           onBlur={(e) => e.target.value !== line.designation && updateLine.mutate({ id: line.id, patch: { designation: e.target.value, syncByCode: !!line.code } })} />
         <button type="button" className="btn-ghost" title="Informations" onClick={() => onShowInfo(line)} style={infoBtn}>ⓘ</button>
-        <input data-cell="ressource:quantity" onKeyDown={focusNextCell} defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: 56, textAlign: 'right' }}
+        <input data-cell="ressource:quantity" onKeyDown={focusNextCell} key={cleanNum(line.quantity)} defaultValue={cleanNum(line.quantity)} disabled={readOnly} title="Quantité" style={{ width: 56, textAlign: 'right' }}
           onBlur={(e) => e.target.value !== cleanNum(line.quantity) && updateLine.mutate({ id: line.id, patch: { quantity: e.target.value || '0' } })} />
         <UnitSelect value={line.unit} token={token} readOnly={readOnly}
           onChange={(v) => updateLine.mutate({ id: line.id, patch: { unit: v || null } })} />
@@ -684,7 +690,7 @@ function Node({
             onForce={(v) => setLinePv.mutate({ lineId: line.id, puVente: v, force: true })}
             onRelease={() => setLinePv.mutate({ lineId: line.id, puVente: null, force: false })} />
         ) : (
-          <input data-cell="ressource:pu" onKeyDown={focusNextCell} defaultValue={cleanNum(line.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
+          <input data-cell="ressource:pu" onKeyDown={focusNextCell} key={cleanNum(line.pu)} defaultValue={cleanNum(line.pu)} disabled={readOnly} title="PU déboursé" style={{ width: 72, textAlign: 'right' }}
             onBlur={(e) => e.target.value !== cleanNum(line.pu) && updateLine.mutate({ id: line.id, patch: { pu: e.target.value || '0', syncByCode: !!line.code } })} />
         )}
         <span style={{ width: 80, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtV(valueOf(line))}</span>
