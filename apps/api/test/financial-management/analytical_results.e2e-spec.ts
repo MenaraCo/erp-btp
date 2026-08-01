@@ -97,7 +97,7 @@ describe('Tableau de bord analytique 5 niveaux (§5.8) — imputation au code an
     await ds.destroy();
   });
 
-  it('agrège engagé/réalisé jusqu’au code analytique, budget non classé en « Non réparti »', async () => {
+  it('agrège engagé/réalisé jusqu’au code analytique, budget non classé en « 999 À ventiler »', async () => {
     const res = (await as('get', `/chantiers/${chantierId}/analytical-results`).expect(200)).body;
     const { nature, fam, code } = findCode(res.natures);
 
@@ -106,10 +106,13 @@ describe('Tableau de bord analytique 5 niveaux (§5.8) — imputation au code an
     expect(code.metrics.realise).toBe('900');
     // remontée famille
     expect(fam.metrics.engage).toBe('950');
-    // budget non classé (ressource non rattachée à un code) → Non réparti de la nature
-    expect(nature.unallocated.budgetObjectif).toBe('1000');
-    expect(nature.metrics.budgetObjectif).toBe('1000');
+    // budget non classé (ressource sans code analytique) → branche « 999 — À ventiler », PAS la nature
+    expect(res.aVentiler.code).toBe('999');
+    expect(res.aVentiler.metrics.budgetObjectif).toBe('1000');
+    expect(nature.metrics.budgetObjectif).toBe('0');
     expect(nature.metrics.engage).toBe('950');
+    // la ressource est listée pour être ventilée depuis le chantier
+    expect(res.aVentiler.resources).toHaveLength(1);
 
     // total réconcilié
     expect(res.total.budgetObjectif).toBe('1000');
@@ -117,7 +120,7 @@ describe('Tableau de bord analytique 5 niveaux (§5.8) — imputation au code an
     expect(res.total.realise).toBe('900');
   });
 
-  it('place un engagé non imputé dans « Non réparti »', async () => {
+  it('place un engagé non imputé dans « 999 À ventiler »', async () => {
     const ddp = (await as('post', `/chantiers/${chantierId}/purchase-requests`).send({ code: 'DDP2' }).expect(201)).body;
     const order = (await as('post', `/purchase-requests/${ddp.id}/convert`).send({ code: 'BC2' }).expect(201)).body;
     await as('post', `/purchase-orders/${order.id}/lines`).send({ nature: 'material', designation: 'X', quantity: '1', unitPrice: '200' }).expect(201);
@@ -125,8 +128,8 @@ describe('Tableau de bord analytique 5 niveaux (§5.8) — imputation au code an
 
     const res = (await as('get', `/chantiers/${chantierId}/analytical-results`).expect(200)).body;
     const material: Nature = res.natures.find((n: Nature) => n.nature === 'material');
-    expect(material.unallocated.engage).toBe('200');
-    expect(material.metrics.engage).toBe('1150'); // code 950 + non réparti 200
+    expect(res.aVentiler.metrics.engage).toBe('200');
+    expect(material.metrics.engage).toBe('950'); // seul l'engagé imputé au code reste dans la nature
   });
 
   it('range les frais de chantier (site_overhead) dans la branche dédiée', async () => {

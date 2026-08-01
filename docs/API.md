@@ -61,7 +61,7 @@
 
 | Méthode | Route | Permission | Notes |
 |---|---|---|---|
-| GET | `/chantiers/:chantierId/analytical-results` | `financial.read` | Budget/engagé/réalisé agrégés sur l'axe analytique nature→lot→famille (§5.8) ; seau « Non réparti » par nature + branche « Frais de chantier » ; totaux réconciliés |
+| GET | `/chantiers/:chantierId/analytical-results` | `financial.read` | Budget/engagé/réalisé agrégés sur l'axe analytique nature→lot→famille→code (§5.8). Ce qui n'a **aucun code analytique** va dans la branche **`999 — À ventiler`** (hors des natures, avec la liste des ressources à ventiler), les frais de chantier dans leur branche dédiée ; totaux réconciliés |
 | GET | `/chantiers/:chantierId/forecast` | `financial.read` (cap. `financial.forecast`) | **Prévisionnel / vue Conducteur (B.3)** : assemble les 4 axes + avancement + paramètres versionnés → indicateurs (budget avancé, écart au stade, EAC, marge prévisionnelle €/%, alertes) |
 
 ## Acceptation de commande — la charnière étude → exécution

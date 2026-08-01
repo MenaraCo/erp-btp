@@ -824,6 +824,37 @@ export class ChantierService {
   }
 
   /**
+   * Ventilation analytique d'une ressource de chantier (cahier §5.8). Une ressource chiffrée sans
+   * code analytique arrive en « 999 — À ventiler » ; le conducteur la range ici, sur le chantier
+   * et sans toucher à la bibliothèque d'étude (catalogues indépendants). Autorisé à toute phase :
+   * classer un coût n'est pas modifier le budget, et l'on découvre souvent l'imputation en cours
+   * de chantier. `codeAnalytiqueId: null` la renvoie à ventiler.
+   */
+  ventileResource(chantierId: string, resourceId: string, codeAnalytiqueId: string | null) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const found = await em.query(
+        `SELECT id FROM nomenclature_resource WHERE id = $1 AND chantier_id = $2`,
+        [resourceId, chantierId],
+      );
+      if (found.length === 0) {
+        throw new NotFoundException(`Ressource de nomenclature introuvable (${resourceId}).`);
+      }
+      if (codeAnalytiqueId) {
+        const code = await em.query(`SELECT id FROM analytical_code WHERE id = $1`, [codeAnalytiqueId]);
+        if (code.length === 0) {
+          throw new NotFoundException(`Code analytique introuvable (${codeAnalytiqueId}).`);
+        }
+      }
+      await em.query(
+        `UPDATE nomenclature_resource SET code_analytique_id = $1, updated_at = now() WHERE id = $2`,
+        [codeAnalytiqueId, resourceId],
+      );
+      return (await em.query(`SELECT * FROM nomenclature_resource WHERE id = $1`, [resourceId]))[0];
+    });
+  }
+
+  /**
    * Arbre d'exécution d'un chantier (cahier §5.5) : par marché, la MÊME structure que le déboursé
    * (titre/ouvrage → sous-ouvrages → composants ressources/%), avec le budget étude / objectif /
    * prévisionnel à chaque ouvrage. C'est la vue pilotée pendant la contre-étude et l'exécution.

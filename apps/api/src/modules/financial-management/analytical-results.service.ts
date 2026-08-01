@@ -77,6 +77,12 @@ export class AnalyticalResultsService {
       return {
         chantierId,
         natures: aggregate.natures,
+        // Branche « 999 — À ventiler » + les ressources qui la remplissent, pour que le conducteur
+        // puisse les classer sans quitter l'écran.
+        aVentiler: {
+          ...aggregate.aVentiler,
+          resources: await this.listAVentiler(em, chantierId),
+        },
         siteOverhead: {
           label: 'Frais de chantier',
           metrics: Object.fromEntries(METRICS.map((m) => [m, siteOverhead[m].toString()])),
@@ -190,7 +196,22 @@ export class AnalyticalResultsService {
     }
   }
 
-  /** Routes a measure to the code-analytique tree, the per-nature unallocated bucket, or frais de chantier. */
+  /**
+   * Ressources de nomenclature sans code analytique : la liste de travail du conducteur.
+   * Une ressource arrivée sans code au transfert atterrit ici, pas dans une nature au hasard.
+   */
+  private async listAVentiler(em: EntityManager, chantierId: string) {
+    return em.query(
+      `SELECT n.id, n.code, n.label, n.unit, n.nature, n.unit_cost_objectif, m.code AS marche_code
+         FROM nomenclature_resource n
+         JOIN marche m ON m.id = n.marche_id
+        WHERE n.chantier_id = $1 AND n.code_analytique_id IS NULL
+        ORDER BY n.label`,
+      [chantierId],
+    );
+  }
+
+  /** Routes a measure to the code-analytique tree, the « à ventiler » branch, or frais de chantier. */
   private dispatch(
     rows: MeasureRow[],
     siteOverhead: Record<string, Decimal>,

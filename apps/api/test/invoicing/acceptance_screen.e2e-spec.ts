@@ -196,26 +196,14 @@ describe('Invoicing — acceptation de commande : file, fiche et options retenue
     await as('get', `/chantiers/${acc.chantier.id}/execution-tree`).expect(403);
   });
 
-  it('les options RETENUES à la commande entrent dans le marché, les autres non', async () => {
-    const retenue = await buildDevis('ACS-6', {
-      kind: 'option', designation: 'Option retenue', quantity: '5',
+  it('laisse les options et variantes HORS commande — elles s’arbitrent dans le devis', async () => {
+    const d = await buildDevis('ACS-6', {
+      kind: 'option', designation: 'Option non commandée', quantity: '5',
     });
-    await win(retenue.devisId);
-    const withOption = (
-      await as('post', `/devis/${retenue.devisId}/accept`)
-        .send({ retainedSectionIds: [retenue.sectionLineId] })
-        .expect(201)
-    ).body;
-    // base 1200 + option 600
-    expect(withOption.marche.total_ht).toBe('1800.00');
-    expect(withOption.lineCount).toBe(2);
-
-    const ecartee = await buildDevis('ACS-7', {
-      kind: 'option', designation: 'Option écartée', quantity: '5',
-    });
-    await win(ecartee.devisId);
-    const without = (await as('post', `/devis/${ecartee.devisId}/accept`).expect(201)).body;
-    expect(without.marche.total_ht).toBe('1200.00');
-    expect(without.lineCount).toBe(1);
+    await win(d.devisId);
+    const acc = (await as('post', `/devis/${d.devisId}/accept`).expect(201)).body;
+    // Seul le tronc commun (1 200 €, 1 ouvrage) entre au marché ; l'option de 600 € reste dehors.
+    expect(acc.marche.total_ht).toBe('1200.00');
+    expect(acc.lineCount).toBe(1);
   });
 });

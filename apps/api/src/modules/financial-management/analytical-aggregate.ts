@@ -63,14 +63,25 @@ export interface AggregatedLot extends Rendered {
 export interface AggregatedNature extends Rendered {
   nature: AnalyticalNature;
   label: string;
-  /** measures attributed to this nature but to no known code analytique */
-  unallocated: Record<string, string>;
   lots: AggregatedLot[];
+}
+/**
+ * Branche « 999 — À ventiler » : tout ce qui n'est rattaché à aucun code analytique connu, toutes
+ * natures confondues. Volontairement HORS des natures — une main-d'œuvre non classée n'a rien à
+ * faire dans « Matériaux ». Elle reste visible tant que le conducteur ne l'a pas ventilée.
+ */
+export interface AggregatedAVentiler extends Rendered {
+  code: string;
+  label: string;
 }
 export interface AnalyticalAggregate {
   natures: AggregatedNature[];
+  aVentiler: AggregatedAVentiler;
   total: Record<string, string>;
 }
+
+export const A_VENTILER_CODE = '999';
+export const A_VENTILER_LABEL = 'À ventiler';
 
 type Acc = Map<string, Decimal>;
 
@@ -100,16 +111,14 @@ export function aggregateAnalytical(
   for (const n of plan) for (const l of n.lots) for (const f of l.familles) for (const c of f.codes) knownCodes.add(c.id);
 
   const byCode = new Map<string, Acc>();
-  const unallocatedByNature = new Map<AnalyticalNature, Acc>();
+  const aVentilerAcc: Acc = new Map();
   for (const row of rows) {
     if (row.codeId != null && knownCodes.has(row.codeId)) {
       const acc = byCode.get(row.codeId) ?? new Map();
       addInto(acc, row.metrics);
       byCode.set(row.codeId, acc);
     } else {
-      const acc = unallocatedByNature.get(row.nature) ?? new Map();
-      addInto(acc, row.metrics);
-      unallocatedByNature.set(row.nature, acc);
+      addInto(aVentilerAcc, row.metrics);
     }
   }
 
@@ -131,17 +140,23 @@ export function aggregateAnalytical(
       mergeInto(natureAcc, lotAcc);
       return { id: lot.id, code: lot.code, label: lot.label, metrics: render(lotAcc, metricKeys), familles };
     });
-    const unallocated = unallocatedByNature.get(node.nature) ?? new Map();
-    mergeInto(natureAcc, unallocated);
     mergeInto(total, natureAcc);
     return {
       nature: node.nature,
       label: node.label,
       metrics: render(natureAcc, metricKeys),
-      unallocated: render(unallocated, metricKeys),
       lots,
     };
   });
+  mergeInto(total, aVentilerAcc);
 
-  return { natures, total: render(total, metricKeys) };
+  return {
+    natures,
+    aVentiler: {
+      code: A_VENTILER_CODE,
+      label: A_VENTILER_LABEL,
+      metrics: render(aVentilerAcc, metricKeys),
+    },
+    total: render(total, metricKeys),
+  };
 }

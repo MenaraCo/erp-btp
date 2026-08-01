@@ -270,14 +270,10 @@ export class AcceptanceService {
    * chantier (nouveau ou existant), portant À LA FOIS sa chaîne de facturation (lignes de marché)
    * ET son étude d'exécution (déboursé). Remplace les deux anciens transferts séparés.
    *
-   * `retainedSectionIds` porte les options/variantes que la commande retient : elles entrent alors
-   * dans le marché comme le reste. Non citées, elles restent hors commande.
+   * Seul le tronc commun du devis entre au marché : les options et variantes s'arbitrent DANS le
+   * devis, avant l'acceptation. Celle-ci ne rejoue pas ce choix.
    */
-  async accept(
-    devisId: string,
-    targetChantierId?: string | null,
-    retainedSectionIds: string[] = [],
-  ) {
+  async accept(devisId: string, targetChantierId?: string | null) {
     const tenantId = this.context.requireTenantId();
 
     const devisRows = await runInTenant(this.dataSource, tenantId, (em) =>
@@ -330,9 +326,6 @@ export class AcceptanceService {
       ),
     );
     const byId = new Map(corps.map((l) => [l.id, l]));
-    // Options / variantes RETENUES par la commande : elles entrent au contrat comme le reste.
-    // Toute autre section reste dehors — c'est le choix du client, pas celui du chiffreur.
-    const retained = new Set(retainedSectionIds.filter((id) => byId.get(id)?.section_type));
     const sectionRootOf = (l: CorpsLine): CorpsLine | null => {
       let cur: CorpsLine | undefined = l;
       while (cur) {
@@ -341,19 +334,15 @@ export class AcceptanceService {
       }
       return null;
     };
-    const inContract = (l: CorpsLine): boolean => {
-      const root = sectionRootOf(l);
-      return root === null || retained.has(root.id);
-    };
-    const excludedSection = (l: CorpsLine) => Boolean(l.section_type) && !retained.has(l.id);
+    const excludedSection = (l: CorpsLine) => Boolean(l.section_type);
     // Lignes facturables : ouvrages (biblio OU manuels à PV) + ressources autonomes, vendables et
-    // au contrat (tronc commun, ou section retenue).
+    // au tronc commun — options et variantes restent hors commande.
     const billable = corps.filter(
       (l) =>
         (l.type === 'ouvrage' || l.type === 'ressource') &&
         l.vendable &&
         pvByLine.has(l.id) &&
-        inContract(l),
+        sectionRootOf(l) === null,
     );
     // Inclure la chaîne de titres ancêtres de chaque ouvrage facturable.
     const included = new Set<string>();
@@ -367,13 +356,8 @@ export class AcceptanceService {
         p = parent.parent_line_id;
       }
     }
-    // Le montant du marché = le total contractuel du devis + le PV des sections retenues, qui
-    // n'étaient pas comptées dans le total principal de la feuille de vente.
-    const venteTotal = billable
-      .filter((l) => sectionRootOf(l) !== null)
-      .reduce((sum, l) => sum.plus(pvByLine.get(l.id) ?? 0), new Decimal(fv.totalPvHt))
-      .toDecimalPlaces(2)
-      .toString();
+    // Le montant du marché = le total contractuel du devis (options et variantes exclues).
+    const venteTotal = fv.totalPvHt;
 
     const childrenOf = new Map<string | null, CorpsLine[]>();
     for (const l of corps) {

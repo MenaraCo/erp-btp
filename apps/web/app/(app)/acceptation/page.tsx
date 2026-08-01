@@ -271,7 +271,6 @@ function AcceptanceModal({
   const { token } = useAuth();
   const qc = useQueryClient();
   const [target, setTarget] = useState<'new' | string>('new');
-  const [retained, setRetained] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ chantierId: string; marcheId: string } | null>(null);
   const router = useRouter();
@@ -287,10 +286,7 @@ function AcceptanceModal({
       apiFetch<{ chantier: { id: string }; marche: { id: string } }>(`/devis/${devisId}/accept`, {
         method: 'POST',
         token,
-        body: {
-          chantierId: target === 'new' ? null : target,
-          retainedSectionIds: [...retained],
-        },
+        body: { chantierId: target === 'new' ? null : target },
       }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['chantiers'] });
@@ -300,10 +296,7 @@ function AcceptanceModal({
     onError: (e) => setError(e instanceof ApiError ? e.message : 'Acceptation impossible.'),
   });
 
-  const retenuTotal = (sheet?.sections ?? [])
-    .filter((s) => retained.has(s.lineId))
-    .reduce((sum, s) => sum + Number(s.montantHt), 0);
-  const totalCommande = Number(sheet?.montants.pvHt ?? 0) + retenuTotal;
+  const totalCommande = Number(sheet?.montants.pvHt ?? 0);
 
   return (
     <div style={overlay} onClick={onClose}>
@@ -392,29 +385,15 @@ function AcceptanceModal({
 
             {sheet.sections.length > 0 && (
               <div className="field">
-                <label>Options et variantes retenues par le client</label>
+                <label>Options et variantes du devis — hors commande</label>
                 <p className="muted" style={{ fontSize: 11, margin: '0 0 6px' }}>
-                  Cochez celles que la commande retient : elles entrent au marché et seront
-                  facturées. Les autres restent hors commande.
+                  Elles ne sont pas reprises au marché. Si le client en retient, intégrez-les au
+                  devis avant de l’accepter.
                 </p>
                 <table className="grid" style={{ margin: 0 }}>
                   <tbody>
                     {sheet.sections.map((s) => (
                       <tr key={s.lineId}>
-                        <td style={{ width: 34 }}>
-                          <input
-                            type="checkbox"
-                            checked={retained.has(s.lineId)}
-                            onChange={(e) =>
-                              setRetained((prev) => {
-                                const next = new Set(prev);
-                                if (e.target.checked) next.add(s.lineId);
-                                else next.delete(s.lineId);
-                                return next;
-                              })
-                            }
-                          />
-                        </td>
                         <td>
                           <span className="badge">{s.sectionType === 'option' ? 'Option' : 'Variante'}</span>{' '}
                           {s.code ? <span className="code-cell">{s.code}</span> : null} {s.designation}

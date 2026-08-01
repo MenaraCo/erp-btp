@@ -19,15 +19,8 @@ export class AcceptanceController {
   @Post('devis/:devisId/accept')
   @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
   @RequiresPermission('invoicing.write')
-  accept(
-    @Param('devisId') devisId: string,
-    @Body() body?: { chantierId?: string | null; retainedSectionIds?: string[] },
-  ) {
-    return this.acceptance.accept(
-      devisId,
-      body?.chantierId ?? null,
-      body?.retainedSectionIds ?? [],
-    );
+  accept(@Param('devisId') devisId: string, @Body() body?: { chantierId?: string | null }) {
+    return this.acceptance.accept(devisId, body?.chantierId ?? null);
   }
 
   /** File d'attente de l'écran : les commandes gagnées qui restent à accepter. */

@@ -45,6 +45,18 @@ export class ChantierController {
     return this.chantiers.listNomenclature(chantierId);
   }
 
+  /** Ventilation analytique d'une ressource de chantier (sortie de « 999 — À ventiler »). */
+  @Put('chantiers/:chantierId/nomenclature/:resourceId/code-analytique')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  ventile(
+    @Param('chantierId') chantierId: string,
+    @Param('resourceId') resourceId: string,
+    @Body() body: { codeAnalytiqueId?: string | null },
+  ) {
+    return this.chantiers.ventileResource(chantierId, resourceId, body?.codeAnalytiqueId ?? null);
+  }
+
   @Get('chantiers/:chantierId/execution-tree')
   @RequiresCapability('site_tracking.budget')
   @RequiresPermission('site_tracking.read')

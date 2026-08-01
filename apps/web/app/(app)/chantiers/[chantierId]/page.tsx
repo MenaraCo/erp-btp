@@ -1,11 +1,11 @@
 'use client';
 
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { euro, percent } from '@/lib/format';
 
 const NATURE_LABELS: Record<string, string> = {
@@ -61,14 +61,27 @@ interface AnalyticalNature {
   nature: string;
   label: string;
   metrics: Metrics;
-  unallocated: Metrics;
   lots: Lot[];
+}
+interface AVentilerResource {
+  id: string;
+  code: string;
+  label: string;
+  unit: string | null;
+  nature: string;
+  unit_cost_objectif: string;
+  marche_code: string;
 }
 interface AnalyticalResults {
   natures: AnalyticalNature[];
+  aVentiler: { code: string; label: string; metrics: Metrics; resources: AVentilerResource[] };
   siteOverhead: { label: string; metrics: Metrics };
   total: Metrics;
 }
+interface PlanCode { id: string; code: string; label: string }
+interface PlanFamille { id: string; code: string; label: string; codes: PlanCode[] }
+interface PlanLot { id: string; code: string; label: string; familles: PlanFamille[] }
+interface PlanNature { nature: string; label: string; lots: PlanLot[] }
 interface Forecast {
   avancement: string;
   indicators: {
@@ -273,6 +286,17 @@ export default function ChantierDetailPage() {
               {analytical.data.natures.map((n) => (
                 <NatureRows key={n.nature} nature={n} />
               ))}
+              {hasValue(analytical.data.aVentiler.metrics) && (
+                <tr>
+                  <td>
+                    <strong>
+                      <span className="code-cell">{analytical.data.aVentiler.code}</span>{' '}
+                      {analytical.data.aVentiler.label}
+                    </strong>
+                  </td>
+                  <MetricCells m={analytical.data.aVentiler.metrics} />
+                </tr>
+              )}
               <tr>
                 <td>
                   <strong>{analytical.data.siteOverhead.label}</strong>
@@ -289,6 +313,14 @@ export default function ChantierDetailPage() {
           </table>
         )}
       </div>
+
+      {analytical.data && (
+        <AVentilerCard
+          chantierId={chantierId}
+          data={analytical.data.aVentiler}
+          onVentiled={() => analytical.refetch()}
+        />
+      )}
     </div>
   );
 }
@@ -326,12 +358,102 @@ function NatureRows({ nature }: { nature: AnalyticalNature }) {
           ))}
         </Fragment>
       ))}
-      {hasValue(nature.unallocated) && (
-        <tr className="muted">
-          <td style={{ paddingLeft: 24, fontStyle: 'italic' }}>Non réparti</td>
-          <MetricCells m={nature.unallocated} />
-        </tr>
-      )}
     </>
+  );
+}
+
+/**
+ * « 999 — À ventiler » : tout ce qui n'a pas de code analytique, toutes natures confondues. On y
+ * range les ressources chiffrées sans code plutôt que de les glisser d'office dans une nature —
+ * et le conducteur les classe ici même, sans quitter son chantier.
+ */
+function AVentilerCard({
+  chantierId,
+  data,
+  onVentiled,
+}: {
+  chantierId: string;
+  data: AnalyticalResults['aVentiler'];
+  onVentiled: () => void;
+}) {
+  const { token } = useAuth();
+  const [error, setError] = useState<string | null>(null);
+  const plan = useQuery({
+    queryKey: ['analytical-plan'],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<PlanNature[]>('/analytical/plan', { token }),
+  });
+  const ventile = useMutation({
+    mutationFn: ({ resourceId, codeId }: { resourceId: string; codeId: string }) =>
+      apiFetch(`/chantiers/${chantierId}/nomenclature/${resourceId}/code-analytique`, {
+        method: 'PUT',
+        body: { codeAnalytiqueId: codeId },
+        token,
+      }),
+    onSuccess: () => { setError(null); onVentiled(); },
+    onError: (e) => setError(e instanceof ApiError ? e.message : 'Ventilation impossible.'),
+  });
+
+  if (data.resources.length === 0) return null;
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h2>
+        <span className="code-cell">{data.code}</span> {data.label}
+      </h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Ces ressources sont arrivées du devis sans code analytique. Tant qu’elles restent ici, elles
+        ne comptent dans aucune nature : rangez-les dans le code qui convient.
+      </p>
+      {error && <div className="error">{error}</div>}
+      <table className="grid">
+        <thead>
+          <tr>
+            <th>Ressource</th>
+            <th>Marché</th>
+            <th style={{ textAlign: 'right' }}>PU objectif</th>
+            <th style={{ width: 280 }}>Code analytique</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.resources.map((r) => (
+            <tr key={r.id}>
+              <td>
+                {r.code ? <span className="code-cell">{r.code}</span> : null} {r.label}{' '}
+                <span className="muted">({NATURE_LABELS[r.nature] ?? r.nature})</span>
+              </td>
+              <td className="muted">{r.marche_code}</td>
+              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {euro(r.unit_cost_objectif)}
+              </td>
+              <td>
+                <select
+                  defaultValue=""
+                  disabled={ventile.isPending || !plan.data}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                    if (e.target.value) ventile.mutate({ resourceId: r.id, codeId: e.target.value });
+                  }}
+                >
+                  <option value="">— choisir un code —</option>
+                  {(plan.data ?? []).map((n) => (
+                    <optgroup key={n.nature} label={NATURE_LABELS[n.nature] ?? n.label}>
+                      {n.lots.flatMap((lot) =>
+                        lot.familles.flatMap((fam) =>
+                          fam.codes.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.code} · {c.label} ({fam.label})
+                            </option>
+                          )),
+                        ),
+                      )}
+                    </optgroup>
+                  ))}
+                </select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
