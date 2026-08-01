@@ -183,6 +183,7 @@ export class DevisPdfService {
       pvDevis: string;
       remise: string;
       fraisAnnexes: string;
+      fraisDetail?: { designation: string; montant: string }[];
       tva: string;
       totalTtc: string;
       optionsPvHt: string;
@@ -423,9 +424,18 @@ export class DevisPdfService {
       };
       doc.moveTo(tX, doc.y).lineTo(RIGHT, doc.y).strokeColor(h.colors.primary).lineWidth(1).stroke();
       doc.moveDown(0.4);
+      const detail = totals.fraisDetail ?? [];
       if (Number(totals.fraisAnnexes) > 0.005) {
         totRow('Sous-total travaux HT', money(Number(totals.pvDevis) - Number(totals.fraisAnnexes)));
-        totRow('Frais annexes', money(totals.fraisAnnexes));
+        // Chaque poste garde SON intitulé et sa propre ligne : jamais de regroupement sous un
+        // libellé générique « Frais annexes ».
+        if (detail.length > 0) {
+          for (const f of detail) {
+            totRow(f.designation || 'Frais', money(f.montant));
+          }
+        } else {
+          totRow('Frais annexes', money(totals.fraisAnnexes));
+        }
       }
       if (Number(totals.remise) > 0.005) {
         totRow('Remise', `- ${money(totals.remise)}`);

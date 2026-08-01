@@ -458,4 +458,71 @@ describe('vente-calc — feuille de vente', () => {
     expect(res.items.find((i) => i.id === 'LIBRE')!.pv).toBe('660');
     expect(res.totalPvHt).toBe('1060');
   });
+
+  /* ─────────── E.3 — mode par POSTE de frais + intitulés conservés ─────────── */
+
+  it("E.3 — chaque poste a son propre mode : l'un noyé, l'autre séparé", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { material: '1000' } }],
+      coeffs({
+        fraisAnnexes: [
+          { designation: 'Compte prorata', type: 'pct', valeur: '5', mode: 'inclus' },
+          { designation: 'Installation de chantier', type: 'fixe', valeur: '300', mode: 'separe' },
+        ],
+      }),
+    );
+    // le prorata (50) est dilué dans la ligne, l'installation reste un poste visible
+    expect(res.items[0].pv).toBe('1050');
+    expect(res.fraisAnnexesIntegres).toBe('50');
+    expect(res.fraisAnnexes).toBe('300');
+    expect(res.pvDevis).toBe('1350');
+  });
+
+  it("E.3 — les postes séparés sont détaillés un par un, avec leur intitulé", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { material: '1000' } }],
+      coeffs({
+        fraisAnnexes: [
+          { designation: 'Compte prorata', type: 'pct', valeur: '2', mode: 'separe' },
+          { designation: 'Nettoyage', type: 'fixe', valeur: '150', mode: 'separe' },
+          { designation: 'Panneau de chantier', type: 'fixe', valeur: '80', mode: 'separe' },
+        ],
+      }),
+    );
+    expect(res.fraisDetail).toEqual([
+      { designation: 'Compte prorata', montant: '20' },
+      { designation: 'Nettoyage', montant: '150' },
+      { designation: 'Panneau de chantier', montant: '80' },
+    ]);
+    expect(res.fraisAnnexes).toBe('250'); // 20 + 150 + 80, jamais regroupés à l'affichage
+  });
+
+  it("E.3 — un poste noyé n'apparaît pas dans le détail des frais", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { material: '1000' } }],
+      coeffs({
+        fraisAnnexes: [
+          { designation: 'Caché', type: 'fixe', valeur: '100', mode: 'inclus' },
+          { designation: 'Visible', type: 'fixe', valeur: '40', mode: 'separe' },
+        ],
+      }),
+    );
+    expect(res.fraisDetail!.map((f) => f.designation)).toEqual(['Visible']);
+    expect(res.items[0].pv).toBe('1100'); // le poste caché est passé dans le prix
+  });
+
+  it("E.3 — les pourcentages portent tous sur le PV hors frais, quel que soit le mode", () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { material: '1000' } }],
+      coeffs({
+        fraisAnnexes: [
+          { designation: 'Noyé 10 %', type: 'pct', valeur: '10', mode: 'inclus' },
+          { designation: 'Séparé 10 %', type: 'pct', valeur: '10', mode: 'separe' },
+        ],
+      }),
+    );
+    expect(res.fraisAnnexesIntegres).toBe('100');
+    expect(res.fraisAnnexes).toBe('100');
+    expect(res.pvDevis).toBe('1200');
+  });
 });

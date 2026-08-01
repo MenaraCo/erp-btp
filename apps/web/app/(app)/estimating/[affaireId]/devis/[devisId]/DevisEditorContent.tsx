@@ -18,7 +18,11 @@ const round = (v: number, n: number) => Number((Number(v) || 0).toFixed(n));
 
 interface Version { id: string; version_no: number; label: string }
 interface DevisDetail {
-  devis: { id: string; numero: string | null; designation: string; type: string; status: string };
+  devis: {
+    id: string; numero: string | null; designation: string; type: string; status: string;
+    responsable?: string | null; priorite?: string | null;
+    date_debut?: string | null; date_echeance?: string | null;
+  };
   versions: Version[];
 }
 interface DevisLine {
@@ -44,12 +48,14 @@ interface SaleSheet {
   fraisAnnexes: string; pvDevis: string; remise: string; totalPvHt: string;
   margeBrute: string; margeNette: string; coeffGlobalReel: string; tva: string; totalTtc: string;
   pvImposeApplied?: boolean; coeffAjustement?: string;
+  fraisAnnexesIntegres?: string;
+  fraisDetail?: { designation: string; montant: string }[];
 }
 type Nat = 'labor' | 'material' | 'equipment' | 'subcontract';
 const NATURE_LABELS: Record<Nat, string> = {
   labor: "Main d'œuvre", material: 'Matériaux', equipment: 'Matériel', subcontract: 'Sous-traitance',
 };
-interface FraisRow { designation: string; type: 'pct' | 'fixe'; valeur: string }
+interface FraisRow { designation: string; type: 'pct' | 'fixe'; valeur: string; mode?: 'separe' | 'inclus' | null }
 interface StType { id: string; code?: string | null; label: string; tauxFg: string; tauxBenefice: string }
 interface SaleConfig {
   configured: boolean;
@@ -60,7 +66,7 @@ interface SaleConfig {
   fraisMode?: 'separe' | 'inclus';
   remise: { type: 'pct' | 'fixe'; valeur: string } | null;
   tvaRate: string | null;
-  fraisAnnexes: { designation: string; type: 'pct' | 'fixe'; valeur: string }[];
+  fraisAnnexes: { designation: string; type: 'pct' | 'fixe'; valeur: string; mode?: 'separe' | 'inclus' | null }[];
 }
 interface ApproRow {
   code: string | null; designation: string; uniteEmploi: string | null; qteEmploi: string;
@@ -161,6 +167,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     queryFn: () => apiFetch(`/affaires/${affaireId}`, { token }),
   });
 
+  const [devisSettings, setDevisSettings] = useState(false);
   const [changingAffaire, setChangingAffaire] = useState(false);
   const allAffaires = useQuery<{ rows: { id: string; code: string; name: string }[] }>({
     queryKey: ['affaires-picker'],
@@ -228,6 +235,37 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
       }),
     onSuccess: () => refresh(),
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
+
+  // Paramètres du devis : identité (numéro, désignation, type) et pilotage (responsable,
+  // priorité, dates). Deux endpoints distincts côté API, une seule validation pour l'utilisateur.
+  const saveDevisSettings = useMutation({
+    mutationFn: async (v: {
+      numero: string; designation: string; type: string;
+      responsable: string; priorite: string; dateDebut: string; dateEcheance: string;
+    }) => {
+      await apiFetch(`/devis/${devisId}`, {
+        method: 'PATCH',
+        body: { numero: v.numero.trim() || null, designation: v.designation.trim(), type: v.type },
+        token,
+      });
+      await apiFetch(`/devis/${devisId}/planning`, {
+        method: 'PATCH',
+        body: {
+          responsable: v.responsable.trim() || null,
+          priorite: v.priorite,
+          dateDebut: v.dateDebut || null,
+          dateEcheance: v.dateEcheance || null,
+        },
+        token,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['devis', devisId] });
+      qc.invalidateQueries({ queryKey: ['devis-list'] });
+      setDevisSettings(false);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Enregistrement impossible.'),
   });
 
   const createVersionMut = useMutation({
@@ -398,6 +436,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     }
     setFrais((cfg.fraisAnnexes ?? []).map((f) => ({
       designation: f.designation, type: f.type, valeur: String(Number(f.valeur)),
+      mode: f.mode ?? 'separe',
     })));
   }, [saleConfig.data, versionId, prefs.taux_fg_default, prefs.taux_ben_default]);
 
@@ -489,6 +528,8 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                 )}
                 <button type="button" title="Changer d'affaire" onClick={() => setChangingAffaire(true)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '1px 4px', borderRadius: 4, fontSize: 11 }}>✎</button>
+                <button type="button" className="btn-secondary" onClick={() => setDevisSettings(true)}
+                  style={{ fontSize: 10, padding: '2px 8px', marginLeft: 4 }}>Paramètres du devis</button>
               </span>
             ) : !isPanel2 && changingAffaire ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -726,29 +767,12 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                       <span>Frais annexes</span>
                       <button className="btn-secondary" type="button" disabled={!isLatest}
                         style={{ textTransform: 'none', letterSpacing: 0 }}
-                        onClick={() => setFrais([...frais, { designation: '', type: 'pct', valeur: '0' }])}>+ Poste</button>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-                      <span className="label" style={{ marginBottom: 0 }}>Sur le devis :</span>
-                      {([
-                        ['separe', 'Poste séparé', 'Les frais apparaissent comme une ligne distincte sur le devis client.'],
-                        ['inclus', 'Noyés dans les prix', 'Les frais sont répartis dans les prix unitaires : le client ne les voit pas.'],
-                      ] as const).map(([v, l, t]) => (
-                        <button key={v} type="button" title={t} disabled={!isLatest}
-                          onClick={() => setFraisMode(v)}
-                          style={{
-                            padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
-                            border: fraisMode === v ? '2px solid var(--primary)' : '1px solid var(--border)',
-                            background: fraisMode === v ? '#eff6ff' : '#fff',
-                            color: fraisMode === v ? 'var(--primary)' : 'inherit',
-                            fontWeight: fraisMode === v ? 700 : 400,
-                          }}>{l}</button>
-                      ))}
+                        onClick={() => setFrais([...frais, { designation: '', type: 'pct', valeur: '0', mode: 'separe' }])}>+ Poste</button>
                     </div>
                     <p className="muted" style={{ marginTop: -4, marginBottom: 10, fontSize: 11 }}>
-                      {fraisMode === 'inclus'
-                        ? 'Les frais sont dilués au prorata dans les prix unitaires — invisibles pour le client. Le total HT est identique.'
-                        : 'Les frais forment une ligne visible après le corps du devis.'}
+                      Chaque poste se règle indépendamment : <strong>Séparé</strong> = ligne visible sur
+                      le devis sous son propre intitulé ; <strong>Noyé</strong> = réparti dans les prix
+                      unitaires, invisible pour le client. Le total HT est le même dans les deux cas.
                     </p>
                     {frais.length === 0 ? (
                       <p className="muted" style={{ marginTop: 0, marginBottom: 12, fontSize: 12 }}>
@@ -757,7 +781,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                     ) : (
                       <>
                         <table className="grid" style={{ marginBottom: 6 }}>
-                          <thead><tr><th>Désignation</th><th style={{ width: 130 }}>Type</th><th style={{ textAlign: 'right', width: 110 }}>Valeur</th><th style={{ width: 40 }} /></tr></thead>
+                          <thead><tr><th>Désignation</th><th style={{ width: 130 }}>Type</th><th style={{ textAlign: 'right', width: 110 }}>Valeur</th><th style={{ width: 190 }}>Sur le devis</th><th style={{ width: 40 }} /></tr></thead>
                           <tbody>
                             {frais.map((f, i) => (
                               <tr key={i}>
@@ -770,6 +794,24 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                                 </td>
                                 <td style={{ textAlign: 'right' }}><input style={{ width: 80, textAlign: 'right' }} value={f.valeur}
                                   onChange={(ev) => setFrais(frais.map((x, j) => j === i ? { ...x, valeur: ev.target.value } : x))} /></td>
+                                <td>
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    {([['separe', 'Séparé'], ['inclus', 'Noyé']] as const).map(([v, l]) => {
+                                      const active = (f.mode ?? 'separe') === v;
+                                      return (
+                                        <button key={v} type="button" disabled={!isLatest}
+                                          onClick={() => setFrais(frais.map((x, j) => j === i ? { ...x, mode: v } : x))}
+                                          style={{
+                                            padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11,
+                                            border: active ? '2px solid var(--primary)' : '1px solid var(--border)',
+                                            background: active ? '#eff6ff' : '#fff',
+                                            color: active ? 'var(--primary)' : 'inherit',
+                                            fontWeight: active ? 700 : 400,
+                                          }}>{l}</button>
+                                      );
+                                    })}
+                                  </div>
+                                </td>
                                 <td style={{ textAlign: 'right' }}>
                                   <button className="btn-ghost" type="button" title="Retirer ce poste"
                                     onClick={() => setFrais(frais.filter((_, j) => j !== i))}>✕</button>
@@ -894,7 +936,12 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginTop: 14 }}>
                       {[
                         { l: 'PV hors frais', v: e(sale.data.pvHorsFrais) },
-                        { l: 'Frais annexes', v: e(sale.data.fraisAnnexes) },
+                        ...(sale.data.fraisDetail ?? []).map((fd) => ({
+                          l: fd.designation || 'Frais', v: e(fd.montant),
+                        })),
+                        ...(Number(sale.data.fraisAnnexesIntegres ?? 0) > 0.005
+                          ? [{ l: 'Frais noyés dans les prix', v: e(sale.data.fraisAnnexesIntegres) }]
+                          : []),
                         { l: 'Remise', v: e(sale.data.remise) },
                         { l: 'Total HT', v: e(sale.data.totalPvHt) },
                         { l: 'Marge brute', v: `${e(sale.data.margeBrute)}${marginPct(sale.data.margeBrute, sale.data.totalPvHt)}` },
@@ -1024,6 +1071,13 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 28 }}>
                           <div style={{ width: 340 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">PV brut HT</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(basePvBrut)}</span></div>
+                            {/* Chaque poste de frais SÉPARÉ apparaît sous son propre intitulé. */}
+                            {(sale.data?.fraisDetail ?? []).map((fd, i) => (
+                              <div key={`${fd.designation}-${i}`} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                                <span className="muted">{fd.designation || 'Frais'}</span>
+                                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(fd.montant)}</span>
+                              </div>
+                            ))}
                             {baseRemise > 0.001 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">Remise</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(baseRemise)}</span></div>}
                             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid var(--border)', fontWeight: 600 }}><span>Total HT</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(baseTotalHt)}</span></div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">TVA</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{e(baseTva)}</span></div>
@@ -1158,7 +1212,13 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
               {tab === 'client' && (
                 <>
                   <div className="form-section-title">Récapitulatif client</div>
-                  <div className="synthese-row"><span className="lbl">PV brut HT</span><span className="val">{e(sale.data?.pvDevis)}</span></div>
+                  <div className="synthese-row"><span className="lbl">PV brut HT</span><span className="val">{e(sale.data?.pvHorsFrais)}</span></div>
+                  {(sale.data?.fraisDetail ?? []).map((fd, i) => (
+                    <div key={`${fd.designation}-${i}`} className="synthese-row">
+                      <span className="lbl">{fd.designation || 'Frais'}</span>
+                      <span className="val">{e(fd.montant)}</span>
+                    </div>
+                  ))}
                   <div className="synthese-row">
                     <span className="lbl">Remise</span>
                     <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
@@ -1210,6 +1270,15 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
         </>
       )}
 
+      {devisSettings && d && (
+        <DevisSettingsModal
+          devis={d}
+          pending={saveDevisSettings.isPending}
+          onClose={() => setDevisSettings(false)}
+          onSave={(v) => { setErr(null); saveDevisSettings.mutate(v); }}
+        />
+      )}
+
       {libraryOpen && (
         <LibraryDrawer
           token={token}
@@ -1255,6 +1324,97 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─────────── Paramètres du devis ─────────── */
+
+function DevisSettingsModal({ devis, pending, onClose, onSave }: {
+  devis: DevisDetail['devis'];
+  pending: boolean;
+  onClose: () => void;
+  onSave: (v: {
+    numero: string; designation: string; type: string;
+    responsable: string; priorite: string; dateDebut: string; dateEcheance: string;
+  }) => void;
+}) {
+  const iso = (d?: string | null) => (d ? String(d).slice(0, 10) : '');
+  const [f, setF] = useState({
+    numero: devis.numero ?? '',
+    designation: devis.designation ?? '',
+    type: devis.type ?? 'principal',
+    responsable: devis.responsable ?? '',
+    priorite: devis.priorite ?? 'normale',
+    dateDebut: iso(devis.date_debut),
+    dateEcheance: iso(devis.date_echeance),
+  });
+  const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }));
+  const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3, display: 'block' };
+  const input: React.CSSProperties = { width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13 };
+  const Field = ({ l, children }: { l: string; children: React.ReactNode }) => (
+    <div style={{ flex: 1, minWidth: 0 }}><span style={label}>{l}</span>{children}</div>
+  );
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+      <div className="card" onClick={(ev) => ev.stopPropagation()} style={{ width: 'min(560px, 96vw)', maxHeight: '85vh', overflow: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ margin: 0 }}>Paramètres du devis</h2>
+          <button className="btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <p className="muted" style={{ marginTop: 2 }}>
+          Identité du devis et informations de pilotage. Le numéro est attribué automatiquement
+          à la création, mais reste modifiable ici.
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Field l="Numéro">
+              <input style={{ ...input, fontFamily: 'monospace' }} value={f.numero}
+                onChange={(ev) => set('numero', ev.target.value)} placeholder="DEV-2026-0001" />
+            </Field>
+            <Field l="Type">
+              <select style={input} value={f.type} onChange={(ev) => set('type', ev.target.value)}>
+                <option value="principal">Principal</option>
+                <option value="lot">Lot</option>
+                <option value="avenant">Avenant</option>
+              </select>
+            </Field>
+          </div>
+          <Field l="Désignation">
+            <input style={input} value={f.designation} onChange={(ev) => set('designation', ev.target.value)} />
+          </Field>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Field l="Responsable">
+              <input style={input} value={f.responsable} onChange={(ev) => set('responsable', ev.target.value)} />
+            </Field>
+            <Field l="Priorité">
+              <select style={input} value={f.priorite} onChange={(ev) => set('priorite', ev.target.value)}>
+                <option value="basse">Basse</option>
+                <option value="normale">Normale</option>
+                <option value="urgente">Urgente</option>
+                <option value="critique">Critique</option>
+              </select>
+            </Field>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Field l="Date de début">
+              <input type="date" style={input} value={f.dateDebut} onChange={(ev) => set('dateDebut', ev.target.value)} />
+            </Field>
+            <Field l="Date d'échéance">
+              <input type="date" style={input} value={f.dateEcheance} onChange={(ev) => set('dateEcheance', ev.target.value)} />
+            </Field>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button className="btn-secondary" onClick={onClose}>Annuler</button>
+          <button className="btn" disabled={pending || !f.designation.trim()} onClick={() => onSave(f)}>
+            {pending ? '…' : 'Enregistrer'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -39,6 +39,13 @@ export interface FraisAnnexe {
   type: FraisType;
   /** pct: percentage of PV hors frais (e.g. '2' = 2%); fixe: absolute amount */
   valeur: Decimal.Value;
+  /**
+   * Traitement de CE poste :
+   *  - 'separe' : ligne visible sur le devis, sous SON PROPRE intitulé ;
+   *  - 'inclus' : montant noyé dans les prix unitaires, invisible pour le client.
+   * À défaut, on retombe sur le mode par défaut du devis (SaleCoefficients.fraisMode).
+   */
+  mode?: 'separe' | 'inclus';
 }
 
 export interface Remise {
@@ -135,6 +142,11 @@ export interface VenteResult {
   fraisAnnexes: string;
   /** Montant des frais noyés dans les PV de ligne (mode « inclus »), pour traçabilité. */
   fraisAnnexesIntegres?: string;
+  /**
+   * Postes de frais SÉPARÉS, un par un et dans l'ordre de saisie — jamais regroupés :
+   * l'édition doit reprendre l'intitulé de chaque poste.
+   */
+  fraisDetail?: { designation: string; montant: string }[];
   pvDevis: string;
   remise: string;
   /** PV net = pvDevis − remise ; base de la TVA (nom conservé pour compat) */
@@ -208,12 +220,10 @@ function applyArrondi(value: Decimal, rule: ArrondiRule | null | undefined): Dec
   return rounded.times(pas);
 }
 
-/** Frais annexes amount: pct items apply to the PV hors frais, fixe items are added as-is. */
-function computeFraisAnnexes(frais: FraisAnnexe[], pvHorsFrais: Decimal): Decimal {
-  return frais.reduce((acc, f) => {
-    const v = new Decimal(f.valeur);
-    return acc.plus(f.type === 'pct' ? pvHorsFrais.times(v).dividedBy(100) : v);
-  }, new Decimal(0));
+/** Montant d'un poste : un pourcentage porte TOUJOURS sur le PV hors frais. */
+function montantFrais(f: FraisAnnexe, pvHorsFrais: Decimal): Decimal {
+  const v = new Decimal(f.valeur);
+  return f.type === 'pct' ? pvHorsFrais.times(v).dividedBy(100) : v;
 }
 
 /** Remise amount: pct applies to the PV devis, fixe is the amount itself. */
@@ -444,13 +454,29 @@ export function computeFeuilleDeVente(
     }
   }
 
-  let fraisAnnexesMt = round2(computeFraisAnnexes(coeffs.fraisAnnexes ?? [], pvHorsFrais));
+  // Chaque poste suit SON mode (à défaut, le mode par défaut du devis). Les pourcentages
+  // portent tous sur le même PV hors frais, avant toute dilution : le résultat ne dépend
+  // donc pas de l'ordre de saisie des postes.
+  const baseHorsFrais = pvHorsFrais;
+  const fraisDetail: { designation: string; montant: string }[] = [];
+  let fraisAnnexesMt = new Decimal(0);
+  let fraisAIntegrer = new Decimal(0);
+  for (const f of coeffs.fraisAnnexes ?? []) {
+    const mt = round2(montantFrais(f, baseHorsFrais));
+    if ((f.mode ?? coeffs.fraisMode ?? 'separe') === 'inclus') {
+      fraisAIntegrer = fraisAIntegrer.plus(mt);
+    } else {
+      fraisAnnexesMt = fraisAnnexesMt.plus(mt);
+      fraisDetail.push({ designation: f.designation, montant: mt.toString() });
+    }
+  }
   let fraisIntegres = new Decimal(0);
 
-  // Mode « noyé » : les frais annexes sont dilués dans les PV de ligne au prorata, de sorte que
-  // le client ne voit aucun poste de frais — seuls les prix unitaires augmentent. Les lignes au
-  // PV forcé sont préservées (décision explicite) et les autres absorbent le montant.
-  if (coeffs.fraisMode === 'inclus' && !fraisAnnexesMt.isZero()) {
+  // Postes « noyés » : dilués dans les PV de ligne au prorata, de sorte que le client ne voie
+  // aucun poste — seuls les prix unitaires augmentent. Les lignes au PV forcé sont préservées
+  // (décision explicite) et les autres absorbent le montant.
+  if (!fraisAIntegrer.isZero()) {
+    const fraisAnnexesMtIncl = fraisAIntegrer;
     const mainResults = results.filter((r) => r.section === 'main');
     const free = mainResults.filter((r) => !r.forced);
     const target = free.length > 0 ? free : mainResults;
@@ -458,18 +484,17 @@ export function computeFeuilleDeVente(
     if (!base.isZero()) {
       let running = new Decimal(0);
       target.forEach((r, i) => {
-        const share = new Decimal(r.pv).dividedBy(base).times(fraisAnnexesMt);
+        const share = new Decimal(r.pv).dividedBy(base).times(fraisAnnexesMtIncl);
         // La dernière ligne absorbe le résidu : la somme colle exactement au montant des frais.
-        const add = i === target.length - 1 ? fraisAnnexesMt.minus(running) : round2(share);
+        const add = i === target.length - 1 ? fraisAnnexesMtIncl.minus(running) : round2(share);
         running = running.plus(add);
         const pv = new Decimal(r.pv).plus(add);
         r.pv = round2(pv).toString();
         r.margeBrute = round2(pv.minus(new Decimal(r.debourse))).toString();
         r.margeNette = round2(pv.minus(new Decimal(r.revient))).toString();
       });
-      pvHorsFrais = round2(pvHorsFrais.plus(fraisAnnexesMt));
-      fraisIntegres = fraisAnnexesMt;
-      fraisAnnexesMt = new Decimal(0);
+      pvHorsFrais = round2(pvHorsFrais.plus(fraisAnnexesMtIncl));
+      fraisIntegres = fraisAnnexesMtIncl;
     }
   }
 
@@ -490,6 +515,7 @@ export function computeFeuilleDeVente(
     pvHorsFrais: pvHorsFrais.toString(),
     fraisAnnexes: fraisAnnexesMt.toString(),
     fraisAnnexesIntegres: fraisIntegres.toString(),
+    fraisDetail,
     pvDevis: round2(pvDevis).toString(),
     remise: remiseMt.toString(),
     totalPvHt: round2(pvNet).toString(),

@@ -53,6 +53,8 @@ export interface FraisAnnexeInput {
   type: FraisType;
   valeur: number | string;
   sortOrder?: number;
+  /** Traitement de CE poste : visible sur le devis ou noyé dans les prix. */
+  mode?: 'separe' | 'inclus' | null;
 }
 
 const ZERO_RATE: NatureSaleRate = { tauxFg: '0', tauxBenefice: '0' };
@@ -139,9 +141,10 @@ export class VenteService {
         const f = frais[i];
         await em.query(
           `INSERT INTO devis_frais_annexe
-             (tenant_id, devis_version_id, designation, type, valeur, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [tenantId, versionId, f.designation, f.type, String(f.valeur ?? 0), f.sortOrder ?? i],
+             (tenant_id, devis_version_id, designation, type, valeur, sort_order, mode)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [tenantId, versionId, f.designation, f.type, String(f.valeur ?? 0), f.sortOrder ?? i,
+           f.mode ?? null],
         );
       }
       return em.query(
@@ -176,7 +179,7 @@ export class VenteService {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertVersion(em, versionId);
       const fraisAnnexes = await em.query(
-        `SELECT designation, type, valeur FROM devis_frais_annexe
+        `SELECT designation, type, valeur, mode FROM devis_frais_annexe
           WHERE devis_version_id = $1 ORDER BY sort_order ASC`,
         [versionId],
       );
@@ -436,15 +439,16 @@ export class VenteService {
     versionId: string,
   ): Promise<SaleCoefficients> {
     const fraisRows = await em.query(
-      `SELECT designation, type, valeur FROM devis_frais_annexe
+      `SELECT designation, type, valeur, mode FROM devis_frais_annexe
         WHERE devis_version_id = $1 ORDER BY sort_order ASC`,
       [versionId],
     );
     const fraisAnnexes: FraisAnnexe[] = fraisRows.map(
-      (f: { designation: string; type: FraisType; valeur: string }) => ({
+      (f: { designation: string; type: FraisType; valeur: string; mode: 'separe' | 'inclus' | null }) => ({
         designation: f.designation,
         type: f.type,
         valeur: f.valeur,
+        mode: f.mode ?? undefined,
       }),
     );
 
