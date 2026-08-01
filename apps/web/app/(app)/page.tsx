@@ -15,7 +15,7 @@ interface DevisRow {
 
 const STATUS_LABEL: Record<string, string> = {
   won: 'Accepté', lost: 'Refusé', sent: 'Envoyé',
-  open: 'Brouillon', study: 'Brouillon', coeffs_proposed: 'Brouillon', coeffs_validated: 'Prêt',
+  open: 'En cours', followup: 'Relancé', revision: 'Révision',
 };
 const badgeClass = (s: string) =>
   s === 'won' ? 'badge success' : s === 'lost' ? 'badge danger' : s === 'sent' ? 'badge info' : 'badge';

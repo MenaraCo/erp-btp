@@ -627,7 +627,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 0, marginBottom: 8, flexWrap: 'wrap' }}>
-            <span className={d.status === 'won' ? 'badge success' : d.status === 'lost' ? 'badge danger' : (d.status === 'sent' || d.status === 'coeffs_validated') ? 'badge info' : 'badge'}>
+            <span className={d.status === 'won' ? 'badge success' : d.status === 'lost' ? 'badge danger' : d.status === 'sent' ? 'badge info' : 'badge'}>
               {AFFAIRE_STATUS_LABELS[d.status] ?? d.status}
             </span>
             <span style={{ color: 'var(--muted)', fontSize: 11 }}>{d.type}</span>

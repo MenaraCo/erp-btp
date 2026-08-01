@@ -40,7 +40,7 @@ const affaireBadge = (s: string) =>
   s === 'gagnee' ? 'badge success' : s === 'perdue' ? 'badge danger' : s === 'gagnee_partielle' ? 'badge info' : 'badge';
 /** badge variant for a devis workflow status */
 const devisBadge = (s: string) =>
-  s === 'won' ? 'badge success' : s === 'lost' ? 'badge danger' : s === 'sent' || s === 'coeffs_validated' ? 'badge info' : 'badge';
+  s === 'won' ? 'badge success' : s === 'lost' ? 'badge danger' : s === 'sent' ? 'badge info' : 'badge';
 
 export default function AffaireDetailPage() {
   const { token } = useAuth();

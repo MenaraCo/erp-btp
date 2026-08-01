@@ -56,17 +56,14 @@ interface Changelog {
 
 const TYPE_LABELS: Record<string, string> = { principal: 'Principal', lot: 'Lot', avenant: 'Avenant' };
 const STATUS_LABELS: Record<string, string> = {
-  open: 'Ouvert', study: 'Étude', coeffs_proposed: 'Coeff. proposés', coeffs_validated: 'Coeff. validés',
-  sent: 'Envoyé', won: 'Gagné', lost: 'Perdu', followup: 'Suivi', revision: 'Révision',
+  open: 'En cours', sent: 'Envoyé', won: 'Gagné', lost: 'Perdu',
+  followup: 'Relancé', revision: 'Révision',
 };
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   won:              { bg: '#dcfce7', color: '#15803d' },
   lost:             { bg: '#fee2e2', color: '#dc2626' },
   sent:             { bg: '#dbeafe', color: '#1d4ed8' },
-  coeffs_validated: { bg: '#dbeafe', color: '#1d4ed8' },
-  coeffs_proposed:  { bg: '#fef9c3', color: '#b45309' },
   open:             { bg: '#f1f5f9', color: '#475569' },
-  study:            { bg: '#f1f5f9', color: '#475569' },
   revision:         { bg: '#fef9c3', color: '#b45309' },
   followup:         { bg: '#f1f5f9', color: '#475569' },
 };
@@ -79,7 +76,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: 'won', label: 'Gagnés' },
   { key: 'lost', label: 'Perdus' },
 ];
-const OPEN_STATUSES = ['open', 'study', 'coeffs_proposed', 'coeffs_validated', 'revision', 'followup'];
+const OPEN_STATUSES = ['open', 'revision', 'followup'];
 const FILTER_STATUSES: Record<FilterTab, string[]> = {
   all: [], open: OPEN_STATUSES, sent: ['sent'], won: ['won'], lost: ['lost'],
 };

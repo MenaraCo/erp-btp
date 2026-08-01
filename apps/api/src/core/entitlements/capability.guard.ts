@@ -27,14 +27,21 @@ export class CapabilityGuard implements CanActivate {
       REQUIRES_ANY_CAPABILITY,
       [context.getHandler(), context.getClass()],
     );
+    // Aucune exigence : on laisse passer SANS toucher au contexte tenant — les routes
+    // publiques (santé, connexion) n'en ont pas et échoueraient si on le réclamait ici.
+    const hasAnyOf = Boolean(anyOf && anyOf.length > 0);
+    if (!capability && !hasAnyOf) {
+      return true;
+    }
+
     const tenantId = this.context.requireTenantId();
     const userId = this.context.getUserId();
 
     // « OU » : la première capacité satisfaite ouvre l'accès. On ne renvoie l'erreur que si
     // AUCUNE ne passe, en reprenant la dernière — elle porte le message le plus parlant.
-    if (anyOf && anyOf.length > 0) {
+    if (hasAnyOf) {
       let lastError: unknown = null;
-      for (const cap of anyOf) {
+      for (const cap of anyOf!) {
         try {
           await this.entitlements.assertCapability(tenantId, userId, cap);
           return true;
@@ -45,10 +52,7 @@ export class CapabilityGuard implements CanActivate {
       throw lastError;
     }
 
-    if (!capability) {
-      return true;
-    }
-    await this.entitlements.assertCapability(tenantId, userId, capability);
+    await this.entitlements.assertCapability(tenantId, userId, capability!);
     return true;
   }
 }

@@ -15,13 +15,10 @@ export function percent(fraction: string | number | null | undefined): string {
 }
 
 export const AFFAIRE_STATUS_LABELS: Record<string, string> = {
-  open: 'Ouverte',
-  study: 'Étude en cours',
-  coeffs_proposed: 'Coefficients proposés',
-  coeffs_validated: 'Coefficients validés',
-  sent: 'Envoyée',
-  won: 'Gagnée',
-  lost: 'Perdue',
-  followup: 'Relancée',
+  open: 'En cours',
+  sent: 'Envoyé',
+  won: 'Gagné',
+  lost: 'Perdu',
+  followup: 'Relancé',
   revision: 'Révision',
 };
