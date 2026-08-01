@@ -159,7 +159,10 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     queryFn: () => apiFetch<SaleConfig>(`/versions/${versionId}/sale-sheet/config`, { token }),
   });
   const affaireDetail = useQuery<{
-    affaire: { id: string; code: string; name: string };
+    affaire: {
+      id: string; code: string; name: string;
+      client?: { id: string; code: string; name: string; email: string | null; phone: string | null } | null;
+    };
     devis: Array<{ id: string; numero: string | null; designation: string; versions: Version[] }>
   }>({
     queryKey: ['affaire', affaireId],
@@ -454,6 +457,50 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     const v = versions.length > 1 ? `-v${versions.find((x) => x.id === versionId)?.version_no ?? ''}` : '';
     return `Devis-${String(ref).replace(/[^\w.-]+/g, '_')}${v}.pdf`;
   };
+
+  /**
+   * Prépare l'envoi du devis par mail : le PDF est téléchargé, puis le client de messagerie
+   * s'ouvre avec destinataire, objet et corps pré-remplis depuis le modèle des Paramètres.
+   *
+   * Un lien mailto ne peut PAS porter de pièce jointe (limite des clients de messagerie) :
+   * le PDF est donc téléchargé à côté, il reste à le glisser dans le message.
+   */
+  async function sendByMail() {
+    if (!versionId) return;
+    setPdfError(null);
+    const cli = affaireDetail.data?.affaire?.client ?? null;
+    const aff = affaireDetail.data?.affaire;
+    const fill = (tpl: string) =>
+      tpl
+        .replace(/\{CLIENT\}/g, cli?.name ?? 'Madame, Monsieur')
+        .replace(/\{DEVIS\}/g, d?.numero ?? d?.designation ?? '')
+        .replace(/\{AFFAIRE\}/g, `${aff?.code ?? ''} — ${aff?.name ?? ''}`.replace(/^ — | — $/, ''))
+        .replace(/\{MONTANT_HT\}/g, e(sale.data?.totalPvHt))
+        .replace(/\{MONTANT_TTC\}/g, e(sale.data?.totalTtc))
+        .replace(/\{DATE\}/g, new Date().toLocaleDateString('fr-FR'))
+        .replace(/\{SOCIETE\}/g, prefs.company_name ?? '');
+    const objet = fill(prefs.mail_devis_objet || 'Devis {DEVIS} — {AFFAIRE}');
+    const corps = fill(
+      prefs.mail_devis_corps ||
+        'Bonjour {CLIENT},\n\nVeuillez trouver ci-joint notre devis {DEVIS}.\n\nCordialement,\n{SOCIETE}',
+    );
+    try {
+      // 1) le PDF d'abord : il doit être dans les téléchargements quand le brouillon s'ouvre
+      await apiDownload(`/versions/${versionId}/devis.pdf`, token, pdfFilename());
+    } catch {
+      setPdfError('PDF indisponible — le mail est préparé sans la pièce jointe.');
+    }
+    // Ancre synthétique plutôt que location.href : pas de risque d'alerte « quitter la page »
+    // et le lien s'ouvre dans le client mail par défaut comme un lien ordinaire.
+    const to = encodeURIComponent(cli?.email ?? '');
+    const href = `mailto:${to}?subject=${encodeURIComponent(objet)}&body=${encodeURIComponent(corps)}`;
+    const a = document.createElement('a');
+    a.href = href;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
 
   async function downloadPdf() {
     if (!versionId) return;
@@ -1065,7 +1112,15 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                   <div className="card" style={{ marginTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <h2 style={{ margin: 0 }}>Aperçu du devis</h2>
-                      <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
+                        <button className="btn" onClick={sendByMail} disabled={!versionId}
+                          title={affaireDetail.data?.affaire?.client?.email
+                            ? `Préparer un mail à ${affaireDetail.data.affaire.client.email}`
+                            : "Aucune adresse client : le mail s'ouvrira sans destinataire"}>
+                          ✉ Envoyer par mail
+                        </button>
+                      </div>
                     </div>
                     <p className="muted" style={{ marginTop: 0 }}>Rendu du document tel qu&apos;il sera remis au client.</p>
                     {pdfError && <p className="muted">{pdfError}</p>}

@@ -273,6 +273,16 @@ export class DevisService {
       if (!affaire) {
         throw new NotFoundException(`Unknown affaire "${affaireId}"`);
       }
+      // Coordonnées du client : nécessaires pour préparer l'envoi du devis par mail.
+      if (affaire.client_id) {
+        const [cli] = await em.query(
+          `SELECT id, code, name, email, phone FROM client WHERE id = $1`,
+          [affaire.client_id],
+        );
+        affaire.client = cli ?? null;
+      } else {
+        affaire.client = null;
+      }
       const devis = await em.query(
         `SELECT id, numero, designation, type, status, sort_order FROM devis
           WHERE affaire_id = $1 ORDER BY sort_order ASC, created_at ASC`,

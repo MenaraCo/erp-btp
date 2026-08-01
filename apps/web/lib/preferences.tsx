@@ -21,6 +21,11 @@ export interface Preferences {
   taux_tva: number[];
   default_tab: 'etude' | 'coefficients' | 'client' | 'pdf';
   nb_decimales: 2 | 3 | 4;
+  /** Raison sociale, renvoyée avec les préférences (jointure company). */
+  company_name?: string;
+  /** Modèle du mail d'envoi de devis (variables {CLIENT}, {DEVIS}, {MONTANT_TTC}…). */
+  mail_devis_objet?: string;
+  mail_devis_corps?: string;
 }
 
 export const DEFAULT_PREFS: Preferences = {

@@ -34,6 +34,9 @@ export interface PreferencesInput {
   devisNumeroAnnee?: boolean;
   /** Longueur de la séquence du numéro (0001 = 4). */
   devisNumeroDigits?: number;
+  /** Modèle du mail d'envoi de devis (variables {CLIENT}, {DEVIS}, {MONTANT_TTC}…). */
+  mailDevisObjet?: string;
+  mailDevisCorps?: string;
   couleurPrincipale?: string;
   couleurAccent?: string;
   tauxTva?: number[];
@@ -435,6 +438,8 @@ export class ParamsService {
            nb_decimales       = COALESCE($10::smallint, nb_decimales),
            devis_numero_annee = COALESCE($11::boolean, devis_numero_annee),
            devis_numero_digits= COALESCE($12::smallint, devis_numero_digits),
+           mail_devis_objet   = COALESCE($13, mail_devis_objet),
+           mail_devis_corps   = COALESCE($14, mail_devis_corps),
            updated_at         = now()
          WHERE company_id = $1`,
         [
@@ -450,6 +455,8 @@ export class ParamsService {
           input.nbDecimales ?? null,
           input.devisNumeroAnnee ?? null,
           input.devisNumeroDigits ?? null,
+          input.mailDevisObjet ?? null,
+          input.mailDevisCorps ?? null,
         ],
       );
       // Retourner le résultat dans la MÊME transaction (évite le deadlock de connexion)

@@ -77,7 +77,7 @@ const NAT_OPTS = [
 ];
 const natLabel = (v: string) => NAT_OPTS.find((n) => n.v === v)?.l ?? v;
 interface Company { id: string; code: string; name: string; has_logo?: boolean; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
-interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; devis_numero_annee?: boolean; devis_numero_digits?: number; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
+interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; devis_numero_annee?: boolean; devis_numero_digits?: number; mail_devis_objet?: string; mail_devis_corps?: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
 /* ─────────── tabs ─────────── */
 
@@ -792,6 +792,8 @@ function TabPreferences({ token }: { token: string }) {
         devisSeparator: f('devis_separator') || null,
         devisNumeroAnnee: (form.devis_numero_annee ?? String(prefs?.devis_numero_annee ?? true)) === 'true',
         devisNumeroDigits: Number(form.devis_numero_digits ?? prefs?.devis_numero_digits ?? 4),
+        mailDevisObjet: f('mail_devis_objet') || null,
+        mailDevisCorps: f('mail_devis_corps') || null,
         couleurPrincipale: f('couleur_principale') || null,
         couleurAccent: f('couleur_accent') || null,
         tauxTva: currentTva,
@@ -960,6 +962,25 @@ function TabPreferences({ token }: { token: string }) {
             {'1'.padStart(Number(form.devis_numero_digits ?? prefs?.devis_numero_digits ?? 4), '0')}
           </strong>. Un numéro saisi à la main est toujours respecté.
         </p>
+      </Card>
+
+      <Card title="Modèle de mail d'envoi de devis">
+        <p className="muted" style={{ fontSize: 11, margin: '0 0 10px' }}>
+          Utilisé par le bouton « Envoyer par mail » de l&apos;aperçu du devis. Variables
+          disponibles :{' '}
+          {['{CLIENT}', '{DEVIS}', '{AFFAIRE}', '{MONTANT_HT}', '{MONTANT_TTC}', '{DATE}', '{SOCIETE}'].map((v) => (
+            <code key={v} style={{ background: 'var(--surface)', padding: '1px 5px', borderRadius: 4, marginRight: 4, fontSize: 10 }}>{v}</code>
+          ))}
+        </p>
+        <Field label="Objet">
+          <input className="input" style={{ width: '100%' }} value={f('mail_devis_objet')}
+            onChange={(e) => setForm({ ...form, mail_devis_objet: e.target.value })} />
+        </Field>
+        <Field label="Corps du message">
+          <textarea className="input" rows={9} style={{ width: '100%', fontFamily: 'inherit', resize: 'vertical' }}
+            value={f('mail_devis_corps')}
+            onChange={(e) => setForm({ ...form, mail_devis_corps: e.target.value })} />
+        </Field>
       </Card>
 
       {/* ── Couleurs ── */}
