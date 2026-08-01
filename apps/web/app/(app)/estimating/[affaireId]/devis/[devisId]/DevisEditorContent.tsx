@@ -1206,8 +1206,14 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                   <div className="synthese-row"><span className="lbl">Débours</span><span className="val" style={{ color: 'var(--accent)' }}>{e(sale.data?.totalDebourse)}</span></div>
                   <div className="synthese-row" style={{ color: 'var(--primary)' }}><span className="lbl">× FG → Prix de revient</span><span className="val">{e(sale.data?.totalRevient)}</span></div>
                   <div className="synthese-row" style={{ color: 'var(--primary)' }}><span className="lbl">× Bén. → PV hors frais</span><span className="val">{e(sale.data?.pvHorsFrais)}</span></div>
+                  {Number(sale.data?.fraisAnnexesIntegres) > 0.001 && (
+                    <div className="synthese-row" style={{ color: '#d97706' }}>
+                      <span className="lbl">dont frais noyés dans les PV</span>
+                      <span className="val">{e(sale.data?.fraisAnnexesIntegres)}</span>
+                    </div>
+                  )}
                   {Number(sale.data?.fraisAnnexes) > 0.001 && (
-                    <div className="synthese-row" style={{ color: '#d97706' }}><span className="lbl">+ Frais annexes</span><span className="val">{e(sale.data?.fraisAnnexes)}</span></div>
+                    <div className="synthese-row" style={{ color: '#d97706' }}><span className="lbl">+ Frais annexes séparés</span><span className="val">{e(sale.data?.fraisAnnexes)}</span></div>
                   )}
                   <div className="synthese-row" style={{ borderTop: '1px solid var(--border)', fontWeight: 700, paddingTop: 6 }}><span>PV final</span><span className="val">{e(sale.data?.pvDevis)}</span></div>
                   <div style={{ background: 'var(--primary)', color: '#fff', borderRadius: 6, textAlign: 'center', padding: '10px 12px', margin: '12px 0' }}>
@@ -1263,7 +1269,31 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
 
               <div className="form-section-title" style={{ marginTop: 18 }}>Synthèse financière</div>
               <div className="synthese-row"><span className="lbl">Déboursé total</span><span className="val">{e(sale.data?.totalDebourse)}</span></div>
-              <div className="synthese-row"><span className="lbl">Frais annexes</span><span className="val">{e(sale.data?.fraisAnnexes)}</span></div>
+              {/* Total des frais annexes = postes séparés + postes noyés dans les prix. La ligne
+                  doit refléter la charge RÉELLE de frais du devis, pas seulement la part visible. */}
+              {(() => {
+                const sep = Number(sale.data?.fraisAnnexes ?? 0);
+                const noyes = Number(sale.data?.fraisAnnexesIntegres ?? 0);
+                const total = sep + noyes;
+                return (
+                  <div className="synthese-row">
+                    <span className="lbl">
+                      Frais annexes
+                      {total > 0.005 && (sep > 0.005 && noyes > 0.005) && (
+                        <span className="muted" style={{ fontSize: 9, display: 'block', lineHeight: 1.3 }}>
+                          dont {e(sep)} séparés · {e(noyes)} noyés
+                        </span>
+                      )}
+                      {total > 0.005 && noyes > 0.005 && sep <= 0.005 && (
+                        <span className="muted" style={{ fontSize: 9, display: 'block', lineHeight: 1.3 }}>
+                          noyés dans les prix
+                        </span>
+                      )}
+                    </span>
+                    <span className="val">{e(total)}</span>
+                  </div>
+                );
+              })()}
               <div className="synthese-row"><span className="lbl">Prix de revient</span><span className="val">{e(sale.data?.totalRevient)}</span></div>
               <div className="synthese-row"><span className="lbl">PV net</span><span className="val">{e(sale.data?.totalPvHt)}</span></div>
               <div className="synthese-row">
