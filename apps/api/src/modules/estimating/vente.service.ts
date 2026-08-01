@@ -42,6 +42,8 @@ export interface SaleSheetInput {
   arrondi?: { pas: number | string; mode?: 'proche' | 'sup' | 'inf' } | null;
   /** PV total imposé (hors frais annexes et remise) ; null = pas d'imposition. */
   pvImpose?: number | string | null;
+  /** Frais annexes : poste séparé sur le devis, ou noyés dans les prix unitaires. */
+  fraisMode?: 'separe' | 'inclus';
   remise?: { type: FraisType; valeur: number | string } | null;
   tvaRate?: number | string;
 }
@@ -95,8 +97,8 @@ export class VenteService {
         await em.query(
           `INSERT INTO sale_sheet
              (tenant_id, devis_version_id, coefficients, st_types, tva_rate, remise_type,
-              remise_valeur, arrondi_pas, arrondi_mode, pv_impose)
-           VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8, $9, $10)
+              remise_valeur, arrondi_pas, arrondi_mode, pv_impose, frais_mode)
+           VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (devis_version_id)
            DO UPDATE SET coefficients = EXCLUDED.coefficients,
                          st_types = EXCLUDED.st_types,
@@ -106,6 +108,7 @@ export class VenteService {
                          arrondi_pas = EXCLUDED.arrondi_pas,
                          arrondi_mode = EXCLUDED.arrondi_mode,
                          pv_impose = EXCLUDED.pv_impose,
+                         frais_mode = EXCLUDED.frais_mode,
                          updated_at = now()
            RETURNING *`,
           [
@@ -119,6 +122,7 @@ export class VenteService {
             String(input.arrondi?.pas ?? 0),
             input.arrondi?.mode ?? 'proche',
             input.pvImpose != null && String(input.pvImpose) !== '' ? String(input.pvImpose) : null,
+            input.fraisMode ?? 'separe',
           ],
         )
       )[0];
@@ -178,14 +182,14 @@ export class VenteService {
       );
       const rows = await em.query(
         `SELECT coefficients, st_types, tva_rate, remise_type, remise_valeur,
-                arrondi_pas, arrondi_mode, pv_impose
+                arrondi_pas, arrondi_mode, pv_impose, frais_mode
            FROM sale_sheet WHERE devis_version_id = $1`,
         [versionId],
       );
       if (rows.length === 0) {
         return {
           configured: false, byNature: null, stTypes: [], remise: null, tvaRate: null,
-          arrondi: null, pvImpose: null, fraisAnnexes,
+          arrondi: null, pvImpose: null, fraisMode: 'separe', fraisAnnexes,
         };
       }
       const c = rows[0];
@@ -200,6 +204,7 @@ export class VenteService {
         stTypes: c.st_types ?? [],
         arrondi: { pas: String(c.arrondi_pas ?? 0), mode: c.arrondi_mode ?? 'proche' },
         pvImpose: c.pv_impose != null ? String(c.pv_impose) : null,
+        fraisMode: c.frais_mode ?? 'separe',
         remise: { type: c.remise_type as FraisType, valeur: String(c.remise_valeur) },
         tvaRate: String(c.tva_rate),
         fraisAnnexes,
@@ -477,6 +482,7 @@ export class VenteService {
           ? { pas: String(c.arrondi_pas), mode: (c.arrondi_mode ?? 'proche') as 'proche' | 'sup' | 'inf' }
           : null,
       pvImpose: c.pv_impose != null ? String(c.pv_impose) : null,
+      fraisMode: (c.frais_mode ?? 'separe') as 'separe' | 'inclus',
       fraisAnnexes,
       remise: remiseValeur.isZero()
         ? null

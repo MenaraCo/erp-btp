@@ -393,4 +393,69 @@ describe('vente-calc — feuille de vente', () => {
     expect(res.items[0].margeBrute).toBe('500'); // 1500 − 1000
     expect(res.items[0].margeNette).toBe('400'); // 1500 − 1100
   });
+
+  /* ─────────── E.2 — frais annexes : à part ou noyés dans les prix unitaires ─────────── */
+
+  it("E.2 — mode « séparé » (défaut) : les frais s'ajoutent après les lignes", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'A', vendable: true, debourseByNature: { material: '400' } },
+        { id: 'B', vendable: true, debourseByNature: { material: '600' } },
+      ],
+      coeffs({ fraisAnnexes: [{ designation: 'Prorata', type: 'pct', valeur: '10' }] }),
+    );
+    expect(res.pvHorsFrais).toBe('1000');
+    expect(res.fraisAnnexes).toBe('100');
+    expect(res.pvDevis).toBe('1100');
+    expect(res.items.find((i) => i.id === 'A')!.pv).toBe('400'); // PU de ligne inchangé
+  });
+
+  it("E.2 — mode « noyé » : les frais sont répartis dans les PV de ligne, au prorata", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'A', vendable: true, debourseByNature: { material: '400' } },
+        { id: 'B', vendable: true, debourseByNature: { material: '600' } },
+      ],
+      coeffs({
+        fraisAnnexes: [{ designation: 'Prorata', type: 'pct', valeur: '10' }],
+        fraisMode: 'inclus',
+      }),
+    );
+    // 100 € de frais dilués : A 400→440, B 600→660
+    expect(res.items.find((i) => i.id === 'A')!.pv).toBe('440');
+    expect(res.items.find((i) => i.id === 'B')!.pv).toBe('660');
+    // plus de poste de frais séparé, mais le total est identique
+    expect(res.fraisAnnexes).toBe('0');
+    expect(res.fraisAnnexesIntegres).toBe('100');
+    expect(res.pvDevis).toBe('1100');
+    expect(res.totalPvHt).toBe('1100');
+  });
+
+  it("E.2 — noyés : le total HT est identique aux deux modes", () => {
+    const items = [
+      { id: 'A', vendable: true, debourseByNature: { material: '700' } },
+      { id: 'B', vendable: true, debourseByNature: { material: '300' } },
+    ];
+    const frais = [{ designation: 'Installation', type: 'fixe' as const, valeur: '250' }];
+    const sep = computeFeuilleDeVente(items, coeffs({ fraisAnnexes: frais }));
+    const inc = computeFeuilleDeVente(items, coeffs({ fraisAnnexes: frais, fraisMode: 'inclus' }));
+    expect(inc.totalPvHt).toBe(sep.totalPvHt);
+    expect(inc.totalTtc).toBe(sep.totalTtc);
+  });
+
+  it("E.2 — noyés : une ligne au PV forcé garde son prix, les autres absorbent les frais", () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'FORCE', vendable: true, debourseByNature: { material: '400' }, forcedPv: '400' },
+        { id: 'LIBRE', vendable: true, debourseByNature: { material: '600' } },
+      ],
+      coeffs({
+        fraisAnnexes: [{ designation: 'Prorata', type: 'fixe', valeur: '60' }],
+        fraisMode: 'inclus',
+      }),
+    );
+    expect(res.items.find((i) => i.id === 'FORCE')!.pv).toBe('400');
+    expect(res.items.find((i) => i.id === 'LIBRE')!.pv).toBe('660');
+    expect(res.totalPvHt).toBe('1060');
+  });
 });

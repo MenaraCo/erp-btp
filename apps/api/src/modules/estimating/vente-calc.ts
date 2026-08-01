@@ -87,6 +87,13 @@ export interface SaleCoefficients {
   stRates?: Record<string, NatureSaleRate>;
   fraisAnnexes?: FraisAnnexe[];
   remise?: Remise | null;
+  /**
+   * Traitement des frais annexes :
+   *  - 'separe' (défaut) : poste distinct ajouté après les lignes, visible sur le devis ;
+   *  - 'inclus'          : montant NOYÉ dans les PV de ligne (au prorata), donc invisible
+   *                        pour le client. Le total HT est identique dans les deux cas.
+   */
+  fraisMode?: 'separe' | 'inclus';
   /** Arrondi appliqué au PV CALCULÉ de chaque ligne (un PV forcé reste tel quel). */
   arrondi?: ArrondiRule | null;
   /**
@@ -126,6 +133,8 @@ export interface VenteResult {
   /** Σ des PV de ligne (forcés ou calculés), avant frais annexes & remise */
   pvHorsFrais: string;
   fraisAnnexes: string;
+  /** Montant des frais noyés dans les PV de ligne (mode « inclus »), pour traçabilité. */
+  fraisAnnexesIntegres?: string;
   pvDevis: string;
   remise: string;
   /** PV net = pvDevis − remise ; base de la TVA (nom conservé pour compat) */
@@ -435,7 +444,35 @@ export function computeFeuilleDeVente(
     }
   }
 
-  const fraisAnnexesMt = round2(computeFraisAnnexes(coeffs.fraisAnnexes ?? [], pvHorsFrais));
+  let fraisAnnexesMt = round2(computeFraisAnnexes(coeffs.fraisAnnexes ?? [], pvHorsFrais));
+  let fraisIntegres = new Decimal(0);
+
+  // Mode « noyé » : les frais annexes sont dilués dans les PV de ligne au prorata, de sorte que
+  // le client ne voit aucun poste de frais — seuls les prix unitaires augmentent. Les lignes au
+  // PV forcé sont préservées (décision explicite) et les autres absorbent le montant.
+  if (coeffs.fraisMode === 'inclus' && !fraisAnnexesMt.isZero()) {
+    const mainResults = results.filter((r) => r.section === 'main');
+    const free = mainResults.filter((r) => !r.forced);
+    const target = free.length > 0 ? free : mainResults;
+    const base = target.reduce((acc, r) => acc.plus(new Decimal(r.pv)), new Decimal(0));
+    if (!base.isZero()) {
+      let running = new Decimal(0);
+      target.forEach((r, i) => {
+        const share = new Decimal(r.pv).dividedBy(base).times(fraisAnnexesMt);
+        // La dernière ligne absorbe le résidu : la somme colle exactement au montant des frais.
+        const add = i === target.length - 1 ? fraisAnnexesMt.minus(running) : round2(share);
+        running = running.plus(add);
+        const pv = new Decimal(r.pv).plus(add);
+        r.pv = round2(pv).toString();
+        r.margeBrute = round2(pv.minus(new Decimal(r.debourse))).toString();
+        r.margeNette = round2(pv.minus(new Decimal(r.revient))).toString();
+      });
+      pvHorsFrais = round2(pvHorsFrais.plus(fraisAnnexesMt));
+      fraisIntegres = fraisAnnexesMt;
+      fraisAnnexesMt = new Decimal(0);
+    }
+  }
+
   const pvDevis = pvHorsFrais.plus(fraisAnnexesMt);
   const remiseMt = round2(computeRemise(coeffs.remise, pvDevis));
   const pvNet = pvDevis.minus(remiseMt);
@@ -452,6 +489,7 @@ export function computeFeuilleDeVente(
     totalRevient: round2(totalRevient).toString(),
     pvHorsFrais: pvHorsFrais.toString(),
     fraisAnnexes: fraisAnnexesMt.toString(),
+    fraisAnnexesIntegres: fraisIntegres.toString(),
     pvDevis: round2(pvDevis).toString(),
     remise: remiseMt.toString(),
     totalPvHt: round2(pvNet).toString(),

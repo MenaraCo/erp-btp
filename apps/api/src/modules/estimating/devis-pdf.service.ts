@@ -185,6 +185,8 @@ export class DevisPdfService {
       fraisAnnexes: string;
       tva: string;
       totalTtc: string;
+      optionsPvHt: string;
+      variantesPvHt: string;
     },
     decimals: number,
   ): Promise<Buffer> {
@@ -406,26 +408,6 @@ export class DevisPdfService {
         doc.moveDown(0.35);
       });
 
-      /* ────────── Récapitulatif par lot ────────── */
-      const topTitres = (childrenOf.get(null) ?? []).filter(
-        (l) => (l.type === 'titre' || l.type === 'sous_titre') && !sectionById.get(l.id),
-      );
-      if (topTitres.length > 1) {
-        ensureRoom(40 + topTitres.length * 14);
-        doc.moveDown(0.6);
-        doc.fontSize(9).font('Helvetica-Bold').fillColor(h.colors.primary)
-          .text('Récapitulatif par lot', M, doc.y);
-        doc.moveDown(0.3);
-        doc.fontSize(8.5).font('Helvetica').fillColor('#334155');
-        for (const t of topTitres) {
-          const sub = this.subtreeTotal(t.id, childrenOf, pvByLine);
-          const ry = doc.y;
-          doc.text(`${numbers.get(t.id) ?? ''}  ${t.designation}`.trim(), M + 4, ry, { width: DESIG_MAX - M });
-          doc.text(money(sub), COL_MT - 90, ry, { width: 90, align: 'right' });
-          doc.moveDown(0.35);
-        }
-      }
-
       /* ────────── Totaux ────────── */
       ensureRoom(110);
       doc.moveDown(0.6);
@@ -452,6 +434,69 @@ export class DevisPdfService {
       totRow('TVA', money(totals.tva));
       doc.moveDown(0.15);
       totRow('Total TTC', money(totals.totalTtc), { big: true });
+
+      /* ────────── Récapitulatif par lot (après les totaux) ────────── */
+      const topTitres = (childrenOf.get(null) ?? []).filter(
+        (l) => (l.type === 'titre' || l.type === 'sous_titre') && !sectionById.get(l.id),
+      );
+      if (topTitres.length > 1) {
+        ensureRoom(40 + topTitres.length * 14);
+        doc.moveDown(0.6);
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(h.colors.primary)
+          .text('Récapitulatif par lot', M, doc.y);
+        doc.moveDown(0.3);
+        doc.fontSize(8.5).font('Helvetica').fillColor('#334155');
+        for (const t of topTitres) {
+          const sub = this.subtreeTotal(t.id, childrenOf, pvByLine);
+          const ry = doc.y;
+          doc.text(`${numbers.get(t.id) ?? ''}  ${t.designation}`.trim(), M + 4, ry, { width: DESIG_MAX - M });
+          doc.text(money(sub), COL_MT - 90, ry, { width: 90, align: 'right' });
+          doc.moveDown(0.35);
+        }
+      }
+
+
+      /* ────────── Options & variantes (hors total du marché) ────────── */
+      const extras = lines.filter((l) => {
+        const sec = sectionById.get(l.id);
+        return (sec === 'option' || sec === 'variante') && (l.type === 'titre' || l.type === 'sous_titre' || l.type === 'ouvrage');
+      });
+      if (extras.length > 0 || Number(totals.optionsPvHt) > 0.005 || Number(totals.variantesPvHt) > 0.005) {
+        ensureRoom(60);
+        doc.moveDown(0.8);
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(h.colors.accent)
+          .text('Options et variantes', M, doc.y);
+        doc.fontSize(7.5).font('Helvetica-Oblique').fillColor('#64748b')
+          .text('Chiffrées à titre indicatif — non comprises dans le total ci-dessus.', M, doc.y + 1);
+        doc.moveDown(0.4);
+        doc.fontSize(8.5).font('Helvetica').fillColor('#334155');
+        for (const l of extras) {
+          const pv = pvByLine.get(l.id);
+          const sub = pv != null ? Number(pv) : this.subtreeTotal(l.id, childrenOf, pvByLine);
+          if (Math.abs(sub) < 0.005) continue;
+          const ry = doc.y;
+          const tag = sectionById.get(l.id) === 'option' ? 'Option' : 'Variante';
+          doc.text(`${tag} · ${numbers.get(l.id) ?? ''} ${l.designation}`.trim(), M + 4, ry, { width: DESIG_MAX - M });
+          doc.text(money(sub), COL_MT - 90, ry, { width: 90, align: 'right' });
+          doc.moveDown(0.35);
+        }
+        if (Number(totals.optionsPvHt) > 0.005) {
+          const ry = doc.y;
+          doc.font('Helvetica-Bold');
+          doc.text('Total options HT', M + 4, ry, { width: DESIG_MAX - M });
+          doc.text(money(totals.optionsPvHt), COL_MT - 90, ry, { width: 90, align: 'right' });
+          doc.font('Helvetica');
+          doc.moveDown(0.35);
+        }
+        if (Number(totals.variantesPvHt) > 0.005) {
+          const ry = doc.y;
+          doc.font('Helvetica-Bold');
+          doc.text('Total variantes HT', M + 4, ry, { width: DESIG_MAX - M });
+          doc.text(money(totals.variantesPvHt), COL_MT - 90, ry, { width: 90, align: 'right' });
+          doc.font('Helvetica');
+          doc.moveDown(0.35);
+        }
+      }
 
       /* ────────── Pied de page sur toutes les pages ────────── */
       const range = doc.bufferedPageRange();
