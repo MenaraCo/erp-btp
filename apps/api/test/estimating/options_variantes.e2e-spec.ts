@@ -75,7 +75,7 @@ describe('Estimating — options & variantes', () => {
     expect(optItem.section).toBe('option');
 
     // Acceptation : le marché ne contient que la base (1 ligne), pas l'option
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;

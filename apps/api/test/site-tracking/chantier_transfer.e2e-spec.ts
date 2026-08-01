@@ -45,7 +45,7 @@ describe('Site-tracking 3.1 — transfert affaire gagnée → chantier', () => {
     await as('put', `/versions/${created.version.id}/sale-sheet`)
       .send({ byNature: { labor: { tauxFg: '50', tauxBenefice: '0' }, material: { tauxFg: '20', tauxBenefice: '0' }, equipment: { tauxFg: '0', tauxBenefice: '0' }, subcontract: { tauxFg: '0', tauxBenefice: '0' } }, tvaRate: '0.20' })
       .expect(200);
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
     return created.devis.id as string;

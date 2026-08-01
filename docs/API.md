@@ -12,6 +12,7 @@
 | Méthode | Route | Capacité | Permission | Notes |
 |---|---|---|---|---|
 | GET | `/health` | — | — | Public (aucun tenant requis) |
+| GET | `/me/capabilities` | — | — | Capacités ouvertes à l'utilisateur (module actif + jeton) + modules actifs ; alimente le menu, qui masque une entrée non souscrite au lieu de la laisser mener à un 403 |
 | POST | `/auth/login` | — | — | `{ email, password, totp? }` → `{ accessToken }` |
 | POST | `/auth/mfa/enable` | — | — | Authentifié (token) → `{ secret }` (TOTP) |
 
@@ -63,14 +64,19 @@
 | GET | `/chantiers/:chantierId/analytical-results` | `financial.read` | Budget/engagé/réalisé agrégés sur l'axe analytique nature→lot→famille (§5.8) ; seau « Non réparti » par nature + branche « Frais de chantier » ; totaux réconciliés |
 | GET | `/chantiers/:chantierId/forecast` | `financial.read` (cap. `financial.forecast`) | **Prévisionnel / vue Conducteur (B.3)** : assemble les 4 axes + avancement + paramètres versionnés → indicateurs (budget avancé, écart au stade, EAC, marge prévisionnelle €/%, alertes) |
 
-## Acceptation / Suivi de chantiers — Chantier 1→N Marché
+## Acceptation de commande — la charnière étude → exécution
 
-L'acceptation d'une affaire gagnée crée un **marché** rattaché à un **chantier** (nouveau ou existant). Un chantier agrège plusieurs marchés ; les coûts s'agrègent au chantier (§5.4/5.5).
+Un devis **gagné** ne devient exécutable que par l'acceptation de commande : elle crée UN **marché** rattaché à un **chantier** (nouveau ou existant), avec ses lignes de facturation ET son étude d'exécution, dans **une seule transaction**. Un chantier agrège plusieurs marchés ; les coûts s'agrègent au chantier (§5.4/5.5).
+
+Ces routes s'ouvrent avec **`invoicing.situations` OU `site_tracking.budget`** (garde `@RequiresAnyCapability`) : l'outil n'a d'intérêt que si l'on facture ou si l'on suit des chantiers.
 
 | Méthode | Route | Permission | Notes |
 |---|---|---|---|
+| GET | `/acceptance/pending` | `invoicing.read` | File d'attente : devis gagnés dont la dernière version n'a pas encore de marché, au **montant de vente** (feuille de vente) |
+| GET | `/acceptance/accepted` | `invoicing.read` | Commandes acceptées : marché + chantier + devis d'origine |
+| GET | `/acceptance/devis/:devisId` | `invoicing.read` | Fiche d'acceptation : client, montants (déboursé/HT/TVA/TTC), **options et variantes** chiffrées une par une, chantiers existants, alertes (`acceptable: false` si bloquante) |
+| POST | `/devis/:devisId/accept` | `invoicing.write` | Accepte la commande. Corps `{ chantierId?, retainedSectionIds? }` : `chantierId` rattache à un chantier existant (sinon création), `retainedSectionIds` liste les options/variantes **retenues**, qui entrent alors au marché. Devis non gagné → 409 ; version déjà acceptée → 409 |
 | POST | `/chantiers` | `site_tracking.write` | Crée un chantier vide (unité d'agrégation) `{ code, name }` ; code dupliqué → 409 |
-| POST | `/affaires/:affaireId/accept` | `invoicing.write` | **Acceptation unifiée (§5.4)** : crée UN marché sur un chantier (nouveau ou existant via corps `{ chantierId }`) portant **à la fois** la chaîne de facturation (lignes de marché) **et** l'étude d'exécution ; double acceptation d'une version → 409 |
 | GET | `/chantiers/:chantierId/marches` | `site_tracking.read` | Liste des marchés agrégés par le chantier |
 
 ## Plan analytique (capacité `estimating.bid`)

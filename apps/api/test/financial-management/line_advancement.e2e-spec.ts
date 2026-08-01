@@ -47,7 +47,7 @@ describe('Financial — avancement ouvrage par ouvrage', () => {
       .send({ type: 'ouvrage', code: '2', designation: 'Ouvrage B', sourceOuvrageId: ob.id, quantity: '10' }).expect(201);
     await as('put', `/versions/${created.version.id}/sale-sheet`)
       .send({ byNature: { labor: '1', material: '1', equipment: '1', subcontract: '1' }, fraisCoefficient: '1', tvaRate: '0.20' }).expect(200);
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;

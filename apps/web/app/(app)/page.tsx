@@ -14,7 +14,7 @@ interface DevisRow {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  won: 'Accepté', lost: 'Refusé', sent: 'Envoyé',
+  won: 'Gagné', lost: 'Perdu', sent: 'Envoyé',
   open: 'En cours', followup: 'Relancé', revision: 'Révision',
 };
 const badgeClass = (s: string) =>
@@ -63,14 +63,14 @@ export default function DashboardPage() {
 
       {/* KPI financiers */}
       <div style={kpiGrid}>
-        <KpiCard label="CA accepté (total)" value={euro(caAccepte)} accent
+        <KpiCard label="CA gagné (total)" value={euro(caAccepte)} accent
           sub={`Déboursé ${euro(deboursAccepte)}`} loading={loading} />
         <KpiCard label="CA prévisionnel" value={euro(caPrevisionnel)}
           sub={`${sent.length} devis envoyé(s)`} loading={loading} />
         <KpiCard label="CA ce mois" value={euro(caMois)}
           sub={`${nbMois} devis créé(s)`} loading={loading} />
         <KpiCard label="Taux de transformation" value={`${tauxTransfo} %`} good
-          sub={`${won.length} accepté(s) / ${devis.length} total`} loading={loading} />
+          sub={`${won.length} gagné(s) / ${devis.length} total`} loading={loading} />
         <KpiCard label="Clients" value={clientsQ.data?.total ?? '—'} sub="Référentiel" loading={clientsQ.isLoading} />
       </div>
 
@@ -79,7 +79,7 @@ export default function DashboardPage() {
       <div style={statusGrid}>
         <StatusTile n={drafts.length} label="Brouillons" color="#64748b" />
         <StatusTile n={sent.length} label="Envoyés" color="#2563eb" />
-        <StatusTile n={won.length} label="Acceptés" color="#16a34a" />
+        <StatusTile n={won.length} label="Gagnés" color="#16a34a" />
         <StatusTile n={lost.length} label="Refusés" color="#dc2626" />
       </div>
 

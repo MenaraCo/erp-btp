@@ -34,7 +34,7 @@ describe('Estimating 1.5 — workflow de devis (rule #7)', () => {
   it('suit le chemin nominal open -> ... -> won', async () => {
     const devis = await newDevis('WF-1');
     expect(devis.status).toBe('open');
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       const res = await as('post', `/devis/${devis.id}/transition`).send({ to }).expect(201);
       expect(res.body.devis.status).toBe(to);
     }
@@ -42,7 +42,8 @@ describe('Estimating 1.5 — workflow de devis (rule #7)', () => {
 
   it('refuse (409) une transition non autorisée', async () => {
     const devis = await newDevis('WF-2');
-    await as('post', `/devis/${devis.id}/transition`).send({ to: 'won' }).expect(409);
+    // Un devis « En cours » n'a jamais été envoyé : on ne peut donc pas le « Relancer ».
+    await as('post', `/devis/${devis.id}/transition`).send({ to: 'followup' }).expect(409);
   });
 
   it('transfer-check : bloquant tant que non Gagné, ok une fois Gagné', async () => {
@@ -51,7 +52,7 @@ describe('Estimating 1.5 — workflow de devis (rule #7)', () => {
     expect(before.transferable).toBe(false);
     expect(before.alerts.some((a: { level: string }) => a.level === 'blocking')).toBe(true);
 
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       await as('post', `/devis/${devis.id}/transition`).send({ to }).expect(201);
     }
     const after = (await as('get', `/devis/${devis.id}/transfer-check`).expect(200)).body;

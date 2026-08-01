@@ -343,7 +343,7 @@ async function ensureSampleChantier(
     ))[0];
     if (!devis) return;
 
-    const path = ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won'];
+    const path = ['sent', 'won'];
     if (devis.status !== 'won') {
       for (const to of path) {
         await s.workflow.transition(devis.id, to);

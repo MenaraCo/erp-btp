@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { LayoutDashboard } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -133,7 +134,13 @@ export default function ChantiersPage() {
             </tbody>
           </table>
         )}
-        {data && data.length === 0 && <p className="muted" style={{ padding: 16 }}>Aucun chantier.</p>}
+        {data && data.length === 0 && (
+          <p className="muted" style={{ padding: 16 }}>
+            Aucun chantier. Un chantier naît d’une commande acceptée : passez par «&nbsp;
+            <Link href="/acceptation" style={{ color: 'var(--accent)' }}>Acceptation de commande</Link>
+            &nbsp;» pour transformer un devis gagné.
+          </p>
+        )}
       </div>
     </div>
   );

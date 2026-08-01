@@ -39,7 +39,7 @@ describe('Prévisionnel de chantier B.3 — moteur d’indicateurs branché (§5
       .send({ type: 'ouvrage', code: '1', designation: 'Lot', sourceOuvrageId: ouv.id, quantity: '10' }).expect(201);
     await as('put', `/versions/${created.version.id}/sale-sheet`)
       .send({ byNature: { labor: { tauxFg: '50', tauxBenefice: '0' }, material: { tauxFg: '0', tauxBenefice: '0' }, equipment: { tauxFg: '0', tauxBenefice: '0' }, subcontract: { tauxFg: '0', tauxBenefice: '0' } }, tvaRate: '0.20' }).expect(200);
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;

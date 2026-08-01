@@ -19,8 +19,39 @@ export class AcceptanceController {
   @Post('devis/:devisId/accept')
   @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
   @RequiresPermission('invoicing.write')
-  accept(@Param('devisId') devisId: string, @Body() body?: { chantierId?: string | null }) {
-    return this.acceptance.accept(devisId, body?.chantierId ?? null);
+  accept(
+    @Param('devisId') devisId: string,
+    @Body() body?: { chantierId?: string | null; retainedSectionIds?: string[] },
+  ) {
+    return this.acceptance.accept(
+      devisId,
+      body?.chantierId ?? null,
+      body?.retainedSectionIds ?? [],
+    );
+  }
+
+  /** File d'attente de l'écran : les commandes gagnées qui restent à accepter. */
+  @Get('acceptance/pending')
+  @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
+  @RequiresPermission('invoicing.read')
+  pending() {
+    return this.acceptance.listPending();
+  }
+
+  /** Historique : les commandes déjà transformées en marché + chantier. */
+  @Get('acceptance/accepted')
+  @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
+  @RequiresPermission('invoicing.read')
+  accepted() {
+    return this.acceptance.listAccepted();
+  }
+
+  /** Fiche d'acceptation d'un devis : client, montants, options à retenir, chantier cible. */
+  @Get('acceptance/devis/:devisId')
+  @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
+  @RequiresPermission('invoicing.read')
+  sheet(@Param('devisId') devisId: string) {
+    return this.acceptance.getSheet(devisId);
   }
 
   @Get('marches')

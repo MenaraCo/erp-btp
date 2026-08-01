@@ -102,7 +102,7 @@ export default function StructurePage() {
         </p>
       )}
       {tree.data && tree.data.marches.length === 0 && (
-        <p className="muted">Ce chantier n'a pas encore de marché (aucun devis transféré).</p>
+        <p className="muted">Ce chantier n'a pas encore de marché : passez par « Acceptation de commande » pour y rattacher un devis gagné.</p>
       )}
 
       {tree.data?.marches.map((m) => (

@@ -26,7 +26,7 @@ describe('Estimating — couche devis (affaire 1→N devis, statut dérivé, acc
   }
 
   async function winDevis(devisId: string) {
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       await as('post', `/devis/${devisId}/transition`).send({ to }).expect(201);
     }
   }

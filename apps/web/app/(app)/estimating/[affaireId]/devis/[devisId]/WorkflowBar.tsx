@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useMutation } from '@tanstack/react-query';
 import { ArrowRight } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -75,7 +76,11 @@ export function WorkflowBar({
           ))}
           {status === 'won' && (
             <span className="muted" style={{ fontSize: 11 }}>
-              — la suite se fait dans <strong>Acceptation de commande</strong> : marché, chantier et budgets.
+              — la suite se fait dans{' '}
+              <Link href="/acceptation" style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                Acceptation de commande
+              </Link>{' '}
+              : marché, chantier et budgets.
             </span>
           )}
         </div>

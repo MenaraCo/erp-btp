@@ -51,7 +51,7 @@ describe('Invoicing — les ressources autonomes sont transférées (budget + fa
       byNature: { labor: { tauxFg: '0', tauxBenefice: '0' }, material: { tauxFg: '0', tauxBenefice: '0' },
         equipment: { tauxFg: '0', tauxBenefice: '0' }, subcontract: { tauxFg: '0', tauxBenefice: '0' } }, tvaRate: '0.20',
     }).expect(200);
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;

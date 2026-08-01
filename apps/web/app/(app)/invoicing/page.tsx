@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
@@ -75,7 +76,13 @@ export default function InvoicingPage() {
             </tbody>
           </table>
         )}
-        {data && data.length === 0 && <p className="muted" style={{ padding: 16 }}>Aucun marché.</p>}
+        {data && data.length === 0 && (
+          <p className="muted" style={{ padding: 16 }}>
+            Aucun marché. Un marché naît d’une commande acceptée : passez par «&nbsp;
+            <Link href="/acceptation" style={{ color: 'var(--accent)' }}>Acceptation de commande</Link>
+            &nbsp;» pour transformer un devis gagné.
+          </p>
+        )}
       </div>
     </div>
   );

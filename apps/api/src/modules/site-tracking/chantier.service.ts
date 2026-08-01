@@ -52,13 +52,13 @@ export class ChantierService {
     const { tenantId, affaire, marcheCode, marcheName, versionId, venteTotal, targetChantierId } =
       args;
     if ((await em.query(`SELECT id FROM marche WHERE devis_version_id = $1`, [versionId])).length > 0) {
-      throw new ConflictException('This affaire version has already been accepted (marché exists).');
+      throw new ConflictException('Cette version du devis a déjà été acceptée (un marché existe).');
     }
     let chantierId: string;
     if (targetChantierId) {
       const found = await em.query(`SELECT id FROM chantier WHERE id = $1 FOR UPDATE`, [targetChantierId]);
       if (found.length === 0) {
-        throw new NotFoundException(`Unknown chantier "${targetChantierId}"`);
+        throw new NotFoundException(`Chantier introuvable (${targetChantierId}).`);
       }
       chantierId = found[0].id;
       await em.query(
@@ -109,7 +109,22 @@ export class ChantierService {
    */
   async materialiseExecutionForMarche(marcheId: string): Promise<number> {
     const tenantId = this.context.requireTenantId();
-    return runInTenant(this.dataSource, tenantId, async (em) => {
+    return runInTenant(this.dataSource, tenantId, (em) =>
+      this.materialiseExecutionInTx(em, tenantId, marcheId),
+    );
+  }
+
+  /**
+   * Même travail, mais DANS la transaction de l'appelant : l'acceptation de commande crée le
+   * marché et son étude d'exécution d'un seul tenant. Sans cela, un échec de matérialisation
+   * laisserait un marché sans budget — un chantier à moitié né, que rien ne rattrape ensuite.
+   */
+  async materialiseExecutionInTx(
+    em: EntityManager,
+    tenantId: string,
+    marcheId: string,
+  ): Promise<number> {
+    {
       const marcheRows = await em.query(
         `SELECT chantier_id, devis_version_id FROM marche WHERE id = $1`,
         [marcheId],
@@ -146,7 +161,35 @@ export class ChantierService {
       )) {
         resById.set(r.id, r);
       }
+      // La nomenclature est unique par (chantier, code). Or le devis n'y est pour rien : il peut
+      // porter des ressources sans code, deux fois le même code, et le chantier peut déjà tenir la
+      // nomenclature d'un marché précédent. On reprend donc l'existant et on n'invente un code que
+      // lorsqu'il le faut — jamais d'échec d'acceptation pour une collision de libellé technique.
       const nomencByResource = new Map<string, string>();
+      const usedCodes = new Set<string>();
+      for (const row of await em.query(
+        `SELECT id, code, source_resource_id FROM nomenclature_resource WHERE chantier_id = $1`,
+        [chantier.id],
+      )) {
+        usedCodes.add(row.code);
+        if (row.source_resource_id) nomencByResource.set(row.source_resource_id, row.id);
+      }
+      /** Code libre pour ce chantier : le code souhaité, sinon suffixé, sinon généré. */
+      const freeCode = (wanted: string | null | undefined): string => {
+        const base = (wanted ?? '').trim();
+        if (base && !usedCodes.has(base)) {
+          usedCodes.add(base);
+          return base;
+        }
+        const stem = base || 'RES';
+        for (let i = 2; ; i += 1) {
+          const candidate = `${stem}-${i}`.slice(0, 64);
+          if (!usedCodes.has(candidate)) {
+            usedCodes.add(candidate);
+            return candidate;
+          }
+        }
+      };
 
       const ensureNomenclature = async (resourceId: string): Promise<string> => {
         const cached = nomencByResource.get(resourceId);
@@ -160,7 +203,7 @@ export class ChantierService {
                (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
                 unit_cost_etude, unit_cost_objectif, code_analytique_id)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING id`,
-            [tenantId, chantier.id, marcheId, resourceId, r.code, r.label, r.unit, r.nature,
+            [tenantId, chantier.id, marcheId, resourceId, freeCode(r.code), r.label, r.unit, r.nature,
               r.unit_cost, r.code_analytique_id ?? null],
           )
         )[0];
@@ -201,7 +244,7 @@ export class ChantierService {
                (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
                 unit_cost_etude, unit_cost_objectif, code_analytique_id)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING id`,
-            [tenantId, chantier.id, marcheId, l.source_resource_id ?? null, l.code ?? '', l.designation,
+            [tenantId, chantier.id, marcheId, l.source_resource_id ?? null, freeCode(l.code), l.designation,
               l.unit, nature, l.pu ?? '0', src?.code_analytique_id ?? null],
           )
         )[0].id;
@@ -344,7 +387,7 @@ export class ChantierService {
 
       await this.recompute(em, tenantId, chantier.id, true, marcheId);
       return count;
-    });
+    }
   }
 
   /** Recomputes the objectif budget by nature for every top line (étude too when freeze). */

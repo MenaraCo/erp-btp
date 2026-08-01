@@ -43,7 +43,7 @@ describe('Invoicing — le marché copie l’arbre du devis (titres + ouvrages)'
       .send({ type: 'ouvrage', code: '1.2', designation: 'Ouvrage B', sourceOuvrageId: ouv.id, quantity: '5', parentLineId: titre.id }).expect(201);
     await as('put', `/versions/${versionId}/sale-sheet`)
       .send({ byNature: { labor: '1', material: '1', equipment: '1', subcontract: '1' }, fraisCoefficient: '1', tvaRate: '0.20' }).expect(200);
-    for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+    for (const to of ['sent', 'won']) {
       await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;

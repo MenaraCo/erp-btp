@@ -6,8 +6,9 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, CalendarDays, FolderOpen, FileText, BookOpen,
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
-  CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload,
+  CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
 } from 'lucide-react';
+import { ACCEPTANCE_CAPABILITIES, useCapabilities } from '@/lib/capabilities';
 
 const STORAGE_KEY = 'erp-sidebar-collapsed';
 
@@ -16,6 +17,8 @@ interface NavItem {
   label: string;
   section: string;
   level?: number;
+  /** Entrée réservée : masquée tant qu'aucune de ces capacités n'est ouverte. */
+  anyCapability?: string[];
 }
 
 const NAV: NavItem[] = [
@@ -29,6 +32,12 @@ const NAV: NavItem[] = [
   { href: '/estimating/imports', label: 'Imports', section: 'Études de prix' },
   { href: '/clients', label: 'Clients', section: 'Référentiel' },
   { href: '/suppliers', label: 'Fournisseurs', section: 'Référentiel' },
+  {
+    href: '/acceptation',
+    label: 'Acceptation de commande',
+    section: 'Exécution',
+    anyCapability: ACCEPTANCE_CAPABILITIES,
+  },
   { href: '/direction', label: 'Direction', section: 'Exécution' },
   { href: '/chantiers', label: 'Chantiers', section: 'Exécution' },
   { href: '/invoicing', label: 'Facturation', section: 'Exécution' },
@@ -48,6 +57,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/estimating/imports': Upload,
   '/clients': Users,
   '/suppliers': Truck,
+  '/acceptation': ClipboardCheck,
   '/direction': Gauge,
   '/chantiers': Building2,
   '/invoicing': Receipt,
@@ -78,6 +88,7 @@ function isActive(href: string, pathname: string): boolean {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const caps = useCapabilities();
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -106,7 +117,11 @@ export function Sidebar() {
       </div>
 
       {/* Nav items — sub-items hidden in collapsed mode */}
-      {NAV.map((item) => {
+      {NAV.filter(
+        // Une entrée réservée reste cachée tant que sa capacité n'est pas ouverte : mieux vaut
+        // ne rien montrer qu'un lien qui finit en « accès refusé ».
+        (item) => !item.anyCapability || caps.isLoading || caps.hasAny(...item.anyCapability),
+      ).map((item) => {
         const showSection = item.section !== lastSection;
         lastSection = item.section;
         const active = isActive(item.href, pathname);

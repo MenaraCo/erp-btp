@@ -86,6 +86,30 @@ export class EntitlementsService {
     }
   }
 
+  /**
+   * Capacités RÉELLEMENT ouvertes à l'utilisateur courant : module actif chez le tenant ET jeton
+   * affecté. C'est ce que le frontend lit pour n'afficher que les entrées de menu utilisables —
+   * l'écran ne décide rien, il se contente de refléter la même règle que la garde côté serveur.
+   */
+  async listCapabilitiesForUser(
+    tenantId: string,
+    userId: string | undefined,
+  ): Promise<string[]> {
+    const active = await this.getActiveModuleCodes(tenantId);
+    if (active.length === 0 || !userId) {
+      return [];
+    }
+    const seated = await runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT module_code FROM seat_assignment WHERE user_id = $1 AND module_code = ANY($2)`,
+        [userId, active],
+      );
+      return rows.map((r: { module_code: string }) => r.module_code);
+    });
+    const keys = await this.catalog.getCapabilityKeysForModuleCodes(seated);
+    return [...keys].sort();
+  }
+
   /** Users of the tenant (for the seat-assignment console). */
   listUsers(
     tenantId: string,
