@@ -282,7 +282,16 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     mutationFn: () =>
       apiFetch(`/versions/${versionId}/frais-annexes`, {
         method: 'PUT',
-        body: { frais: frais.map((f) => ({ designation: f.designation, type: f.type, valeur: f.valeur || '0' })) },
+        body: {
+          frais: frais.map((f) => ({
+            designation: f.designation,
+            type: f.type,
+            valeur: f.valeur || '0',
+            // Sans le mode, le poste retombait sur le réglage global du devis : tous les
+            // frais se retrouvaient noyés dans les prix, y compris ceux marqués « Séparé ».
+            mode: f.mode ?? 'separe',
+          })),
+        },
         token,
       }),
     onSuccess: () => refresh(),
@@ -822,7 +831,12 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                         </table>
                         {sale.data && (
                           <p className="muted" style={{ marginTop: 0, marginBottom: 12, fontSize: 11 }}>
-                            Total frais appliqué : <strong>{e(sale.data.fraisAnnexes)}</strong>
+                            Frais séparés : <strong>{e(sale.data.fraisAnnexes)}</strong>
+                            {Number(sale.data.fraisAnnexesIntegres ?? 0) > 0.005 && (
+                              <> · noyés dans les prix : <strong>{e(sale.data.fraisAnnexesIntegres)}</strong></>
+                            )}
+                            {' · '}total appliqué :{' '}
+                            <strong>{e(Number(sale.data.fraisAnnexes) + Number(sale.data.fraisAnnexesIntegres ?? 0))}</strong>
                           </p>
                         )}
                       </>
@@ -998,8 +1012,14 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                 const remiseFraction = pvDevisN > 0 ? totalPvHtN / pvDevisN : 1;
                 const tvaRate = totalPvHtN > 0 ? tvaTotal / totalPvHtN : 0;
                 const basePvBrut = apercuTotals.base;
-                const baseTotalHt = basePvBrut * remiseFraction;
-                const baseRemise = basePvBrut - baseTotalHt;
+                // Les frais SÉPARÉS s'ajoutent au PV des lignes : sans eux, le Total HT de
+                // l'aperçu ne collerait pas au devis réel (ils ne sont pas dans les lignes).
+                const baseFraisSepares = (sale.data?.fraisDetail ?? []).reduce(
+                  (acc, f) => acc + Number(f.montant), 0,
+                );
+                const baseAvantRemise = basePvBrut + baseFraisSepares;
+                const baseTotalHt = baseAvantRemise * remiseFraction;
+                const baseRemise = baseAvantRemise - baseTotalHt;
                 const baseTva = baseTotalHt * tvaRate;
                 const baseTtc = baseTotalHt + baseTva;
 
