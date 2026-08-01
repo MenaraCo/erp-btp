@@ -502,6 +502,64 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     a.remove();
   }
 
+  /** Bordereau d'appel d'offre : structure + quantités, prix laissés à compléter. */
+  async function downloadBordereau() {
+    if (!versionId) return;
+    setPdfError(null);
+    try {
+      await apiDownload(
+        `/versions/${versionId}/devis.pdf?bordereau=1`, token,
+        pdfFilename().replace(/^Devis-/, 'Bordereau-'),
+      );
+    } catch {
+      setPdfError('PDF indisponible.');
+    }
+  }
+
+  /**
+   * Export DPGF (Excel) : la décomposition du prix global et forfaitaire, une ligne par poste.
+   * `avecPrix = false` produit le bordereau vierge à faire chiffrer.
+   */
+  function exportDpgf(avecPrix: boolean) {
+    const rows: (string | number)[][] = [[
+      'N°', 'Désignation', 'Unité', 'Quantité',
+      ...(avecPrix ? ['P.U. HT', 'Montant HT'] : ['P.U. HT', 'Montant HT']),
+    ]];
+    for (const { line, depth } of orderTree((lines.data ?? []) as DevisLine[])) {
+      // Le sous-détail de déboursé ne fait pas partie du DPGF remis au client.
+      const parent = (lines.data ?? []).find((x) => x.id === line.parent_line_id);
+      if (parent?.type === 'ouvrage') continue;
+      if (line.type === 'texte') continue;
+      const item = itemById.get(line.id);
+      const isTitre = line.type === 'titre' || line.type === 'sous_titre';
+      const qty = line.quantity != null ? Number(line.quantity) : '';
+      const pv = item ? Number(item.pv) : '';
+      const pu = item && qty ? Number(item.pv) / Number(qty) : '';
+      rows.push([
+        line.numero ?? '',
+        `${'    '.repeat(depth)}${line.designation}`,
+        isTitre ? '' : (line.unit ?? ''),
+        isTitre ? '' : qty,
+        avecPrix && !isTitre ? (pu === '' ? '' : round(pu, prefs.nb_decimales)) : '',
+        avecPrix ? (pv === '' ? '' : round(pv, prefs.nb_decimales)) : '',
+      ]);
+    }
+    if (avecPrix && sale.data) {
+      rows.push([]);
+      for (const fd of sale.data.fraisDetail ?? []) {
+        rows.push(['', fd.designation, '', '', '', round(Number(fd.montant), prefs.nb_decimales)]);
+      }
+      rows.push(['', 'TOTAL HT', '', '', '', round(Number(sale.data.totalPvHt), prefs.nb_decimales)]);
+      rows.push(['', 'TVA', '', '', '', round(Number(sale.data.tva), prefs.nb_decimales)]);
+      rows.push(['', 'TOTAL TTC', '', '', '', round(Number(sale.data.totalTtc), prefs.nb_decimales)]);
+    }
+    downloadXlsx(
+      `${avecPrix ? 'DPGF' : 'Bordereau'}_${d?.numero || d?.designation || devisId}`,
+      rows,
+      avecPrix ? 'DPGF' : 'Bordereau',
+    );
+  }
+
   async function downloadPdf() {
     if (!versionId) return;
     setPdfError(null);
@@ -1112,8 +1170,16 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                   <div className="card" style={{ marginTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <h2 style={{ margin: 0 }}>Aperçu du devis</h2>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
+                        <button className="btn-secondary" onClick={downloadBordereau} disabled={!versionId}
+                          title="Édition d'appel d'offre : structure et quantités, prix à compléter">
+                          Bordereau (sans prix)
+                        </button>
+                        <button className="btn-secondary" onClick={() => exportDpgf(true)} disabled={!versionId}
+                          title="Décomposition du prix global et forfaitaire, avec les prix">
+                          DPGF Excel
+                        </button>
                         <button className="btn" onClick={sendByMail} disabled={!versionId}
                           title={affaireDetail.data?.affaire?.client?.email
                             ? `Préparer un mail à ${affaireDetail.data.affaire.client.email}`

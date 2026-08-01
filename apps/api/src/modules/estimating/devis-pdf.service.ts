@@ -68,7 +68,7 @@ export class DevisPdfService {
     private readonly vente: VenteService,
   ) {}
 
-  async generate(versionId: string): Promise<Buffer> {
+  async generate(versionId: string, opts: { bordereau?: boolean } = {}): Promise<Buffer> {
     const tenantId = this.context.requireTenantId();
     const data = await runInTenant(this.dataSource, tenantId, async (em) => {
       const v = await em.query(
@@ -134,7 +134,10 @@ export class DevisPdfService {
     };
     const decimals = Number(data.prefs?.nb_decimales ?? 2);
 
-    return this.render(header, data.lines, depths, numbers, pvByLine, sectionById, totals, decimals);
+    return this.render(
+      header, data.lines, depths, numbers, pvByLine, sectionById, totals, decimals,
+      Boolean(opts.bordereau),
+    );
   }
 
   private computeDepths(lines: DevisLineRow[]): Map<string, number> {
@@ -190,6 +193,11 @@ export class DevisPdfService {
       variantesPvHt: string;
     },
     decimals: number,
+    /**
+     * Mode BORDEREAU (appel d'offre) : la structure et les quantités sont imprimées, mais les
+     * prix sont laissés vides — le soumissionnaire les complète. Aucun total n'est affiché.
+     */
+    bordereau = false,
   ): Promise<Buffer> {
     const M = 40;
     const PAGE_W = 595 - M * 2;
@@ -267,8 +275,8 @@ export class DevisPdfService {
       const boxW = 210;
       const boxX = RIGHT - boxW;
       doc.roundedRect(boxX, M, boxW, 74, 4).fillAndStroke('#f8fafc', '#cbd5e1');
-      doc.fillColor(h.colors.primary).fontSize(15).font('Helvetica-Bold')
-        .text('DEVIS', boxX + 10, M + 8, { width: boxW - 20 });
+      doc.fillColor(h.colors.primary).fontSize(bordereau ? 12 : 15).font('Helvetica-Bold')
+        .text(bordereau ? 'BORDEREAU DE PRIX' : 'DEVIS', boxX + 10, M + 8, { width: boxW - 20 });
       doc.fontSize(8).font('Helvetica').fillColor('#334155');
       const ref = h.devis.numero ?? h.affaire.code;
       doc.text(`N° ${ref}${h.version.version_no > 1 ? `  (v${h.version.version_no})` : ''}`, boxX + 10, M + 28, { width: boxW - 20 });
@@ -307,6 +315,15 @@ export class DevisPdfService {
           M, doc.y, { width: PAGE_W - 250 },
         );
       }
+      if (bordereau) {
+        doc.moveDown(0.4);
+        doc.fontSize(8).font('Helvetica-Oblique').fillColor(h.colors.accent)
+          .text(
+            "Bordereau de prix — merci de compléter les prix unitaires et les montants. "
+            + 'Les quantités sont indiquées à titre contractuel.',
+            M, doc.y, { width: PAGE_W - 250 },
+          );
+      }
       doc.moveDown(0.8);
 
       /* ────────── En-tête de colonnes (répété à chaque page) ────────── */
@@ -317,6 +334,7 @@ export class DevisPdfService {
         doc.text('DÉSIGNATION', M + 4, hy + 3, { width: DESIG_MAX - M });
         doc.text('U', COL_UNIT - 30, hy + 3, { width: 30, align: 'right' });
         doc.text('QTÉ', COL_QTY - 58, hy + 3, { width: 58, align: 'right' });
+        // Libellés courts : la consigne « à compléter » figure déjà en tête de document.
         doc.text('P.U. HT', COL_PU - 58, hy + 3, { width: 58, align: 'right' });
         doc.text('MONTANT HT', COL_MT - 74, hy + 3, { width: 74, align: 'right' });
         doc.y = hy + 20;
@@ -361,12 +379,12 @@ export class DevisPdfService {
             doc.rect(M, ty - 2, PAGE_W, 17).fill(h.colors.primary);
             doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#fff');
             doc.text(`${num}  ${line.designation}`.trim(), M + 5, ty + 2, { width: DESIG_MAX - M });
-            doc.text(money(sub), COL_MT - 90, ty + 2, { width: 90, align: 'right' });
+            if (!bordereau) doc.text(money(sub), COL_MT - 90, ty + 2, { width: 90, align: 'right' });
             doc.y = ty + 21;
           } else {
             doc.fontSize(9).font('Helvetica-Bold').fillColor(h.colors.primary);
             doc.text(`${num}  ${line.designation}`.trim(), indent, ty, { width: DESIG_MAX - indent });
-            doc.text(money(sub), COL_MT - 90, ty, { width: 90, align: 'right' });
+            if (!bordereau) doc.text(money(sub), COL_MT - 90, ty, { width: 90, align: 'right' });
             doc.moveDown(0.4);
           }
           return;
@@ -398,11 +416,20 @@ export class DevisPdfService {
         const endY = doc.y;
         doc.text(line.unit ?? '', COL_UNIT - 30, rowY, { width: 30, align: 'right' });
         if (qty != null) doc.text(nf(qty), COL_QTY - 58, rowY, { width: 58, align: 'right' });
-        if (pu != null) doc.text(nf(pu), COL_PU - 58, rowY, { width: 58, align: 'right' });
-        if (pv != null) {
-          doc.font('Helvetica-Bold')
-            .text(money(pv), COL_MT - 74, rowY, { width: 74, align: 'right' });
-          doc.font('Helvetica');
+        if (bordereau) {
+          // Cases à compléter : un filet discret sous chaque colonne de prix.
+          if (qty != null) {
+            const by = rowY + 9;
+            doc.moveTo(COL_PU - 56, by).lineTo(COL_PU, by).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+            doc.moveTo(COL_MT - 72, by).lineTo(COL_MT, by).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+          }
+        } else {
+          if (pu != null) doc.text(nf(pu), COL_PU - 58, rowY, { width: 58, align: 'right' });
+          if (pv != null) {
+            doc.font('Helvetica-Bold')
+              .text(money(pv), COL_MT - 74, rowY, { width: 74, align: 'right' });
+            doc.font('Helvetica');
+          }
         }
         doc.y = Math.max(endY, rowY + 12);
         doc.moveTo(M, doc.y + 2).lineTo(RIGHT, doc.y + 2).strokeColor('#eef2f7').lineWidth(0.5).stroke();
@@ -410,6 +437,9 @@ export class DevisPdfService {
       });
 
       /* ────────── Totaux ────────── */
+      // En bordereau, aucun montant n'est communiqué : les totaux, le récapitulatif par lot
+      // et les options chiffrées sont omis — c'est au soumissionnaire de les établir.
+      if (!bordereau) {
       ensureRoom(110);
       doc.moveDown(0.6);
       const tX = RIGHT - 250;
@@ -506,6 +536,29 @@ export class DevisPdfService {
           doc.font('Helvetica');
           doc.moveDown(0.35);
         }
+      }
+
+      } // fin du bloc « hors bordereau »
+
+      if (bordereau) {
+        // Cartouche de récapitulation à compléter par le soumissionnaire.
+        ensureRoom(90);
+        doc.moveDown(1);
+        const bX = RIGHT - 250;
+        doc.moveTo(bX, doc.y).lineTo(RIGHT, doc.y).strokeColor(h.colors.primary).lineWidth(1).stroke();
+        doc.moveDown(0.5);
+        doc.fontSize(9).font('Helvetica').fillColor('#334155');
+        for (const l of ['Total HT', 'TVA', 'Total TTC']) {
+          const ry = doc.y;
+          doc.text(l, bX, ry, { width: 120 });
+          doc.moveTo(bX + 130, ry + 10).lineTo(RIGHT, ry + 10).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+          doc.moveDown(0.9);
+        }
+        doc.moveDown(0.6);
+        doc.fontSize(8).font('Helvetica').fillColor('#334155');
+        doc.text('Date :', M, doc.y);
+        doc.moveDown(1.2);
+        doc.text('Cachet et signature du soumissionnaire :', M, doc.y);
       }
 
       /* ────────── Pied de page sur toutes les pages ────────── */
