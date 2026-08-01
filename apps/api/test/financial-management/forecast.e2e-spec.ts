@@ -64,20 +64,23 @@ describe('Prévisionnel de chantier B.3 — moteur d’indicateurs branché (§5
 
   it('assemble les 4 axes + avancement et calcule les indicateurs', async () => {
     const res = (await as('get', `/chantiers/${chantierId}/forecast`).expect(200)).body;
-    // vente=1200 (80×1.5×10), budget=800, prévisionnel=800, engagé=200, réalisé=150, avancement=0.5
+    // vente=1200 (80×1.5×10) ; budget=1200 = déboursé 800 + frais généraux 400 (50 % de FG),
+    // repris du devis à l'acceptation ; prévisionnel=budget, engagé=200, réalisé=150, avanc.=0.5
     expect(res.inputs.vente).toBe('1200.00');
-    expect(res.inputs.budget).toBe('800.00');
+    expect(res.inputs.budget).toBe('1200.00');
     expect(res.inputs.engage).toBe('200.00');
     expect(res.inputs.realise).toBe('150.00');
     expect(res.avancement).toBe('0.5000');
 
     const i = res.indicators;
-    expect(i.budgetAvance).toBe('400.00'); // 800 × 0.5
-    expect(i.ecartAuStade).toBe('50.00'); // 400 − (150 + 200)
-    expect(i.eac).toBe('800.00'); // m1 (défaut) = réalisé + reste à dépenser = prévisionnel
-    expect(i.margePrevisionnelle).toBe('400.00'); // 1200 − 800
-    expect(i.cpi).toBe('2.6667'); // 400 / 150
-    expect(i.alerts).not.toContain('marge'); // marge 33% > cible 5%
+    expect(i.budgetAvance).toBe('600.00'); // 1200 × 0.5
+    expect(i.ecartAuStade).toBe('250.00'); // 600 − (150 + 200)
+    expect(i.eac).toBe('1200.00'); // m1 (défaut) = réalisé + reste à dépenser = prévisionnel
+    // Marge nulle : le devis ne prend aucun bénéfice, tout le prix couvre déboursé + frais. C'est
+    // le sens même de la reprise des frais — la marge affichée n'est plus flattée par des coûts
+    // que le chantier supporte pourtant réellement.
+    expect(i.margePrevisionnelle).toBe('0.00'); // 1200 − 1200
+    expect(i.cpi).toBe('4.0000'); // 600 / 150
   });
 
   it('refuse l’accès sans le module Gestion financière (403)', async () => {

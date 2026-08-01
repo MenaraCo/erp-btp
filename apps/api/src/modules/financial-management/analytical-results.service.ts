@@ -201,11 +201,17 @@ export class AnalyticalResultsService {
    * Une ressource arrivée sans code au transfert atterrit ici, pas dans une nature au hasard.
    */
   private async listAVentiler(em: EntityManager, chantierId: string) {
+    // Seules les ressources qui alimentent l'arbre des codes sont à ventiler : celles des lignes
+    // NON vendables (frais de chantier) ont déjà leur branche dédiée, elles n'ont rien à y faire.
     return em.query(
-      `SELECT n.id, n.code, n.label, n.unit, n.nature, n.unit_cost_objectif, m.code AS marche_code
+      `SELECT DISTINCT n.id, n.code, n.label, n.unit, n.nature, n.unit_cost_objectif,
+              m.code AS marche_code
          FROM nomenclature_resource n
          JOIN marche m ON m.id = n.marche_id
-        WHERE n.chantier_id = $1 AND n.code_analytique_id IS NULL
+         JOIN execution_component ec ON ec.nomenclature_resource_id = n.id
+         JOIN execution_line el ON el.id = ec.execution_line_id
+         JOIN execution_line top ON top.id = COALESCE(el.parent_line_id, el.id)
+        WHERE n.chantier_id = $1 AND n.code_analytique_id IS NULL AND top.vendable = true
         ORDER BY n.label`,
       [chantierId],
     );

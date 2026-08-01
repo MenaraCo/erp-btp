@@ -525,4 +525,73 @@ describe('vente-calc — feuille de vente', () => {
     expect(res.fraisAnnexes).toBe('100');
     expect(res.pvDevis).toBe('1200');
   });
+
+  // ── Frais de chantier repris à l'exécution (suivi de chantier) ────────────────────────────
+  // Le chantier doit hériter de ce que le devis a prévu AU-DELÀ du déboursé direct : les frais
+  // généraux et les frais annexes. Sans eux, le budget de chantier est incomplet dès le jour 1.
+
+  it('frais de chantier — les FG sont repris par nature, montant par montant', () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { labor: '1000', material: '500' } }],
+      coeffs({
+        byNature: {
+          labor: rate('10', '20'), // FG = 100
+          material: rate('8', '20'), // FG = 40
+          equipment: rate('0', '0'),
+          subcontract: rate('0', '0'),
+        },
+      }),
+    );
+    expect(res.fraisChantier!.fgByNature.labor).toBe('100');
+    expect(res.fraisChantier!.fgByNature.material).toBe('40');
+    // Le bénéfice n'est PAS un frais de chantier : il ne doit jamais entrer dans le budget.
+    expect(res.fraisChantier!.total).toBe('140');
+  });
+
+  it('frais de chantier — chaque type de sous-traitance apporte SES frais généraux', () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseBySt: { 'st-plomberie': '2000' } }],
+      coeffs({
+        stRates: { 'st-plomberie': rate('5', '10') }, // FG = 100
+      }),
+    );
+    expect(res.fraisChantier!.fgBySt['st-plomberie']).toBe('100');
+    expect(res.fraisChantier!.total).toBe('100');
+  });
+
+  it('frais de chantier — tous les postes de frais annexes sont repris, noyés comme séparés', () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByNature: { material: '1000' } }],
+      coeffs({
+        fraisAnnexes: [
+          { designation: 'Installation de chantier', type: 'fixe', valeur: '300', mode: 'separe' },
+          { designation: 'Compte prorata', type: 'pct', valeur: '5', mode: 'inclus' },
+        ],
+      }),
+    );
+    // Le mode (noyé/séparé) ne regarde que l'ÉDITION du devis : le chantier les supporte tous.
+    expect(res.fraisChantier!.postes).toEqual([
+      { designation: 'Installation de chantier', montant: '300', mode: 'separe' },
+      { designation: 'Compte prorata', montant: '50', mode: 'inclus' },
+    ]);
+    expect(res.fraisChantier!.total).toBe('350');
+  });
+
+  it('frais de chantier — options et variantes n’apportent aucun frais (hors commande)', () => {
+    const res = computeFeuilleDeVente(
+      [
+        { id: 'A', vendable: true, debourseByNature: { labor: '1000' } },
+        { id: 'OPT', vendable: true, section: 'option', debourseByNature: { labor: '5000' } },
+      ],
+      coeffs({
+        byNature: {
+          labor: rate('10', '0'),
+          material: rate('0', '0'),
+          equipment: rate('0', '0'),
+          subcontract: rate('0', '0'),
+        },
+      }),
+    );
+    expect(res.fraisChantier!.fgByNature.labor).toBe('100'); // et non 600
+  });
 });

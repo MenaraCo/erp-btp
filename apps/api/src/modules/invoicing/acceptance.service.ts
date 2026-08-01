@@ -4,13 +4,22 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { isTransferable } from '../estimating/devis-workflow';
 import { VenteService } from '../estimating/vente.service';
-import { ChantierService } from '../site-tracking/chantier.service';
+import { ChantierService, FraisChantierInput } from '../site-tracking/chantier.service';
+import { VenteResult } from '../estimating/vente-calc';
+
+/** Intitulés des natures pour les postes de frais généraux repris au chantier. */
+const NATURE_LABELS: Record<string, string> = {
+  labor: "main-d'œuvre",
+  material: 'matériaux',
+  equipment: 'matériel',
+  subcontract: 'sous-traitance',
+};
 
 interface CorpsLine {
   id: string;
@@ -424,7 +433,12 @@ export class AcceptanceService {
       // Étude d'exécution DANS LA MÊME transaction : soit la commande donne un marché ET ses
       // budgets, soit rien du tout. Un marché sans budget serait un chantier ingérable que
       // l'écran ne proposerait même plus de reprendre (la version compte comme déjà acceptée).
-      const executionLineCount = await this.chantiers.materialiseExecutionInTx(em, tenantId, m.id);
+      const executionLineCount = await this.chantiers.materialiseExecutionInTx(
+        em,
+        tenantId,
+        m.id,
+        await this.fraisChantierPostes(em, versionId, fv.fraisChantier),
+      );
       return { m, executionLineCount };
     });
 
@@ -437,6 +451,63 @@ export class AcceptanceService {
       lineCount: billable.length,
       executionLineCount: marche.executionLineCount,
     };
+  }
+
+  /**
+   * Traduit les frais de la feuille de vente en postes budgétaires de chantier : un poste par
+   * nature portant des frais généraux, un par type de sous-traitance, un par frais annexe. Le
+   * chantier hérite ainsi de TOUT ce que le devis a prévu au-delà du déboursé direct.
+   */
+  private async fraisChantierPostes(
+    em: EntityManager,
+    versionId: string,
+    frais: VenteResult['fraisChantier'],
+  ): Promise<FraisChantierInput | null> {
+    if (!frais) return null;
+    const postes: FraisChantierInput['postes'] = [];
+
+    for (const [nature, montant] of Object.entries(frais.fgByNature)) {
+      if (new Decimal(montant).isZero()) continue;
+      postes.push({
+        code: `FG-${nature.toUpperCase()}`,
+        label: `Frais généraux — ${NATURE_LABELS[nature] ?? nature}`,
+        nature,
+        montant,
+      });
+    }
+
+    // Les types de sous-traitance portent leurs propres taux : on reprend leur intitulé du devis.
+    const stTypes: Array<{ id: string; label: string }> = Object.keys(frais.fgBySt).length
+      ? ((
+          await em.query(`SELECT st_types FROM sale_sheet WHERE devis_version_id = $1`, [versionId])
+        )[0]?.st_types ?? [])
+      : [];
+    const stLabel = new Map(stTypes.map((t) => [t.id, t.label]));
+    for (const [typeId, montant] of Object.entries(frais.fgBySt)) {
+      if (new Decimal(montant).isZero()) continue;
+      postes.push({
+        code: `FG-ST-${typeId}`.slice(0, 64),
+        label: `Frais généraux — sous-traitance ${stLabel.get(typeId) ?? typeId}`,
+        nature: 'subcontract',
+        montant,
+      });
+    }
+
+    // Frais annexes : noyés dans les prix ou facturés à part, le chantier les paye pareil.
+    // Code court numéroté (FA-1, FA-2…) : l'intitulé du poste reste le libellé, pas le code.
+    let rang = 0;
+    for (const poste of frais.postes) {
+      if (new Decimal(poste.montant).isZero()) continue;
+      rang += 1;
+      postes.push({
+        code: `FA-${rang}`,
+        label: poste.designation,
+        nature: 'site_overhead',
+        montant: poste.montant,
+      });
+    }
+
+    return postes.length > 0 ? { postes } : null;
   }
 
   getMarche(marcheId: string) {

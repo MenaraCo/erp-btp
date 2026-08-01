@@ -74,8 +74,8 @@ Ces routes s'ouvrent avec **`invoicing.situations` OU `site_tracking.budget`** (
 |---|---|---|---|
 | GET | `/acceptance/pending` | `invoicing.read` | File d'attente : devis gagnés dont la dernière version n'a pas encore de marché, au **montant de vente** (feuille de vente) |
 | GET | `/acceptance/accepted` | `invoicing.read` | Commandes acceptées : marché + chantier + devis d'origine |
-| GET | `/acceptance/devis/:devisId` | `invoicing.read` | Fiche d'acceptation : client, montants (déboursé/HT/TVA/TTC), **options et variantes** chiffrées une par une, chantiers existants, alertes (`acceptable: false` si bloquante) |
-| POST | `/devis/:devisId/accept` | `invoicing.write` | Accepte la commande. Corps `{ chantierId?, retainedSectionIds? }` : `chantierId` rattache à un chantier existant (sinon création), `retainedSectionIds` liste les options/variantes **retenues**, qui entrent alors au marché. Devis non gagné → 409 ; version déjà acceptée → 409 |
+| GET | `/acceptance/devis/:devisId` | `invoicing.read` | Fiche d'acceptation : client, montants (déboursé/HT/TVA/TTC), **options et variantes** chiffrées une par une (pour information, hors commande), chantiers existants, alertes (`acceptable: false` si bloquante) |
+| POST | `/devis/:devisId/accept` | `invoicing.write` | Accepte la commande. Le chantier hérite du **déboursé** ET des **frais de chantier** du devis (frais généraux par nature et par type de ST, chaque poste de frais annexes — noyé comme séparé), réunis dans une ligne d'exécution non vendable « Frais de chantier » budgétée en `site_overhead`. Corps `{ chantierId? }` : rattache à un chantier existant, sinon en crée un. Options et variantes restent **hors commande** (elles s'arbitrent dans le devis). Devis non gagné → 409 ; version déjà acceptée → 409 |
 | POST | `/chantiers` | `site_tracking.write` | Crée un chantier vide (unité d'agrégation) `{ code, name }` ; code dupliqué → 409 |
 | GET | `/chantiers/:chantierId/marches` | `site_tracking.read` | Liste des marchés agrégés par le chantier |
 

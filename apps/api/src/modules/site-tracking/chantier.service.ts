@@ -17,6 +17,15 @@ import {
 } from '../estimating/ouvrage-calc';
 import { BUDGET_NATURES, BudgetNature } from './budget-nature';
 
+/**
+ * Frais de chantier prêts à être budgétés, calculés par la feuille de vente (module étude de prix)
+ * et transmis à l'acceptation : le suivi de chantier ne recalcule pas de prix de vente, il reçoit
+ * des montants déjà arbitrés.
+ */
+export interface FraisChantierInput {
+  postes: { code: string; label: string; nature: string; montant: string }[];
+}
+
 interface OuvrageComp {
   kind: string;
   child_resource_id: string | null;
@@ -123,6 +132,7 @@ export class ChantierService {
     em: EntityManager,
     tenantId: string,
     marcheId: string,
+    frais?: FraisChantierInput | null,
   ): Promise<number> {
     {
       const marcheRows = await em.query(
@@ -385,6 +395,40 @@ export class ChantierService {
         count++;
       }
 
+      // Frais de chantier repris du devis : une ligne NON VENDABLE (donc budgétée en
+      // « site_overhead »), un composant par poste pour qu'on sache toujours d'où vient l'argent.
+      const postes = (frais?.postes ?? []).filter((p) => !new Decimal(p.montant).isZero());
+      if (postes.length > 0) {
+        const lineId = (
+          await em.query(
+            `INSERT INTO execution_line
+               (tenant_id, chantier_id, marche_id, parent_line_id, type, vendable, code, designation, unit,
+                quantite_etude, quantite_objectif, debourse_unitaire_etude, debourse_unitaire_objectif, sort_order)
+             VALUES ($1,$2,$3,NULL,'ouvrage',false,'FRAIS','Frais de chantier','ens',1,1,0,0,$4) RETURNING id`,
+            [tenantId, chantier.id, marcheId, top++],
+          )
+        )[0].id as string;
+        let cSort = 0;
+        for (const poste of postes) {
+          const nomencId = (
+            await em.query(
+              `INSERT INTO nomenclature_resource
+                 (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
+                  unit_cost_etude, unit_cost_objectif, code_analytique_id)
+               VALUES ($1,$2,$3,NULL,$4,$5,'ens',$6,$7,$7,NULL) RETURNING id`,
+              [tenantId, chantier.id, marcheId, freeCode(poste.code), poste.label, poste.nature, poste.montant],
+            )
+          )[0].id as string;
+          await em.query(
+            `INSERT INTO execution_component
+               (tenant_id, execution_line_id, kind, nomenclature_resource_id, quantite_etude, quantite_objectif, sort_order)
+             VALUES ($1,$2,'resource',$3,1,1,$4)`,
+            [tenantId, lineId, nomencId, cSort++],
+          );
+        }
+        count++;
+      }
+
       await this.recompute(em, tenantId, chantier.id, true, marcheId);
       return count;
     }
@@ -423,7 +467,13 @@ export class ChantierService {
       if (c.kind === 'resource') {
         comp.quantity = c.quantite_objectif ?? 0;
         comp.unitCost = c.unit_cost_objectif ?? 0;
-        comp.nature = c.nature ?? 'material';
+        // Le moteur de déboursé ne connaît que les 4 natures de coût direct. Les postes de frais
+        // de chantier (« site_overhead ») gardent leur nature en base — c'est ce qui les rend
+        // lisibles — mais entrent ici sous une nature neutre : leur ligne étant non vendable,
+        // la totalité retombe de toute façon dans le budget « frais de chantier ».
+        comp.nature = NATURES.includes(c.nature as (typeof NATURES)[number])
+          ? (c.nature as (typeof NATURES)[number])
+          : 'material';
       } else if (c.kind === 'sub_line') {
         comp.quantity = c.quantite_objectif ?? 0;
         comp.childOuvrageId = c.child_line_id;

@@ -131,6 +131,19 @@ export interface VenteItemResult {
   debourseBySt?: Record<string, string>;
   /** Taux appliqués à chaque type de ST, pour traçabilité. */
   appliedStRates?: Record<string, { fg: string; benefice: string }>;
+  /** Montant de frais généraux porté par la ligne, par nature — repris en frais de chantier. */
+  fgByNature?: Record<Nature, string>;
+  /** Idem par type de sous-traitance. */
+  fgBySt?: Record<string, string>;
+}
+
+export interface FraisChantier {
+  fgByNature: Record<Nature, string>;
+  /** FG par type de sous-traitance (clé = identifiant du type dans le devis). */
+  fgBySt: Record<string, string>;
+  /** Tous les postes de frais annexes, NOYÉS COMME SÉPARÉS : le chantier les supporte tous. */
+  postes: { designation: string; montant: string; mode: 'inclus' | 'separe' }[];
+  total: string;
 }
 
 export interface VenteResult {
@@ -158,6 +171,13 @@ export interface VenteResult {
   pvImposeApplied?: boolean;
   /** coefficient d'ajustement appliqué aux lignes non forcées pour atteindre le PV imposé */
   coeffAjustement?: string;
+  /**
+   * Frais de chantier repris à l'exécution : frais généraux (par nature et par type de
+   * sous-traitance) + postes de frais annexes. Le suivi de chantier en fait son budget de frais,
+   * sans quoi le chantier démarrerait avec un budget amputé de tout ce qui n'est pas déboursé
+   * direct. Le bénéfice en est exclu : ce n'est pas un coût.
+   */
+  fraisChantier?: FraisChantier;
   /** PV des options (hors total principal) */
   optionsPvHt: string;
   /** PV des variantes (hors total principal) */
@@ -250,6 +270,11 @@ function priceItem(
   const appliedRates = {} as Record<Nature, { fg: string; benefice: string }>;
   const appliedStRates: Record<string, { fg: string; benefice: string }> = {};
 
+  // Montant de FG porté par la ligne, seau par seau : c'est lui que le chantier reprendra en
+  // frais de chantier (le bénéfice, lui, n'est pas un coût et n'a rien à y faire).
+  const fgByNature = {} as Record<Nature, string>;
+  const fgBySt: Record<string, string> = {};
+
   const applyRate = (eff: Decimal, rate: NatureSaleRate) => {
     const fg = new Decimal(rate.tauxFg);
     const ben = new Decimal(rate.tauxBenefice);
@@ -258,16 +283,20 @@ function priceItem(
     debourse = debourse.plus(eff);
     revient = revient.plus(revientN);
     pvComputed = pvComputed.plus(pvN);
-    return { fg: fg.toString(), benefice: ben.toString() };
+    return { fg: fg.toString(), benefice: ben.toString(), montantFg: revientN.minus(eff) };
   };
 
   for (const n of NATURES) {
     const rate = coeffs.byNature[n] ?? { tauxFg: 0, tauxBenefice: 0 };
-    appliedRates[n] = applyRate(effBreakdown[n], rate);
+    const applied = applyRate(effBreakdown[n], rate);
+    appliedRates[n] = { fg: applied.fg, benefice: applied.benefice };
+    fgByNature[n] = round2(applied.montantFg).toString();
   }
   // Chaque type de sous-traitance suit SES propres taux (repli sur la nature « subcontract »).
   for (const [typeId, eff] of Object.entries(effSt)) {
-    appliedStRates[typeId] = applyRate(eff, stRateOf(coeffs, typeId));
+    const applied = applyRate(eff, stRateOf(coeffs, typeId));
+    appliedStRates[typeId] = { fg: applied.fg, benefice: applied.benefice };
+    fgBySt[typeId] = round2(applied.montantFg).toString();
   }
 
   const ventilatedFrais = debourse.minus(ownDebourse);
@@ -303,6 +332,8 @@ function priceItem(
       Object.entries(effSt).map(([k, v]) => [k, round2(v).toString()]),
     ),
     appliedStRates,
+    fgByNature,
+    fgBySt,
   };
 }
 
@@ -459,11 +490,16 @@ export function computeFeuilleDeVente(
   // donc pas de l'ordre de saisie des postes.
   const baseHorsFrais = pvHorsFrais;
   const fraisDetail: { designation: string; montant: string }[] = [];
+  const fraisPostes: FraisChantier['postes'] = [];
   let fraisAnnexesMt = new Decimal(0);
   let fraisAIntegrer = new Decimal(0);
   for (const f of coeffs.fraisAnnexes ?? []) {
     const mt = round2(montantFrais(f, baseHorsFrais));
-    if ((f.mode ?? coeffs.fraisMode ?? 'separe') === 'inclus') {
+    const mode = (f.mode ?? coeffs.fraisMode ?? 'separe') as 'inclus' | 'separe';
+    // Noyé ou séparé ne regarde que l'ÉDITION du devis : le chantier supporte le poste dans
+    // les deux cas, il doit donc figurer au budget de frais quel que soit le mode.
+    fraisPostes.push({ designation: f.designation, montant: mt.toString(), mode });
+    if (mode === 'inclus') {
       fraisAIntegrer = fraisAIntegrer.plus(mt);
     } else {
       fraisAnnexesMt = fraisAnnexesMt.plus(mt);
@@ -508,8 +544,35 @@ export function computeFeuilleDeVente(
     ? new Decimal(0)
     : pvHorsFrais.dividedBy(totalDebourse).toDecimalPlaces(COEFF_SCALE, Decimal.ROUND_HALF_UP);
 
+  // Frais de chantier : FG de toutes les lignes du tronc commun (options et variantes exclues,
+  // elles ne sont pas commandées) + tous les postes de frais annexes.
+  const fgByNature = zeroBreakdown();
+  const fgBySt: Record<string, Decimal> = {};
+  for (const r of results) {
+    if (r.section !== 'main') continue;
+    for (const n of NATURES) {
+      fgByNature[n] = fgByNature[n].plus(new Decimal(r.fgByNature?.[n] ?? 0));
+    }
+    for (const [k, v] of Object.entries(r.fgBySt ?? {})) {
+      fgBySt[k] = (fgBySt[k] ?? new Decimal(0)).plus(new Decimal(v));
+    }
+  }
+  const fgTotal = NATURES.reduce((acc, n) => acc.plus(fgByNature[n]), new Decimal(0)).plus(
+    Object.values(fgBySt).reduce((acc, v) => acc.plus(v), new Decimal(0)),
+  );
+  const postesTotal = fraisPostes.reduce((acc, p) => acc.plus(new Decimal(p.montant)), new Decimal(0));
+  const fraisChantier: FraisChantier = {
+    fgByNature: Object.fromEntries(
+      NATURES.map((n) => [n, round2(fgByNature[n]).toString()]),
+    ) as Record<Nature, string>,
+    fgBySt: Object.fromEntries(Object.entries(fgBySt).map(([k, v]) => [k, round2(v).toString()])),
+    postes: fraisPostes,
+    total: round2(fgTotal.plus(postesTotal)).toString(),
+  };
+
   return {
     items: results,
+    fraisChantier,
     totalDebourse: round2(totalDebourse).toString(),
     totalRevient: round2(totalRevient).toString(),
     pvHorsFrais: pvHorsFrais.toString(),
