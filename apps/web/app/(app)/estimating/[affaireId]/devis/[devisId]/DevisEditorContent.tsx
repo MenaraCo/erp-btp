@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
-import { apiFetch, apiFetchBlobUrl, ApiError } from '@/lib/api';
+import { apiFetch, apiDownload, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
 import { usePreferences, fmtEuro, cleanNum } from '@/lib/preferences';
 import { downloadXlsx } from '@/lib/xlsx';
@@ -396,11 +396,20 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     })));
   }, [saleConfig.data, versionId, prefs.taux_fg_default, prefs.taux_ben_default]);
 
+  const pdfFilename = () => {
+    const ref = detail.data?.devis?.numero ?? detail.data?.devis?.designation ?? 'devis';
+    const v = versions.length > 1 ? `-v${versions.find((x) => x.id === versionId)?.version_no ?? ''}` : '';
+    return `Devis-${String(ref).replace(/[^\w.-]+/g, '_')}${v}.pdf`;
+  };
+
   async function downloadPdf() {
     if (!versionId) return;
     setPdfError(null);
-    try { window.open(await apiFetchBlobUrl(`/versions/${versionId}/devis.pdf`, token), '_blank'); }
-    catch { setPdfError('PDF indisponible.'); }
+    try {
+      await apiDownload(`/versions/${versionId}/devis.pdf`, token, pdfFilename());
+    } catch {
+      setPdfError('PDF indisponible.');
+    }
   }
 
   const e = (v: string | number | null | undefined) => fmtEuro(v, prefs.nb_decimales);
