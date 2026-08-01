@@ -9,9 +9,6 @@
  */
 export type DevisStatus =
   | 'open'
-  | 'study'
-  | 'coeffs_proposed'
-  | 'coeffs_validated'
   | 'sent'
   | 'won'
   | 'lost'
@@ -19,27 +16,25 @@ export type DevisStatus =
   | 'revision';
 
 export const DEVIS_STATUS_LABELS: Record<DevisStatus, string> = {
-  open: 'Ouverte',
-  study: 'Étude en cours',
-  coeffs_proposed: 'Coefficients proposés',
-  coeffs_validated: 'Coefficients validés',
-  sent: 'Envoyée',
-  won: 'Gagnée',
-  lost: 'Perdue',
-  followup: 'Relancée',
+  open: 'En cours',
+  sent: 'Envoyé',
+  won: 'Gagné',
+  lost: 'Perdu',
+  followup: 'Relancé',
   revision: 'Révision',
 };
 
+/**
+ * Cycle commercial uniquement. Le passage à l'exécution (marché + chantier) relève de
+ * l'acceptation de commande, pas d'une transition de statut.
+ */
 export const DEVIS_TRANSITIONS: Record<DevisStatus, DevisStatus[]> = {
-  open: ['study'],
-  study: ['coeffs_proposed'],
-  coeffs_proposed: ['coeffs_validated', 'study'],
-  coeffs_validated: ['sent', 'coeffs_proposed'],
+  open: ['sent', 'won', 'lost'],
   sent: ['won', 'lost', 'followup', 'revision'],
-  won: [],
-  lost: ['followup', 'revision'],
-  followup: ['sent', 'revision'],
-  revision: ['study'],
+  won: ['lost'],
+  lost: ['followup', 'revision', 'won'],
+  followup: ['sent', 'won', 'lost', 'revision'],
+  revision: ['open', 'sent'],
 };
 
 export class InvalidTransitionError extends Error {

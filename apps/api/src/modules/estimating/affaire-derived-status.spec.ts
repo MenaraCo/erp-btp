@@ -10,7 +10,7 @@ describe('affaire-derived-status — statut affaire dérivé des devis', () => {
   });
 
   it('2 devis gagnés sur 3 (reste en cours) → gagnee_partielle', () => {
-    expect(deriveAffaireStatus(['won', 'won', 'study'])).toBe('gagnee_partielle');
+    expect(deriveAffaireStatus(['won', 'won', 'open'])).toBe('gagnee_partielle');
   });
 
   it('1 gagné, 2 perdus → gagnee_partielle', () => {
@@ -22,6 +22,6 @@ describe('affaire-derived-status — statut affaire dérivé des devis', () => {
   });
 
   it('aucun gagné, au moins un en cours → en_cours', () => {
-    expect(deriveAffaireStatus(['study', 'lost', 'sent'])).toBe('en_cours');
+    expect(deriveAffaireStatus(['open', 'lost', 'sent'])).toBe('en_cours');
   });
 });

@@ -6,32 +6,42 @@ import {
   nextStates,
 } from './devis-workflow';
 
-describe('devis-workflow — machine à états (rule #7)', () => {
-  it('autorise le chemin nominal jusqu’à Gagnée', () => {
-    expect(canTransition('open', 'study')).toBe(true);
-    expect(canTransition('study', 'coeffs_proposed')).toBe(true);
-    expect(canTransition('coeffs_proposed', 'coeffs_validated')).toBe(true);
-    expect(canTransition('coeffs_validated', 'sent')).toBe(true);
+describe('devis-workflow — cycle commercial (rule #7)', () => {
+  it('autorise le chemin nominal : en cours → envoyé → gagné', () => {
+    expect(canTransition('open', 'sent')).toBe(true);
     expect(canTransition('sent', 'won')).toBe(true);
   });
 
-  it('refuse une transition non autorisée', () => {
-    expect(canTransition('open', 'won')).toBe(false);
-    expect(canTransition('open', 'sent')).toBe(false);
-    expect(() => assertTransition('open', 'won')).toThrow(InvalidTransitionError);
+  it('permet de conclure directement depuis « en cours » (accord verbal, marché de gré à gré)', () => {
+    expect(canTransition('open', 'won')).toBe(true);
+    expect(canTransition('open', 'lost')).toBe(true);
   });
 
-  it('Gagnée est terminal', () => {
-    expect(nextStates('won')).toEqual([]);
+  it('gère la relance et la révision après envoi', () => {
+    expect(canTransition('sent', 'followup')).toBe(true);
+    expect(canTransition('sent', 'revision')).toBe(true);
+    expect(canTransition('followup', 'won')).toBe(true);
+    expect(canTransition('revision', 'sent')).toBe(true);
   });
 
-  it('seule une affaire Gagnée est transférable', () => {
+  it('un devis perdu peut être repris (relance, révision) ou requalifié gagné', () => {
+    expect(canTransition('lost', 'followup')).toBe(true);
+    expect(canTransition('lost', 'won')).toBe(true);
+  });
+
+  it('refuse une transition non prévue et la signale', () => {
+    expect(canTransition('won', 'sent')).toBe(false);
+    expect(() => assertTransition('won', 'open')).toThrow(InvalidTransitionError);
+  });
+
+  it('« gagné » n’est pas terminal : une erreur de saisie reste corrigeable', () => {
+    expect(nextStates('won')).toEqual(['lost']);
+  });
+
+  it('seul un devis gagné passe à l’acceptation de commande', () => {
     expect(isTransferable('won')).toBe(true);
     expect(isTransferable('sent')).toBe(false);
     expect(isTransferable('lost')).toBe(false);
-  });
-
-  it('permet le retour en arrière étude depuis coefficients proposés', () => {
-    expect(canTransition('coeffs_proposed', 'study')).toBe(true);
+    expect(isTransferable('open')).toBe(false);
   });
 });

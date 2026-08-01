@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
+import { RequiresAnyCapability } from '../../core/entitlements/requires-any-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { AcceptanceService } from './acceptance.service';
 
@@ -11,22 +11,27 @@ export class AcceptanceController {
    * Acceptation unifiée (cahier §5.4) : un seul marché sur un chantier (nouveau ou existant)
    * portant facturation + étude d'exécution. Corps optionnel `{ chantierId }`.
    */
+  /**
+   * L'acceptation de commande est la charnière entre l'étude de prix et l'exécution : elle n'a
+   * d'intérêt que si l'on facture OU si l'on suit des chantiers. Une seule des deux capacités
+   * suffit donc à l'ouvrir.
+   */
   @Post('devis/:devisId/accept')
-  @RequiresCapability('invoicing.situations')
+  @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
   @RequiresPermission('invoicing.write')
   accept(@Param('devisId') devisId: string, @Body() body?: { chantierId?: string | null }) {
     return this.acceptance.accept(devisId, body?.chantierId ?? null);
   }
 
   @Get('marches')
-  @RequiresCapability('invoicing.situations')
+  @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
   @RequiresPermission('invoicing.read')
   list() {
     return this.acceptance.listMarches();
   }
 
   @Get('marches/:marcheId')
-  @RequiresCapability('invoicing.situations')
+  @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
   @RequiresPermission('invoicing.read')
   get(@Param('marcheId') marcheId: string) {
     return this.acceptance.getMarche(marcheId);
