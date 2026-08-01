@@ -77,7 +77,7 @@ const NAT_OPTS = [
 ];
 const natLabel = (v: string) => NAT_OPTS.find((n) => n.v === v)?.l ?? v;
 interface Company { id: string; code: string; name: string; has_logo?: boolean; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
-interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
+interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; devis_numero_annee?: boolean; devis_numero_digits?: number; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
 /* ─────────── tabs ─────────── */
 
@@ -790,6 +790,8 @@ function TabPreferences({ token }: { token: string }) {
         tauxBenDefault: f('taux_ben_default') !== '' ? Number(f('taux_ben_default')) : undefined,
         devisPrefix: f('devis_prefix') || null,
         devisSeparator: f('devis_separator') || null,
+        devisNumeroAnnee: (form.devis_numero_annee ?? String(prefs?.devis_numero_annee ?? true)) === 'true',
+        devisNumeroDigits: Number(form.devis_numero_digits ?? prefs?.devis_numero_digits ?? 4),
         couleurPrincipale: f('couleur_principale') || null,
         couleurAccent: f('couleur_accent') || null,
         tauxTva: currentTva,
@@ -934,7 +936,30 @@ function TabPreferences({ token }: { token: string }) {
               onChange={(e) => setForm({ ...form, devis_separator: e.target.value })} />
             <span className="muted" style={{ fontSize: 10 }}>Entre le préfixe et l'année</span>
           </Field>
+          <Field label="Année dans le numéro">
+            <select className="input" style={{ width: 90 }}
+              value={form.devis_numero_annee ?? String(prefs?.devis_numero_annee ?? true)}
+              onChange={(e) => setForm({ ...form, devis_numero_annee: e.target.value })}>
+              <option value="true">Oui</option>
+              <option value="false">Non</option>
+            </select>
+          </Field>
+          <Field label="Chiffres de la séquence">
+            <input className="input" style={{ width: 60 }} type="number" min={1} max={8}
+              value={form.devis_numero_digits ?? String(prefs?.devis_numero_digits ?? 4)}
+              onChange={(e) => setForm({ ...form, devis_numero_digits: e.target.value })} />
+          </Field>
         </Row>
+        <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+          Les nouveaux devis reçoivent automatiquement le numéro suivant, ex.{' '}
+          <strong>
+            {`${f('devis_prefix') || 'DEV'}${f('devis_separator') || '-'}`}
+            {(form.devis_numero_annee ?? String(prefs?.devis_numero_annee ?? true)) === 'true'
+              ? `${new Date().getFullYear()}${f('devis_separator') || '-'}`
+              : ''}
+            {'1'.padStart(Number(form.devis_numero_digits ?? prefs?.devis_numero_digits ?? 4), '0')}
+          </strong>. Un numéro saisi à la main est toujours respecté.
+        </p>
       </Card>
 
       {/* ── Couleurs ── */}

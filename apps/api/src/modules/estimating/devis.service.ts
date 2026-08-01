@@ -154,11 +154,12 @@ export class DevisService {
           [tenantId, input.code, input.name, input.clientId ?? null, input.moa ?? null],
         )
       )[0];
+      const numero = (await this.nextDevisNumero(em)) ?? input.code;
       const devis = (
         await em.query(
           `INSERT INTO devis (tenant_id, affaire_id, numero, designation, type, status, sort_order)
            VALUES ($1, $2, $3, $4, 'principal', 'open', 0) RETURNING *`,
-          [tenantId, affaire.id, input.code, input.name],
+          [tenantId, affaire.id, numero, input.name],
         )
       )[0];
       const version = (
@@ -170,6 +171,42 @@ export class DevisService {
       )[0];
       return { affaire, devis, version };
     });
+  }
+
+
+  /**
+   * Numéro de devis suivant, selon le paramétrage société (préfixe, séparateur, année,
+   * longueur de séquence). Ex. « DEV-2026-0007 ».
+   *
+   * La séquence se déduit du plus grand numéro existant du MÊME gabarit plutôt que d'un
+   * compteur stocké : ainsi une suppression ou un import ne crée jamais de doublon ni de trou
+   * qui se propagerait.
+   */
+  private async nextDevisNumero(em: EntityManager): Promise<string | null> {
+    const [p] = await em.query(
+      `SELECT devis_prefix, devis_separator, devis_numero_annee, devis_numero_digits
+         FROM company_preferences LIMIT 1`,
+    );
+    const prefix = (p?.devis_prefix ?? 'DEV').trim();
+    if (!prefix) return null;
+    const sep = p?.devis_separator ?? '-';
+    const digits = Math.max(1, Math.min(8, Number(p?.devis_numero_digits ?? 4)));
+    const withYear = p?.devis_numero_annee !== false;
+    const base = withYear ? `${prefix}${sep}${new Date().getFullYear()}${sep}` : `${prefix}${sep}`;
+
+    const rows = await em.query(
+      `SELECT numero FROM devis WHERE numero LIKE $1 || '%'`,
+      [base],
+    );
+    let max = 0;
+    for (const r of rows) {
+      const tail = String(r.numero).slice(base.length);
+      // On n'accepte que le gabarit exact : « DEV-2026-0007 », pas « DEV-2026-0007-bis ».
+      if (/^\d+$/.test(tail)) {
+        max = Math.max(max, Number(tail));
+      }
+    }
+    return `${base}${String(max + 1).padStart(digits, '0')}`;
   }
 
   /** Adds a devis to an affaire (Lot 2, avenant…). Client/lieu are inherited from the affaire. */
@@ -190,7 +227,14 @@ export class DevisService {
         await em.query(
           `INSERT INTO devis (tenant_id, affaire_id, numero, designation, type, status, sort_order)
            VALUES ($1, $2, $3, $4, $5, 'open', $6) RETURNING *`,
-          [tenantId, affaireId, input.numero ?? null, input.designation, input.type ?? 'lot', order],
+          [
+            tenantId,
+            affaireId,
+            input.numero?.trim() || (await this.nextDevisNumero(em)),
+            input.designation,
+            input.type ?? 'lot',
+            order,
+          ],
         )
       )[0];
       const version = (

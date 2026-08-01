@@ -30,6 +30,10 @@ export interface PreferencesInput {
   tauxBenDefault?: number;
   devisPrefix?: string;
   devisSeparator?: string;
+  /** Inclure l'année dans le numéro de devis (DEV-2026-0001 vs DEV-0001). */
+  devisNumeroAnnee?: boolean;
+  /** Longueur de la séquence du numéro (0001 = 4). */
+  devisNumeroDigits?: number;
   couleurPrincipale?: string;
   couleurAccent?: string;
   tauxTva?: number[];
@@ -429,6 +433,8 @@ export class ParamsService {
            taux_tva           = COALESCE($8::jsonb, taux_tva),
            default_tab        = COALESCE($9, default_tab),
            nb_decimales       = COALESCE($10::smallint, nb_decimales),
+           devis_numero_annee = COALESCE($11::boolean, devis_numero_annee),
+           devis_numero_digits= COALESCE($12::smallint, devis_numero_digits),
            updated_at         = now()
          WHERE company_id = $1`,
         [
@@ -442,6 +448,8 @@ export class ParamsService {
           input.tauxTva != null ? JSON.stringify(input.tauxTva) : null,
           input.defaultTab ?? null,
           input.nbDecimales ?? null,
+          input.devisNumeroAnnee ?? null,
+          input.devisNumeroDigits ?? null,
         ],
       );
       // Retourner le résultat dans la MÊME transaction (évite le deadlock de connexion)

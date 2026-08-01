@@ -450,7 +450,7 @@ export class VenteService {
 
     const rows = await em.query(
       `SELECT coefficients, st_types, tva_rate, remise_type, remise_valeur,
-              arrondi_pas, arrondi_mode, pv_impose
+              arrondi_pas, arrondi_mode, pv_impose, frais_mode
          FROM sale_sheet WHERE devis_version_id = $1`,
       [versionId],
     );

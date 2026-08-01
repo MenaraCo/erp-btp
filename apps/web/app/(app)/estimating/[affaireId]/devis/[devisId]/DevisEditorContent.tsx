@@ -57,6 +57,7 @@ interface SaleConfig {
   stTypes?: StType[];
   arrondi?: { pas: string; mode: 'proche' | 'sup' | 'inf' } | null;
   pvImpose?: string | null;
+  fraisMode?: 'separe' | 'inclus';
   remise: { type: 'pct' | 'fixe'; valeur: string } | null;
   tvaRate: string | null;
   fraisAnnexes: { designation: string; type: 'pct' | 'fixe'; valeur: string }[];
@@ -194,6 +195,8 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
   // B.3 — arrondi commercial du PV de ligne + PV total imposé.
   const [arrondi, setArrondi] = useState<{ pas: string; mode: 'proche' | 'sup' | 'inf' }>({ pas: '0', mode: 'proche' });
   const [pvImpose, setPvImpose] = useState('');
+  // Frais annexes : poste visible sur le devis, ou noyés dans les prix unitaires.
+  const [fraisMode, setFraisMode] = useState<'separe' | 'inclus'>('separe');
   const [tva, setTva] = useState('20');
   const tvaPrefsApplied = useRef(false);
   useEffect(() => {
@@ -217,6 +220,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
           stTypes: stTypes.filter((t) => t.label.trim()),
           arrondi: { pas: arrondi.pas || '0', mode: arrondi.mode },
           pvImpose: pvImpose.trim() === '' ? null : pvImpose,
+          fraisMode,
           remise: { type: remise.type, valeur: remise.valeur || '0' },
           tvaRate: String((Number(tva) || 0) / 100),
         },
@@ -384,6 +388,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
       setStTypes(cfg.stTypes ?? []);
       if (cfg.arrondi) setArrondi({ pas: String(Number(cfg.arrondi.pas)), mode: cfg.arrondi.mode });
       setPvImpose(cfg.pvImpose != null ? String(Number(cfg.pvImpose)) : '');
+      setFraisMode(cfg.fraisMode ?? 'separe');
       if (cfg.remise) setRemise({ type: cfg.remise.type, valeur: String(Number(cfg.remise.valeur)) });
       if (cfg.tvaRate) setTva(String(Number(cfg.tvaRate) * 100));
     } else {
@@ -723,6 +728,28 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                         style={{ textTransform: 'none', letterSpacing: 0 }}
                         onClick={() => setFrais([...frais, { designation: '', type: 'pct', valeur: '0' }])}>+ Poste</button>
                     </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+                      <span className="label" style={{ marginBottom: 0 }}>Sur le devis :</span>
+                      {([
+                        ['separe', 'Poste séparé', 'Les frais apparaissent comme une ligne distincte sur le devis client.'],
+                        ['inclus', 'Noyés dans les prix', 'Les frais sont répartis dans les prix unitaires : le client ne les voit pas.'],
+                      ] as const).map(([v, l, t]) => (
+                        <button key={v} type="button" title={t} disabled={!isLatest}
+                          onClick={() => setFraisMode(v)}
+                          style={{
+                            padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+                            border: fraisMode === v ? '2px solid var(--primary)' : '1px solid var(--border)',
+                            background: fraisMode === v ? '#eff6ff' : '#fff',
+                            color: fraisMode === v ? 'var(--primary)' : 'inherit',
+                            fontWeight: fraisMode === v ? 700 : 400,
+                          }}>{l}</button>
+                      ))}
+                    </div>
+                    <p className="muted" style={{ marginTop: -4, marginBottom: 10, fontSize: 11 }}>
+                      {fraisMode === 'inclus'
+                        ? 'Les frais sont dilués au prorata dans les prix unitaires — invisibles pour le client. Le total HT est identique.'
+                        : 'Les frais forment une ligne visible après le corps du devis.'}
+                    </p>
                     {frais.length === 0 ? (
                       <p className="muted" style={{ marginTop: 0, marginBottom: 12, fontSize: 12 }}>
                         Aucun poste. Ex : compte prorata (% du PV) ou installation de chantier (montant fixe).
