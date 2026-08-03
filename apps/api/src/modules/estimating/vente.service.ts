@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
+import { DebourseTypeService } from './debourse-type.service';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { returningRows } from '../../core/database/returning.util';
 import {
@@ -34,8 +35,21 @@ export interface StTypeInput {
   tauxBenefice: number | string;
 }
 
+/** Taux d'un type de déboursé pour CE devis (le type lui-même vit dans le référentiel). */
+export interface TypeRateInput {
+  typeId: string;
+  tauxFg: number | string;
+  tauxBenefice: number | string;
+}
+
 export interface SaleSheetInput {
-  byNature: Record<Nature, { tauxFg: number | string; tauxBenefice: number | string }>;
+  /**
+   * Taux des quatre natures de base. Facultatif dès lors que `types` est fourni : ils sont alors
+   * déduits du type qui porte chaque nature (le type de base, sinon le premier de cette nature).
+   */
+  byNature?: Record<Nature, { tauxFg: number | string; tauxBenefice: number | string }>;
+  /** Taux par type de déboursé (référentiel société + types propres au devis). */
+  types?: TypeRateInput[];
   /** Types de sous-traitance définis POUR CE DEVIS (chacun ses FG/bénéfice). */
   stTypes?: StTypeInput[];
   /** Arrondi commercial du PV de ligne : pas (0 = aucun) et sens. */
@@ -76,6 +90,7 @@ export class VenteService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
+    private readonly debourseTypes: DebourseTypeService,
   ) {}
 
   /** Upserts the sale coefficients (FG/Bénéfice per nature), remise and TVA of a version. */
@@ -83,7 +98,18 @@ export class VenteService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertVersion(em, versionId);
-      const coefficients = JSON.stringify(this.normalizeByNature(input.byNature));
+      const typeRates = Object.fromEntries(
+        (input.types ?? []).map((t) => [
+          t.typeId,
+          { tauxFg: String(t.tauxFg ?? 0), tauxBenefice: String(t.tauxBenefice ?? 0) },
+        ]),
+      );
+      // Les quatre natures restent le socle de la gestion en aval : quand l'écran ne transmet que
+      // des types, on les déduit du type qui porte chaque nature.
+      const byNature = input.byNature
+        ? this.normalizeByNature(input.byNature)
+        : await this.deriveByNature(em, versionId, typeRates);
+      const coefficients = JSON.stringify({ ...byNature, types: typeRates });
       const stTypes = JSON.stringify(
         (input.stTypes ?? []).map((t) => ({
           id: t.id,
@@ -189,9 +215,45 @@ export class VenteService {
            FROM sale_sheet WHERE devis_version_id = $1`,
         [versionId],
       );
+      // Types utilisables sur ce devis : le référentiel société + ses propres types, chacun avec
+      // les taux mémorisés POUR CE DEVIS (le référentiel ne porte pas de taux).
+      await this.debourseTypes.ensureInTx(em, tenantId);
+      const typeRows = await em.query(
+        `SELECT id, code, label, base_nature, builtin, devis_version_id, sort_order
+           FROM debourse_type
+          WHERE devis_version_id IS NULL OR devis_version_id = $1
+          ORDER BY devis_version_id NULLS FIRST, sort_order, code`,
+        [versionId],
+      );
+      // Repli sur les taux de la nature de rattachement : un devis chiffré AVANT les types
+      // paramétrables n'a pas de taux par type, et doit retrouver les siens à l'écran — sans quoi
+      // un simple enregistrement les remettrait à zéro.
+      const withRates = (
+        rates: Record<string, NatureSaleRate>,
+        fallback?: Record<Nature, NatureSaleRate>,
+      ) =>
+        typeRows.map(
+          (t: {
+            id: string; code: string; label: string; base_nature: Nature;
+            builtin: boolean; devis_version_id: string | null;
+          }) => ({
+            id: t.id,
+            code: t.code,
+            label: t.label,
+            baseNature: t.base_nature,
+            builtin: t.builtin,
+            devisVersionId: t.devis_version_id,
+            tauxFg: String(rates[t.id]?.tauxFg ?? fallback?.[t.base_nature]?.tauxFg ?? 0),
+            tauxBenefice: String(
+              rates[t.id]?.tauxBenefice ?? fallback?.[t.base_nature]?.tauxBenefice ?? 0,
+            ),
+          }),
+        );
+
       if (rows.length === 0) {
         return {
-          configured: false, byNature: null, stTypes: [], remise: null, tvaRate: null,
+          configured: false, byNature: null, stTypes: [], types: withRates({}),
+          remise: null, tvaRate: null,
           arrondi: null, pvImpose: null, fraisMode: 'separe', fraisAnnexes,
         };
       }
@@ -205,6 +267,7 @@ export class VenteService {
         configured: true,
         byNature,
         stTypes: c.st_types ?? [],
+        types: withRates((c.coefficients?.types ?? {}) as Record<string, NatureSaleRate>, byNature),
         arrondi: { pas: String(c.arrondi_pas ?? 0), mode: c.arrondi_mode ?? 'proche' },
         pvImpose: c.pv_impose != null ? String(c.pv_impose) : null,
         fraisMode: c.frais_mode ?? 'separe',
@@ -234,6 +297,30 @@ export class VenteService {
     if (version.length === 0) {
       throw new NotFoundException(`Unknown version "${versionId}"`);
     }
+  }
+
+  /**
+   * Taux d'une nature = ceux du type qui la porte : son type de base s'il existe, sinon le premier
+   * type rattaché à cette nature. Sans aucun type, la nature reste à zéro.
+   */
+  private async deriveByNature(
+    em: EntityManager,
+    versionId: string,
+    typeRates: Record<string, NatureSaleRate>,
+  ): Promise<Record<Nature, NatureSaleRate>> {
+    await this.debourseTypes.ensureInTx(em, this.context.requireTenantId());
+    const types = await em.query(
+      `SELECT id, base_nature, builtin FROM debourse_type
+        WHERE devis_version_id IS NULL OR devis_version_id = $1
+        ORDER BY builtin DESC, sort_order, code`,
+      [versionId],
+    );
+    const out = {} as Record<Nature, NatureSaleRate>;
+    for (const n of NATURES) {
+      const carrier = types.find((t: { base_nature: Nature }) => t.base_nature === n);
+      out[n] = (carrier && typeRates[carrier.id]) || ZERO_RATE;
+    }
+    return out;
   }
 
   private normalizeByNature(
@@ -470,17 +557,31 @@ export class VenteService {
         tauxBenefice: String(r.tauxBenefice ?? 0),
       };
     }
-    // Taux propres à chaque type de sous-traitance déclaré sur CE devis.
+    // Taux propres à chaque type de sous-traitance déclaré sur CE devis (mécanisme d'origine).
     const stRates = Object.fromEntries(
       (c.st_types ?? []).map((t: { id: string; tauxFg?: string; tauxBenefice?: string }) => [
         t.id,
         { tauxFg: String(t.tauxFg ?? 0), tauxBenefice: String(t.tauxBenefice ?? 0) },
       ]),
     ) as Record<string, NatureSaleRate>;
+    // Types de déboursé paramétrables : leurs taux (sur ce devis) et leur nature de rattachement,
+    // qui décide où leur déboursé est agrégé.
+    const typeRates = (c.coefficients?.types ?? {}) as Record<string, NatureSaleRate>;
+    await this.debourseTypes.ensureInTx(em, this.context.requireTenantId());
+    const typeRows = await em.query(
+      `SELECT id, base_nature FROM debourse_type
+        WHERE devis_version_id IS NULL OR devis_version_id = $1`,
+      [versionId],
+    );
+    const typeBaseNature = Object.fromEntries(
+      typeRows.map((t: { id: string; base_nature: Nature }) => [t.id, t.base_nature]),
+    ) as Record<string, Nature>;
     const remiseValeur = new Decimal(c.remise_valeur ?? 0);
     return {
       byNature,
       stRates,
+      typeRates,
+      typeBaseNature,
       arrondi:
         c.arrondi_pas != null && Number(c.arrondi_pas) > 0
           ? { pas: String(c.arrondi_pas), mode: (c.arrondi_mode ?? 'proche') as 'proche' | 'sup' | 'inf' }

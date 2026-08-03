@@ -73,8 +73,11 @@ export class DebourseTypeService {
     };
   }
 
-  /** Sème les types de base quand la société n'en a AUCUN (première utilisation). */
-  private async ensure(em: EntityManager, tenantId: string): Promise<void> {
+  /**
+   * Sème les types de base quand la société n'en a AUCUN (première utilisation). Public : la
+   * feuille de vente s'appuie sur ces types et doit pouvoir les garantir dans SA transaction.
+   */
+  async ensureInTx(em: EntityManager, tenantId: string): Promise<void> {
     const existing = await em.query(`SELECT 1 FROM debourse_type LIMIT 1`);
     if (existing.length > 0) return;
     let ord = 0;
@@ -94,7 +97,7 @@ export class DebourseTypeService {
   list(devisVersionId?: string | null): Promise<DebourseType[]> {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      await this.ensure(em, tenantId);
+      await this.ensureInTx(em, tenantId);
       const rows: Row[] = await em.query(
         `SELECT id, code, label, base_nature, builtin, devis_version_id, sort_order
            FROM debourse_type
@@ -123,7 +126,7 @@ export class DebourseTypeService {
     }
     this.assertNature(input?.baseNature as string);
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      await this.ensure(em, tenantId);
+      await this.ensureInTx(em, tenantId);
       await this.assertCodeFree(em, code, input.devisVersionId ?? null, null);
       const [next] = await em.query(
         `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM debourse_type`,

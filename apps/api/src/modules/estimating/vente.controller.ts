@@ -11,7 +11,9 @@ export class VenteController {
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')
   setSaleSheet(@Param('versionId') versionId: string, @Body() body: SaleSheetInput) {
-    if (!body?.byNature) {
+    // L'écran transmet désormais les taux PAR TYPE ; les natures de base s'en déduisent. Les
+    // appels historiques (byNature seul) restent acceptés tels quels.
+    if (!body?.byNature && !body?.types) {
       throw new BadRequestException('byNature coefficients are required');
     }
     return this.vente.setSaleSheet(versionId, body);

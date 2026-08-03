@@ -594,4 +594,85 @@ describe('vente-calc — feuille de vente', () => {
     );
     expect(res.fraisChantier!.fgByNature.labor).toBe('100'); // et non 600
   });
+
+  // ── Types de déboursé paramétrables ───────────────────────────────────────────────────────
+  // Un type porte ses propres FG/bénéfice et se rattache à une nature de base : c'est cette
+  // nature qui reçoit le déboursé dans les récapitulatifs, les budgets et l'analytique.
+
+  it('type de déboursé — applique les taux DU TYPE, pas ceux de sa nature', () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByType: { 'loc-1': '1000' } }],
+      coeffs({
+        byNature: {
+          labor: rate('0', '0'),
+          material: rate('0', '0'),
+          equipment: rate('50', '50'), // la nature : jamais appliquée ici
+          subcontract: rate('0', '0'),
+        },
+        typeRates: { 'loc-1': rate('10', '20') }, // 1000 → 1100 → 1320
+        typeBaseNature: { 'loc-1': 'equipment' },
+      }),
+    );
+    expect(res.items[0].revient).toBe('1100');
+    expect(res.items[0].pv).toBe('1320');
+  });
+
+  it('type de déboursé — le déboursé remonte dans la NATURE DE RATTACHEMENT du type', () => {
+    const res = computeFeuilleDeVente(
+      [
+        {
+          id: 'A',
+          vendable: true,
+          debourseByNature: { equipment: '500' },
+          debourseByType: { 'loc-1': '1000', 'int-1': '300' },
+        },
+      ],
+      coeffs({
+        typeRates: { 'loc-1': rate('0', '0'), 'int-1': rate('0', '0') },
+        typeBaseNature: { 'loc-1': 'equipment', 'int-1': 'labor' },
+      }),
+    );
+    // Matériel = 500 en direct + 1 000 de « Location » ; MO = 300 d'« Intérim ».
+    expect(res.items[0].debourseByNature.equipment).toBe('1500');
+    expect(res.items[0].debourseByNature.labor).toBe('300');
+  });
+
+  it('type de déboursé — un type non paramétré retombe sur les taux de sa nature', () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByType: { inconnu: '1000' } }],
+      coeffs({
+        byNature: {
+          labor: rate('0', '0'),
+          material: rate('10', '0'),
+          equipment: rate('0', '0'),
+          subcontract: rate('0', '0'),
+        },
+        typeBaseNature: { inconnu: 'material' },
+      }),
+    );
+    expect(res.items[0].revient).toBe('1100'); // taux de la nature « matériaux »
+    expect(res.items[0].debourseByNature.material).toBe('1000');
+  });
+
+  it('type de déboursé — sans nature de rattachement connue, le repli reste la sous-traitance', () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseBySt: { 'st-x': '1000' } }],
+      coeffs({ stRates: { 'st-x': rate('5', '0') } }),
+    );
+    // Compatibilité : les devis déjà chiffrés avec des types de ST gardent leur résultat.
+    expect(res.items[0].revient).toBe('1050');
+    expect(res.items[0].debourseByNature.subcontract).toBe('1000');
+  });
+
+  it('type de déboursé — les frais généraux repris au chantier suivent le type', () => {
+    const res = computeFeuilleDeVente(
+      [{ id: 'A', vendable: true, debourseByType: { 'loc-1': '2000' } }],
+      coeffs({
+        typeRates: { 'loc-1': rate('15', '10') }, // FG = 300
+        typeBaseNature: { 'loc-1': 'equipment' },
+      }),
+    );
+    expect(res.fraisChantier!.fgBySt['loc-1']).toBe('300');
+    expect(res.fraisChantier!.total).toBe('300');
+  });
 });

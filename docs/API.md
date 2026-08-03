@@ -61,8 +61,9 @@
 | POST | `/versions/:versionId/lines` | `estimating.devis.write` | Ligne de devis (titre/sous-titre/ouvrage/ressource) |
 | GET | `/versions/:versionId/lines` | `estimating.devis.read` | Arbre du corps de devis |
 | PUT | `/versions/:versionId/variables/:name` | `estimating.devis.write` | Variable de métré → recalcul des formules |
-| PUT | `/versions/:versionId/sale-sheet` | `estimating.devis.write` | Coefficients de la feuille de vente |
+| PUT | `/versions/:versionId/sale-sheet` | `estimating.devis.write` | Coefficients de la feuille de vente. Accepte `types: [{ typeId, tauxFg, tauxBenefice }]` — les 4 natures de base en sont déduites (type de base de la nature, sinon premier type qui s'y rattache). `byNature` reste accepté seul pour les appels historiques |
 | GET | `/versions/:versionId/sale-sheet` | `estimating.devis.read` | Calcul feuille de vente (PV, ventilation, TVA/TTC) |
+| GET | `/versions/:versionId/sale-sheet/config` | `estimating.devis.read` | Paramétrage mémorisé : natures, `types` (types de déboursé utilisables ici, avec leurs taux sur CE devis), arrondi, PV imposé, remise, TVA, frais annexes. Un devis chiffré avant les types paramétrables retombe sur les taux de la nature de rattachement — ouvrir puis enregistrer ne perd rien |
 | GET | `/versions/:versionId/devis.pdf` | `estimating.devis.read` | PDF du devis (`application/pdf`) |
 | POST | `/affaires/:affaireId/transition` | `estimating.devis.write` | Workflow (`{ to }`) ; transition interdite → 409 |
 | GET | `/affaires/:affaireId/transfer-check` | `estimating.devis.read` | Transférable ? + alertes |

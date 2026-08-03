@@ -73,6 +73,13 @@ export interface VenteItemInput {
    * reste dans debourseByNature.subcontract et suit les taux de la nature.
    */
   debourseBySt?: Partial<Record<string, Decimal.Value>>;
+  /**
+   * Déboursé ventilé par TYPE DE DÉBOURSÉ paramétrable (référentiel société ou type propre au
+   * devis) : « ST Moyens », « Location », « Intérim »… Chaque type porte ses propres FG/bénéfice
+   * et se rattache à une nature de base, qui recevra le déboursé dans les récapitulatifs.
+   * Successeur de `debourseBySt`, qui reste accepté pour les devis déjà chiffrés.
+   */
+  debourseByType?: Partial<Record<string, Decimal.Value>>;
   vendable: boolean;
   /**
    * Base de ventilation d'une ligne de FRAIS (non vendable), à la manière d'ONAYA :
@@ -90,8 +97,16 @@ export interface VenteItemInput {
 
 export interface SaleCoefficients {
   byNature: Record<Nature, NatureSaleRate>;
-  /** Taux propres à chaque TYPE de sous-traitance (clé = id du type, défini par devis). */
+  /** Taux propres à chaque TYPE de sous-traitance (ancien nom, conservé pour l'existant). */
   stRates?: Record<string, NatureSaleRate>;
+  /** Taux propres à chaque type de déboursé (clé = id du type). Successeur de `stRates`. */
+  typeRates?: Record<string, NatureSaleRate>;
+  /**
+   * Nature de base de chaque type : elle décide où le déboursé du type est agrégé (récapitulatifs,
+   * budgets de chantier, axe analytique) et sert de repli quand le type n'a pas de taux propres.
+   * Type inconnu ici → sous-traitance, comportement d'origine des types de ST.
+   */
+  typeBaseNature?: Record<string, Nature>;
   fraisAnnexes?: FraisAnnexe[];
   remise?: Remise | null;
   /**
@@ -224,9 +239,18 @@ function sumSt(b: StBreakdown): Decimal {
   return Object.values(b).reduce((acc, v) => acc.plus(v), new Decimal(0));
 }
 
-/** Taux applicables à un type de ST, avec repli sur la nature « sous-traitance ». */
+/** Nature de base d'un type de déboursé (repli historique : la sous-traitance). */
+function baseNatureOf(coeffs: SaleCoefficients, typeId: string): Nature {
+  return coeffs.typeBaseNature?.[typeId] ?? 'subcontract';
+}
+
+/** Taux applicables à un type, avec repli sur les taux de sa nature de rattachement. */
 function stRateOf(coeffs: SaleCoefficients, typeId: string): NatureSaleRate {
-  return coeffs.stRates?.[typeId] ?? coeffs.byNature.subcontract ?? { tauxFg: 0, tauxBenefice: 0 };
+  return (
+    coeffs.typeRates?.[typeId] ??
+    coeffs.stRates?.[typeId] ??
+    coeffs.byNature[baseNatureOf(coeffs, typeId)] ?? { tauxFg: 0, tauxBenefice: 0 }
+  );
 }
 
 /** Arrondit une valeur au pas demandé (0 ou absent = pas d'arrondi). */
@@ -307,7 +331,13 @@ function priceItem(
     ? round2(new Decimal(input.forcedPv as Decimal.Value))
     : round2(applyArrondi(pvComputed, coeffs.arrondi));
 
-  const stTotal = sumSt(effSt);
+  // Chaque type verse son déboursé dans sa nature de rattachement : c'est cette nature que
+  // lisent les récapitulatifs, les budgets de chantier et l'axe analytique.
+  const stByNature = zeroBreakdown();
+  for (const [typeId, v] of Object.entries(effSt)) {
+    const n = baseNatureOf(coeffs, typeId);
+    stByNature[n] = stByNature[n].plus(v);
+  }
   return {
     id: input.id,
     debourse: round2(debourse).toString(),
@@ -323,10 +353,7 @@ function priceItem(
     // La ligne « sous-traitance » agrège les types de ST : les consommateurs existants
     // (récap déboursé, synthèse par ouvrage) restent justes sans changement.
     debourseByNature: Object.fromEntries(
-      NATURES.map((n) => [
-        n,
-        round2(n === 'subcontract' ? effBreakdown[n].plus(stTotal) : effBreakdown[n]).toString(),
-      ]),
+      NATURES.map((n) => [n, round2(effBreakdown[n].plus(stByNature[n])).toString()]),
     ) as Record<Nature, string>,
     debourseBySt: Object.fromEntries(
       Object.entries(effSt).map(([k, v]) => [k, round2(v).toString()]),
@@ -346,7 +373,7 @@ export function computeFeuilleDeVente(
   const prepared = items.map((it) => ({
     input: it,
     breakdown: toBreakdown(it.debourseByNature),
-    st: toStBreakdown(it.debourseBySt),
+    st: toStBreakdown({ ...(it.debourseBySt ?? {}), ...(it.debourseByType ?? {}) }),
     section: it.section ?? 'main',
   }));
 

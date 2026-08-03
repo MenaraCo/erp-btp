@@ -56,11 +56,25 @@ const NATURE_LABELS: Record<Nat, string> = {
   labor: "Main d'œuvre", material: 'Matériaux', equipment: 'Matériel', subcontract: 'Sous-traitance',
 };
 interface FraisRow { designation: string; type: 'pct' | 'fixe'; valeur: string; mode?: 'separe' | 'inclus' | null }
+/** Type de déboursé utilisable sur ce devis, avec ses taux retenus pour ce devis. */
+interface DebType {
+  id: string;
+  code: string;
+  label: string;
+  baseNature: string;
+  builtin: boolean;
+  /** Non nul = type créé pour ce devis seul (supprimable, versable au référentiel). */
+  devisVersionId: string | null;
+  tauxFg: string;
+  tauxBenefice: string;
+}
+
 interface StType { id: string; code?: string | null; label: string; tauxFg: string; tauxBenefice: string }
 interface SaleConfig {
   configured: boolean;
   byNature: Record<Nat, { tauxFg: string; tauxBenefice: string }> | null;
   stTypes?: StType[];
+  types?: DebType[];
   arrondi?: { pas: string; mode: 'proche' | 'sup' | 'inf' } | null;
   pvImpose?: string | null;
   fraisMode?: 'separe' | 'inclus';
@@ -202,6 +216,10 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
   const [remise, setRemise] = useState<{ type: 'pct' | 'fixe'; valeur: string }>({ type: 'pct', valeur: '0' });
   // B.1 — types de sous-traitance propres à CE devis (chacun ses FG/bénéfice).
   const [stTypes, setStTypes] = useState<StType[]>([]);
+  // Types de déboursé de l'entreprise (référentiel société + types propres à ce devis), avec
+  // les % FG et % bénéfice retenus SUR CE DEVIS.
+  const [debTypes, setDebTypes] = useState<DebType[]>([]);
+  const [newType, setNewType] = useState({ code: '', label: '', baseNature: 'material' });
   // B.3 — arrondi commercial du PV de ligne + PV total imposé.
   const [arrondi, setArrondi] = useState<{ pas: string; mode: 'proche' | 'sup' | 'inf' }>({ pas: '0', mode: 'proche' });
   const [pvImpose, setPvImpose] = useState('');
@@ -216,17 +234,52 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     setTva(String(def));
   }, [prefs.id, prefs.taux_tva]);
 
+  // Types de déboursé : créés pour CE devis, versés au référentiel société, ou retirés.
+  const refreshTypes = () => qc.invalidateQueries({ queryKey: ['sale-config', versionId] });
+  const addType = useMutation({
+    mutationFn: () =>
+      apiFetch<DebType>('/debourse-types', {
+        method: 'POST',
+        body: { ...newType, code: newType.code.trim(), label: newType.label.trim(), devisVersionId: versionId },
+        token,
+      }),
+    onSuccess: (t) => {
+      // Le nouveau type prend d'emblée les taux par défaut de la société.
+      setDebTypes((prev) => [...prev, {
+        ...t,
+        tauxFg: String(Number(prefs.taux_fg_default) || 0),
+        tauxBenefice: String(Number(prefs.taux_ben_default) || 0),
+      }]);
+      setNewType({ code: '', label: '', baseNature: 'material' });
+      setErr(null);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Type impossible à créer.'),
+  });
+  const promoteType = useMutation({
+    mutationFn: (id: string) => apiFetch(`/debourse-types/${id}/promote`, { method: 'POST', token }),
+    onSuccess: (_r, id) => {
+      setDebTypes((prev) => prev.map((t) => (t.id === id ? { ...t, devisVersionId: null } : t)));
+      refreshTypes();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Type impossible à verser au référentiel.'),
+  });
+  const removeType = useMutation({
+    mutationFn: (id: string) => apiFetch(`/debourse-types/${id}`, { method: 'DELETE', token }),
+    onSuccess: (_r, id) => {
+      setDebTypes((prev) => prev.filter((t) => t.id !== id));
+      refreshTypes();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Type impossible à supprimer.'),
+  });
+
   const setSale = useMutation({
     mutationFn: () =>
       apiFetch(`/versions/${versionId}/sale-sheet`, {
         method: 'PUT',
         body: {
-          byNature: {
-            labor: { tauxFg: coef.labor.fg, tauxBenefice: coef.labor.ben },
-            material: { tauxFg: coef.material.fg, tauxBenefice: coef.material.ben },
-            equipment: { tauxFg: coef.equipment.fg, tauxBenefice: coef.equipment.ben },
-            subcontract: { tauxFg: coef.subcontract.fg, tauxBenefice: coef.subcontract.ben },
-          },
+          types: debTypes.map((t) => ({
+            typeId: t.id, tauxFg: t.tauxFg || '0', tauxBenefice: t.tauxBenefice || '0',
+          })),
           stTypes: stTypes.filter((t) => t.label.trim()),
           arrondi: { pas: arrondi.pas || '0', mode: arrondi.mode },
           pvImpose: pvImpose.trim() === '' ? null : pvImpose,
@@ -436,6 +489,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
         subcontract: { fg: b.subcontract.tauxFg, ben: b.subcontract.tauxBenefice },
       });
       setStTypes(cfg.stTypes ?? []);
+      setDebTypes(cfg.types ?? []);
       if (cfg.arrondi) setArrondi({ pas: String(Number(cfg.arrondi.pas)), mode: cfg.arrondi.mode });
       setPvImpose(cfg.pvImpose != null ? String(Number(cfg.pvImpose)) : '');
       setFraisMode(cfg.fraisMode ?? 'separe');
@@ -445,6 +499,8 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
       const fg = String(Number(prefs.taux_fg_default) || 25);
       const ben = String(Number(prefs.taux_ben_default) || 15);
       setCoef({ labor: { fg, ben }, material: { fg, ben }, equipment: { fg, ben }, subcontract: { fg, ben } });
+      // Devis neuf : tous les types partent des taux par défaut de la société.
+      setDebTypes((cfg.types ?? []).map((t) => ({ ...t, tauxFg: fg, tauxBenefice: ben })));
     }
     setFrais((cfg.fraisAnnexes ?? []).map((f) => ({
       designation: f.designation, type: f.type, valeur: String(Number(f.valeur)),
@@ -762,9 +818,11 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
 
               {tab === 'coeffs' && (
                 <div className="card" style={{ marginTop: 16 }}>
-                  <h2>Feuille de vente — coefficients par nature</h2>
+                  <h2>Feuille de vente — frais généraux &amp; bénéfice par type</h2>
                   <p className="muted" style={{ marginTop: 0 }}>
                     Déboursé × (1 + FG %) = prix de revient, puis × (1 + Bénéfice %) = prix de vente.
+                    Les types viennent de vos <strong>Paramètres → Types de déboursé</strong> ; vous
+                    pouvez en ajouter un pour ce devis seul, puis le verser au référentiel.
                   </p>
                   <form onSubmit={(ev) => {
                     ev.preventDefault(); setErr(null);
@@ -772,74 +830,86 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                     setSale.mutate();
                     setFraisAnnexes.mutate();
                   }}>
-                    <table className="grid" style={{ marginBottom: 12 }}>
-                      <thead><tr><th>Nature</th><th style={{ textAlign: 'right' }}>FG %</th><th style={{ textAlign: 'right' }}>Bénéfice %</th><th style={{ textAlign: 'right' }}>Coeff.</th></tr></thead>
+                    <table className="grid" style={{ marginBottom: 8 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 80 }}>Code</th>
+                          <th>Intitulé</th>
+                          <th style={{ width: 150 }}>Rattaché à</th>
+                          <th style={{ textAlign: 'right', width: 90 }}>FG %</th>
+                          <th style={{ textAlign: 'right', width: 90 }}>Bénéfice %</th>
+                          <th style={{ textAlign: 'right', width: 80 }}>Coeff.</th>
+                          <th style={{ width: 70 }} />
+                        </tr>
+                      </thead>
                       <tbody>
-                        {(Object.keys(NATURE_LABELS) as Nat[]).map((n) => {
-                          const c = coef[n];
-                          const k = (1 + Number(c.fg) / 100) * (1 + Number(c.ben) / 100);
+                        {debTypes.map((t, i) => {
+                          const k = (1 + Number(t.tauxFg || 0) / 100) * (1 + Number(t.tauxBenefice || 0) / 100);
+                          const upd = (patch: Partial<DebType>) =>
+                            setDebTypes(debTypes.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                          const local = t.devisVersionId != null;
                           return (
-                            <tr key={n}>
-                              <td>{NATURE_LABELS[n]}</td>
+                            <tr key={t.id}>
+                              <td className="code-cell">{t.code}</td>
+                              <td>
+                                {t.label}
+                                {local && (
+                                  <span className="badge" style={{ marginLeft: 6 }}>propre à ce devis</span>
+                                )}
+                              </td>
+                              <td className="muted">{NATURE_LABELS[t.baseNature as Nat] ?? t.baseNature}</td>
                               <td style={{ textAlign: 'right' }}>
-                                <input style={{ width: 64, textAlign: 'right' }} value={c.fg}
-                                  onChange={(ev) => setCoef({ ...coef, [n]: { ...c, fg: ev.target.value } })} />
+                                <input style={{ width: 64, textAlign: 'right' }} value={t.tauxFg} disabled={!isLatest}
+                                  onChange={(ev) => upd({ tauxFg: ev.target.value })} />
                               </td>
                               <td style={{ textAlign: 'right' }}>
-                                <input style={{ width: 64, textAlign: 'right' }} value={c.ben}
-                                  onChange={(ev) => setCoef({ ...coef, [n]: { ...c, ben: ev.target.value } })} />
+                                <input style={{ width: 64, textAlign: 'right' }} value={t.tauxBenefice} disabled={!isLatest}
+                                  onChange={(ev) => upd({ tauxBenefice: ev.target.value })} />
                               </td>
                               <td style={{ textAlign: 'right' }} className="muted">{k.toFixed(3)}</td>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                {local && (
+                                  <>
+                                    <button type="button" className="btn-ghost" title="Verser au référentiel société"
+                                      disabled={!isLatest} onClick={() => promoteType.mutate(t.id)}>↑</button>
+                                    <button type="button" className="btn-ghost" title="Supprimer ce type"
+                                      disabled={!isLatest} onClick={() => removeType.mutate(t.id)}>✕</button>
+                                  </>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
 
-                    {/* B.1 — types de sous-traitance propres à ce devis (chacun ses FG/bénéfice) */}
-                    <div className="form-section-title" style={{ marginTop: 4 }}>Types de sous-traitance</div>
-                    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
-                      Définissez ici les sous-traitances de ce devis (ex. « ST Moyens », « ST Compétence »).
-                      Chaque type porte ses propres FG % et bénéfice %. Une ressource de nature
-                      « Sous-traitance » sans type suit les taux de la nature ci-dessus.
-                    </p>
-                    <table className="grid" style={{ marginBottom: 8 }}>
-                      <thead><tr><th>Libellé</th><th style={{ width: 90 }}>Code</th><th style={{ textAlign: 'right', width: 90 }}>FG %</th><th style={{ textAlign: 'right', width: 90 }}>Bénéfice %</th><th style={{ textAlign: 'right', width: 80 }}>Coeff.</th><th style={{ width: 40 }} /></tr></thead>
-                      <tbody>
-                        {stTypes.length === 0 && (
-                          <tr><td colSpan={6} className="muted" style={{ fontSize: 12 }}>Aucun type — la sous-traitance suit les taux de la nature.</td></tr>
-                        )}
-                        {stTypes.map((t, i) => {
-                          const k = (1 + Number(t.tauxFg) / 100) * (1 + Number(t.tauxBenefice) / 100);
-                          const upd = (patch: Partial<StType>) =>
-                            setStTypes(stTypes.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-                          return (
-                            <tr key={t.id}>
-                              <td><input style={{ width: '100%' }} value={t.label} placeholder="ST Moyens"
-                                onChange={(ev) => upd({ label: ev.target.value })} /></td>
-                              <td><input style={{ width: '100%' }} value={t.code ?? ''} placeholder="STM"
-                                onChange={(ev) => upd({ code: ev.target.value })} /></td>
-                              <td style={{ textAlign: 'right' }}><input style={{ width: 64, textAlign: 'right' }} value={t.tauxFg}
-                                onChange={(ev) => upd({ tauxFg: ev.target.value })} /></td>
-                              <td style={{ textAlign: 'right' }}><input style={{ width: 64, textAlign: 'right' }} value={t.tauxBenefice}
-                                onChange={(ev) => upd({ tauxBenefice: ev.target.value })} /></td>
-                              <td style={{ textAlign: 'right' }} className="muted">{k.toFixed(3)}</td>
-                              <td style={{ textAlign: 'right' }}>
-                                <button type="button" className="btn-ghost" title="Supprimer ce type"
-                                  onClick={() => setStTypes(stTypes.filter((_, j) => j !== i))}>✕</button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    <button type="button" className="btn-secondary" style={{ marginBottom: 12 }} disabled={!isLatest}
-                      onClick={() => setStTypes([...stTypes, {
-                        id: `st${Date.now().toString(36)}`, code: '', label: '',
-                        tauxFg: coef.subcontract.fg, tauxBenefice: coef.subcontract.ben,
-                      }])}>
-                      + Type de sous-traitance
-                    </button>
+                    {/* Ajout d'un type pour CE devis : le référentiel société se gère dans Paramètres. */}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap' }}>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Code</label>
+                        <input className="input" style={{ width: 90 }} placeholder="LOC" value={newType.code}
+                          disabled={!isLatest} onChange={(ev) => setNewType({ ...newType, code: ev.target.value })} />
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Intitulé</label>
+                        <input className="input" style={{ width: 220 }} placeholder="Location de matériel"
+                          value={newType.label} disabled={!isLatest}
+                          onChange={(ev) => setNewType({ ...newType, label: ev.target.value })} />
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Rattaché à</label>
+                        <select className="input" style={{ width: 160 }} value={newType.baseNature} disabled={!isLatest}
+                          onChange={(ev) => setNewType({ ...newType, baseNature: ev.target.value })}>
+                          {(Object.keys(NATURE_LABELS) as Nat[]).map((n) => (
+                            <option key={n} value={n}>{NATURE_LABELS[n]}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button type="button" className="btn-secondary" disabled={!isLatest || !newType.code.trim() || !newType.label.trim()}
+                        onClick={() => addType.mutate()}>
+                        + Type de déboursé
+                      </button>
+                    </div>
 
                     <div className="form-section-title" style={{ marginTop: 4 }}>Arrondi &amp; prix imposé</div>
                     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
