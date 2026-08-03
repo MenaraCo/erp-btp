@@ -29,6 +29,13 @@ describe('devis-workflow — cycle commercial (rule #7)', () => {
     expect(canTransition('lost', 'won')).toBe(true);
   });
 
+  it('un devis envoyé peut être remis en cours — envoi par erreur, reprise de l’étude', () => {
+    // Sans ce retour direct, corriger un envoi prématuré obligeait à passer par « Révision »,
+    // ce qui laissait une trace de révision qui n'a jamais existé.
+    expect(canTransition('sent', 'open')).toBe(true);
+    expect(canTransition('followup', 'open')).toBe(true);
+  });
+
   it('refuse une transition non prévue et la signale', () => {
     expect(canTransition('won', 'sent')).toBe(false);
     expect(() => assertTransition('won', 'open')).toThrow(InvalidTransitionError);

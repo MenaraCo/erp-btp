@@ -30,10 +30,12 @@ export const DEVIS_STATUS_LABELS: Record<DevisStatus, string> = {
  */
 export const DEVIS_TRANSITIONS: Record<DevisStatus, DevisStatus[]> = {
   open: ['sent', 'won', 'lost'],
-  sent: ['won', 'lost', 'followup', 'revision'],
+  // « Remettre en cours » depuis un devis envoyé ou relancé : un envoi prématuré se corrige sans
+  // passer par « Révision », qui laisserait la trace d'une révision qui n'a jamais eu lieu.
+  sent: ['open', 'won', 'lost', 'followup', 'revision'],
   won: ['lost'],
   lost: ['followup', 'revision', 'won'],
-  followup: ['sent', 'won', 'lost', 'revision'],
+  followup: ['open', 'sent', 'won', 'lost', 'revision'],
   revision: ['open', 'sent'],
 };
 

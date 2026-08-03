@@ -17,10 +17,10 @@ import { useAuth } from '@/lib/auth';
  */
 const TRANSITIONS: Record<string, string[]> = {
   open: ['sent', 'won', 'lost'],
-  sent: ['won', 'lost', 'followup', 'revision'],
+  sent: ['open', 'won', 'lost', 'followup', 'revision'],
   won: ['lost'],
   lost: ['followup', 'revision', 'won'],
-  followup: ['sent', 'won', 'lost', 'revision'],
+  followup: ['open', 'sent', 'won', 'lost', 'revision'],
   revision: ['open', 'sent'],
 };
 
