@@ -144,6 +144,106 @@ describe('Études de prix — taux par type de déboursé sur le devis', () => {
     expect(relu.ST.tauxBenefice).toBe('5');
   });
 
+  it('une ressource rattachée à un type suit LES COEFFICIENTS DE CE TYPE', async () => {
+    const v = await newVersion('TR-6');
+    const loc = (
+      await as('post', '/debourse-types')
+        .send({ code: 'LOC2', label: 'Location', baseNature: 'equipment', devisVersionId: v })
+        .expect(201)
+    ).body;
+    const list = await types(v);
+    const mat = list.find((t) => t.code === 'MAT')!;
+
+    // Deux ressources « matériel » : l'une sur le type de base, l'autre sur « Location ».
+    const titre = (
+      await as('post', `/versions/${v}/lines`)
+        .send({ type: 'titre', code: '1', designation: 'T', sortOrder: 1 })
+        .expect(201)
+    ).body;
+    const base = (
+      await as('post', `/versions/${v}/lines`)
+        .send({
+          type: 'ressource', parentLineId: titre.id, code: 'A', designation: 'Matériel courant',
+          unit: 'u', quantity: '1', pu: '1000', nature: 'equipment', debourseTypeId: mat.id,
+        })
+        .expect(201)
+    ).body;
+    const louee = (
+      await as('post', `/versions/${v}/lines`)
+        .send({
+          type: 'ressource', parentLineId: titre.id, code: 'B', designation: 'Nacelle louée',
+          unit: 'u', quantity: '1', pu: '1000', nature: 'equipment', debourseTypeId: loc.id,
+        })
+        .expect(201)
+    ).body;
+
+    await as('put', `/versions/${v}/sale-sheet`)
+      .send({
+        types: [
+          { typeId: mat.id, tauxFg: '10', tauxBenefice: '0' }, // 1000 → 1100
+          { typeId: loc.id, tauxFg: '50', tauxBenefice: '0' }, // 1000 → 1500
+        ],
+        tvaRate: '0.20',
+      })
+      .expect(200);
+
+    const fv = (await as('get', `/versions/${v}/sale-sheet`).expect(200)).body;
+    const byId = Object.fromEntries(fv.items.map((i: { id: string }) => [i.id, i]));
+    expect(byId[base.id].revient).toBe('1100');
+    expect(byId[louee.id].revient).toBe('1500'); // et non 1100 : le type l'emporte sur la nature
+    // Les deux restent du « matériel » pour les budgets de chantier et l'analytique.
+    expect(byId[louee.id].debourseByNature.equipment).toBe('1000');
+    expect(fv.totalRevient).toBe('2600');
+  });
+
+  it('une ressource de bibliothèque transmet son type à la ligne de devis', async () => {
+    const v = await newVersion('TR-7');
+    const loc = (
+      await as('post', '/debourse-types')
+        .send({ code: 'LOC3', label: 'Location', baseNature: 'equipment' })
+        .expect(201)
+    ).body;
+    const lib = (await as('post', '/libraries').send({ code: 'LTR', name: 'LTR' }).expect(201)).body;
+    const res = (
+      await as('post', `/libraries/${lib.id}/resources`)
+        .send({
+          code: 'NACELLE', label: 'Nacelle', unit: 'j', nature: 'equipment',
+          unitCost: '1000', debourseTypeId: loc.id,
+        })
+        .expect(201)
+    ).body;
+    expect(res.debourseTypeId).toBe(loc.id);
+
+    const titre = (
+      await as('post', `/versions/${v}/lines`)
+        .send({ type: 'titre', code: '1', designation: 'T', sortOrder: 1 })
+        .expect(201)
+    ).body;
+    // Ajoutée depuis la bibliothèque SANS préciser de type : elle doit hériter de celui de la ressource.
+    const ligne = (
+      await as('post', `/versions/${v}/lines`)
+        .send({
+          type: 'ressource', parentLineId: titre.id, sourceResourceId: res.id,
+          designation: 'Nacelle', quantity: '1',
+        })
+        .expect(201)
+    ).body;
+    expect(ligne.debourse_type_id).toBe(loc.id);
+
+    const mat = (await types(v)).find((t) => t.code === 'MAT')!;
+    await as('put', `/versions/${v}/sale-sheet`)
+      .send({
+        types: [
+          { typeId: mat.id, tauxFg: '0', tauxBenefice: '0' },
+          { typeId: loc.id, tauxFg: '40', tauxBenefice: '0' },
+        ],
+        tvaRate: '0.20',
+      })
+      .expect(200);
+    const fv = (await as('get', `/versions/${v}/sale-sheet`).expect(200)).body;
+    expect(fv.totalRevient).toBe('1400'); // les taux du type « Location », pas ceux du matériel
+  });
+
   it('les devis déjà chiffrés en byNature continuent de fonctionner à l’identique', async () => {
     const v = await newVersion('TR-4');
     await addResource(v, 'material', '1000');

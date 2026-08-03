@@ -382,12 +382,21 @@ export function computeFeuilleDeVente(
   const extras = prepared.filter((p) => p.section !== 'main');
   const vendable = main.filter((p) => p.input.vendable);
 
-  // « Part propre » = MO + matériaux + matériel ; « ST » = sous-traitance (nature + types).
+  // « Part propre » = MO + matériaux + matériel ; « ST » = sous-traitance. Un déboursé porté par
+  // un TYPE compte dans la part de sa nature de rattachement : sans cela, un devis entièrement
+  // typé aurait une part propre vide et les frais qui lui sont destinés partiraient partout.
   const PROPRE: Nature[] = ['labor', 'material', 'equipment'];
+  const sumTypesIn = (st: StBreakdown, natures: Nature[]) =>
+    Object.entries(st).reduce(
+      (acc, [typeId, v]) => (natures.includes(baseNatureOf(coeffs, typeId)) ? acc.plus(v) : acc),
+      new Decimal(0),
+    );
   const basePropre = (p: (typeof prepared)[number]) =>
-    PROPRE.reduce((acc, n) => acc.plus(p.breakdown[n]), new Decimal(0));
+    PROPRE.reduce((acc, n) => acc.plus(p.breakdown[n]), new Decimal(0)).plus(
+      sumTypesIn(p.st, PROPRE),
+    );
   const baseSt = (p: (typeof prepared)[number]) =>
-    p.breakdown.subcontract.plus(sumSt(p.st));
+    p.breakdown.subcontract.plus(sumTypesIn(p.st, ['subcontract']));
   const baseOf = (p: (typeof prepared)[number], b: VentilationBase) =>
     b === 'propre' ? basePropre(p) : b === 'st' ? baseSt(p) : basePropre(p).plus(baseSt(p));
 

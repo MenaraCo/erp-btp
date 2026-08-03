@@ -35,6 +35,15 @@ export class ResourceEntity extends BaseTenantEntity {
   codeProduit?: string | null;
 
   /**
+   * Type de déboursé de l'entreprise (« ST Moyens », « Location »…). Il porte les % FG et bénéfice
+   * du chiffrage ; sa nature de rattachement, elle, reste `nature` ci-dessus — c'est elle qui
+   * alimente budgets de chantier, analytique et compta. Nullable : la ressource suit alors sa
+   * seule nature.
+   */
+  @Column({ name: 'debourse_type_id', type: 'uuid', nullable: true })
+  debourseTypeId?: string | null;
+
+  /**
    * Rattachement au plan analytique (cahier §5.8) : la ressource appartient à exactement un
    * code analytique (→ famille → lot → nature). Nullable : classement au rythme du tenant.
    */

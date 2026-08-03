@@ -32,6 +32,7 @@ export interface MontageLine {
   cadence: string | null;
   prix_public: string | null;
   nature: string | null;
+  debourse_type_id?: string | null;
   section_type: 'option' | 'variante' | null;
   source_ouvrage_id: string | null;
   source_resource_id: string | null;
@@ -971,6 +972,32 @@ function SupplierSelect({ value, token, readOnly, onChange }: {
   );
 }
 
+/**
+ * Type de déboursé de la ligne : référentiel société + types propres à ce devis. Choisir un type
+ * fixe aussi la nature de rattachement, celle que lisent les budgets de chantier et l'analytique.
+ */
+interface DebTypeOpt { id: string; code: string; label: string; baseNature: string }
+function DebourseTypeSelect({ value, versionId, token, readOnly, onChange }: {
+  value: string; versionId: string; token: string | null; readOnly: boolean;
+  onChange: (id: string, baseNature: string) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ['debourse-types', versionId], enabled: Boolean(token && versionId), staleTime: 60_000,
+    queryFn: () => apiFetch<DebTypeOpt[]>(`/debourse-types?devisVersionId=${versionId}`, { token }),
+  });
+  const types = data ?? [];
+  return (
+    <select value={value} disabled={readOnly} style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, background: readOnly ? '#f8fafc' : '#fff' }}
+      onChange={(e) => {
+        const t = types.find((x) => x.id === e.target.value);
+        onChange(e.target.value, t?.baseNature ?? '');
+      }}>
+      <option value="">— aucun (taux de la nature) —</option>
+      {types.map((t) => <option key={t.id} value={t.id}>{t.code} — {t.label}</option>)}
+    </select>
+  );
+}
+
 /** Types de sous-traitance déclarés sur CE devis (onglet « Coefficients & frais »). */
 interface StType { id: string; code?: string | null; label: string }
 function StTypeSelect({ value, versionId, token, readOnly, onChange }: {
@@ -1232,6 +1259,7 @@ function LineInfoModal({ line, components, deboursById, decimals, token, version
     pu: cleanNum(line.pu),
     prixPublic: cleanNum(line.prix_public ?? ''),
     stTypeId: line.st_type_id ?? '',
+    debourseTypeId: line.debourse_type_id ?? '',
     uniteAchat: line.unite_achat ?? '',
     coeffConversion: cleanNum(line.coeff_conversion ?? '') || '1',
     supplierId: line.supplier_id ?? '',
@@ -1300,11 +1328,18 @@ function LineInfoModal({ line, components, deboursById, decimals, token, version
             )}
           </div>
 
-          {/* Le type de ST n'a de sens que pour une ressource de nature « sous-traitance ». */}
-          {!isOuvrage && form.nature === 'subcontract' && (
-            <Field label="Type de sous-traitance">
-              <StTypeSelect value={form.stTypeId} versionId={versionId} token={token} readOnly={readOnly}
-                onChange={(v) => { set('stTypeId', v); commit({ stTypeId: v || null }); }} />
+          {!isOuvrage && (
+            <Field label="Type de déboursé">
+              <DebourseTypeSelect value={form.debourseTypeId} versionId={versionId} token={token} readOnly={readOnly}
+                onChange={(id, baseNature) => {
+                  setForm((f) => ({ ...f, debourseTypeId: id, nature: baseNature || f.nature }));
+                  commit(
+                    baseNature
+                      ? { debourseTypeId: id || null, nature: baseNature }
+                      : { debourseTypeId: id || null },
+                    true,
+                  );
+                }} />
             </Field>
           )}
 

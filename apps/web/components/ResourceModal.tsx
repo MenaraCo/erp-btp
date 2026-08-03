@@ -13,6 +13,7 @@ export interface FullResource {
   label: string;
   unit: string;
   nature: string;
+  debourseTypeId?: string | null;
   unitCost: string;
   codeProduit?: string | null;
   codeAnalytiqueId?: string | null;
@@ -29,15 +30,10 @@ interface Famille { id: string; code: string; label: string }
 interface Code { id: string; code: string; label: string; famille_id: string }
 interface Supplier { id: string; code: string; name: string }
 
-const NATURES = [
-  { v: 'material', l: 'Matériau' },
-  { v: 'labor', l: "Main d'œuvre" },
-  { v: 'equipment', l: 'Matériel' },
-  { v: 'subcontract', l: 'Sous-traitance' },
-];
+interface DebType { id: string; code: string; label: string; baseNature: string; devisVersionId: string | null }
 
 const empty = {
-  code: '', label: '', unit: '', nature: 'material', unitCost: '',
+  code: '', label: '', unit: '', nature: 'material', debourseTypeId: '', unitCost: '',
   codeProduit: '', codeAnalytiqueId: '', prixPublic: '', uniteAchat: '',
   coeffConversion: '1', supplierId: '', refFournisseur: '', conditionnement: '',
 };
@@ -58,6 +54,11 @@ export function ResourceModal({ libId, resource, onClose }: {
   /* Référentiels (listes déroulantes dynamiques) */
   const units = useQuery({ queryKey: ['params-units'], enabled: Boolean(token),
     queryFn: () => apiFetch<Unit[]>('/params/units', { token }) });
+  // Types de déboursé de la société : ils remplacent le choix « nature » en dur. La nature de
+  // rattachement du type reste enregistrée sur la ressource — c'est elle qui alimente les budgets
+  // de chantier et l'analytique.
+  const debTypes = useQuery({ queryKey: ['debourse-types'], enabled: Boolean(token),
+    queryFn: () => apiFetch<DebType[]>('/debourse-types', { token }) });
   const familles = useQuery({ queryKey: ['params-familles'], enabled: Boolean(token),
     queryFn: () => apiFetch<Famille[]>('/params/familles', { token }) });
   const codes = useQuery({ queryKey: ['params-codes'], enabled: Boolean(token),
@@ -75,7 +76,9 @@ export function ResourceModal({ libId, resource, onClose }: {
     if (resource) {
       setF({
         code: resource.code ?? '', label: resource.label ?? '', unit: resource.unit ?? '',
-        nature: resource.nature ?? 'material', unitCost: cleanNum(resource.unitCost),
+        nature: resource.nature ?? 'material',
+        debourseTypeId: resource.debourseTypeId ?? '',
+        unitCost: cleanNum(resource.unitCost),
         codeProduit: resource.codeProduit ?? '', codeAnalytiqueId: resource.codeAnalytiqueId ?? '',
         prixPublic: cleanNum(resource.prixPublic), uniteAchat: resource.uniteAchat ?? '',
         coeffConversion: cleanNum(resource.coeffConversion) || '1', supplierId: resource.supplierId ?? '',
@@ -128,6 +131,7 @@ export function ResourceModal({ libId, resource, onClose }: {
     mutationFn: () => {
       const body = {
         code: f.code, label: f.label, unit: f.unit, nature: f.nature,
+        debourseTypeId: f.debourseTypeId || null,
         unitCost: f.unitCost || '0',
         codeProduit: f.codeProduit || f.code,
         codeAnalytiqueId: f.codeAnalytiqueId || null,
@@ -190,9 +194,21 @@ export function ResourceModal({ libId, resource, onClose }: {
           <Field label="Code">
             <input className="input" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />
           </Field>
-          <Field label="Nature">
-            <select className="input" value={f.nature} onChange={(e) => setF({ ...f, nature: e.target.value })}>
-              {NATURES.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+          <Field label="Type de déboursé">
+            <select
+              className="input"
+              value={f.debourseTypeId}
+              onChange={(e) => {
+                const t = (debTypes.data ?? []).find((x) => x.id === e.target.value);
+                // Choisir un type fixe aussi la nature de rattachement : elle reste ce que lisent
+                // les budgets de chantier, l'analytique et la compta.
+                setF({ ...f, debourseTypeId: e.target.value, nature: t?.baseNature ?? f.nature });
+              }}
+            >
+              <option value="">— aucun —</option>
+              {(debTypes.data ?? [])
+                .filter((t) => t.devisVersionId === null)
+                .map((t) => <option key={t.id} value={t.id}>{t.code} — {t.label}</option>)}
             </select>
           </Field>
         </Grid>

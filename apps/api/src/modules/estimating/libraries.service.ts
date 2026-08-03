@@ -58,6 +58,8 @@ export interface ResourceInput {
   codeProduit?: string | null;
   /** Rattachement optionnel à un code analytique du plan (cahier §5.8). */
   codeAnalytiqueId?: string | null;
+  /** Type de déboursé de l'entreprise (porte les % FG et bénéfice du chiffrage). */
+  debourseTypeId?: string | null;
   /** Champs d'achat (pour le Calcul Appro). */
   prixPublic?: string | number | null;
   uniteAchat?: string | null;
@@ -147,6 +149,7 @@ export class LibrariesService {
             output: input.output == null ? null : numOrNull(input.output),
             codeProduit: input.codeProduit ?? input.code,
             codeAnalytiqueId: input.codeAnalytiqueId ?? null,
+            debourseTypeId: input.debourseTypeId ?? null,
             prixPublic: numOrNull(input.prixPublic),
             uniteAchat: input.uniteAchat ?? null,
             coeffConversion: numOr(input.coeffConversion, '1'),
@@ -195,6 +198,8 @@ export class LibrariesService {
            supplier_id        = $12,
            ref_fournisseur    = $13,
            conditionnement    = $14,
+           debourse_type_id   = CASE WHEN $15 = '__KEEP__' THEN debourse_type_id
+                                     ELSE NULLIF($15, '')::uuid END,
            updated_at         = now()
          WHERE id = $1`,
         [
@@ -212,6 +217,7 @@ export class LibrariesService {
           input.supplierId ?? null,
           input.refFournisseur ?? null,
           input.conditionnement ?? null,
+          input.debourseTypeId === undefined ? '__KEEP__' : (input.debourseTypeId ?? ''),
         ],
         );
       } catch (e) {
@@ -341,7 +347,8 @@ export class LibrariesService {
                 r.unite_achat AS "uniteAchat", r.coeff_conversion AS "coeffConversion",
                 r.code_produit AS "codeProduit", r.code_analytique_id AS "codeAnalytiqueId",
                 r.supplier_id AS "supplierId", r.ref_fournisseur AS "refFournisseur",
-                r.conditionnement,
+                r.conditionnement, r.debourse_type_id AS "debourseTypeId",
+                dt.code AS "debourseTypeCode",
                 ca.code AS "codeAnalytiqueCode", ca.label AS "codeAnalytiqueLabel",
                 fam.code AS "familleCode", fam.label AS "familleLabel",
                 s.name AS "supplierName"
@@ -349,6 +356,7 @@ export class LibrariesService {
          LEFT JOIN analytical_code ca ON ca.id = r.code_analytique_id
          LEFT JOIN analytical_famille fam ON fam.id = ca.famille_id
          LEFT JOIN supplier s ON s.id = r.supplier_id
+         LEFT JOIN debourse_type dt ON dt.id = r.debourse_type_id
          WHERE ${where}
          ORDER BY ${sortCol} ${dir} NULLS LAST, r.code ASC
          LIMIT ${pageSize} OFFSET ${offset}`,
@@ -367,7 +375,7 @@ export class LibrariesService {
                 r.unite_achat AS "uniteAchat", r.coeff_conversion AS "coeffConversion",
                 r.code_produit AS "codeProduit", r.code_analytique_id AS "codeAnalytiqueId",
                 r.supplier_id AS "supplierId", r.ref_fournisseur AS "refFournisseur",
-                r.conditionnement
+                r.conditionnement, r.debourse_type_id AS "debourseTypeId"
          FROM resource r
          WHERE r.id = $1 AND r.library_id = $2`,
         [resourceId, libraryId],

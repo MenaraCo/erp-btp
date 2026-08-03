@@ -675,4 +675,23 @@ describe('vente-calc — feuille de vente', () => {
     expect(res.fraisChantier!.fgBySt['loc-1']).toBe('300');
     expect(res.fraisChantier!.total).toBe('300');
   });
+
+  it('type de déboursé — la ventilation « part propre » compte les types rattachés à MO/matériaux/matériel', () => {
+    const res = computeFeuilleDeVente(
+      [
+        // Déboursé porté ENTIÈREMENT par des types : la part propre ne doit pas devenir vide.
+        { id: 'A', vendable: true, debourseByType: { 'int-1': '1000' } }, // rattaché à MO
+        { id: 'B', vendable: true, debourseByType: { 'stm-1': '1000' } }, // rattaché à la ST
+        // Frais à ventiler sur la seule part propre : ils doivent tomber sur A, pas sur B.
+        { id: 'F', vendable: false, ventilationBase: 'propre', debourseByNature: { labor: '100' } },
+      ],
+      coeffs({
+        typeBaseNature: { 'int-1': 'labor', 'stm-1': 'subcontract' },
+      }),
+    );
+    const a = res.items.find((i) => i.id === 'A')!;
+    const b = res.items.find((i) => i.id === 'B')!;
+    expect(a.debourse).toBe('1100'); // 1000 + les 100 de frais
+    expect(b.debourse).toBe('1000'); // la sous-traitance ne porte pas ces frais
+  });
 });

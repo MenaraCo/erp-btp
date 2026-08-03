@@ -358,6 +358,8 @@ export class VenteService {
       nature: Nature | null;
       resource_nature: Nature | null;
       st_type_id: string | null;
+      debourse_type_id: string | null;
+      resource_debourse_type_id: string | null;
       ventilation_base: 'propre' | 'st' | 'all' | null;
       quantity: string | null;
       pu: string | null;
@@ -369,6 +371,7 @@ export class VenteService {
     }> = await em.query(
       `SELECT dl.id, dl.parent_line_id, dl.type, dl.source_ouvrage_id, dl.source_resource_id,
               dl.nature, r.nature AS resource_nature, dl.st_type_id, dl.ventilation_base,
+              dl.debourse_type_id, r.debourse_type_id AS resource_debourse_type_id,
               dl.quantity, dl.pu, dl.perte, dl.pu_vente, dl.pu_vente_force, dl.vendable, dl.section_type
          FROM devis_line dl
          LEFT JOIN resource r ON r.id = dl.source_resource_id
@@ -441,15 +444,30 @@ export class VenteService {
     ) => {
       bucket[typeId] = new Decimal(bucket[typeId] ?? 0).plus(amount).toString();
     };
+    /**
+     * Où verser le déboursé d'une ligne : dans son TYPE quand elle en porte un (le sien, sinon
+     * celui de la ressource d'origine), sinon dans sa nature. Le type l'emporte car il porte des
+     * taux propres ; le moteur le reversera de toute façon dans sa nature de rattachement.
+     */
     const routeDebourse = (
       byNature: Partial<Record<Nature, string>>,
       bySt: Partial<Record<string, string>>,
-      line: { nature: Nature | null; resource_nature: Nature | null; st_type_id: string | null },
+      line: {
+        nature: Nature | null;
+        resource_nature: Nature | null;
+        st_type_id: string | null;
+        debourse_type_id?: string | null;
+        resource_debourse_type_id?: string | null;
+      },
       nature: Nature,
       amount: Decimal,
     ) => {
-      if (nature === 'subcontract' && line.st_type_id) {
-        addSt(bySt, line.st_type_id, amount);
+      const typeId =
+        line.debourse_type_id ??
+        line.resource_debourse_type_id ??
+        (nature === 'subcontract' ? line.st_type_id : null);
+      if (typeId) {
+        addSt(bySt, typeId, amount);
       } else {
         addNature(byNature, nature, amount);
       }

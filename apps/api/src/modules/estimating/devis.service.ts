@@ -54,6 +54,8 @@ export interface DevisLinePatch {
   syncByCode?: boolean;
   /** Type de sous-traitance du devis auquel rattacher la ligne (nature = subcontract). */
   stTypeId?: string | null;
+  /** Type de déboursé (référentiel société ou type propre au devis) porté par la ligne. */
+  debourseTypeId?: string | null;
   /** Assiette de ventilation d'une ligne de frais : 'propre' | 'st' | 'all'. */
   ventilationBase?: string | null;
   /** false = ligne de FRAIS (non vendable) : son déboursé est ventilé sur les lignes vendables. */
@@ -133,6 +135,8 @@ export interface DevisLineInput {
   supplierId?: string | null;
   refFournisseur?: string | null;
   conditionnement?: string | null;
+  /** Type de déboursé porté par la ligne ; à défaut, celui de la ressource d'origine. */
+  debourseTypeId?: string | null;
 }
 
 @Injectable()
@@ -856,11 +860,13 @@ export class DevisService {
       let supplierId = input.supplierId ?? null;
       let refFournisseur = input.refFournisseur ?? null;
       let conditionnement = input.conditionnement ?? null;
+      // Type de déboursé : celui demandé, sinon celui de la ressource d'origine.
+      let debourseTypeId = input.debourseTypeId ?? null;
       if (input.sourceResourceId) {
         const res = await em.query(
           `SELECT r.code, r.nature, r.unit, r.prix_public, r.unit_cost,
                   r.unite_achat, r.coeff_conversion, r.supplier_id, r.ref_fournisseur,
-                  r.conditionnement, ac.code AS code_analytique
+                  r.conditionnement, r.debourse_type_id, ac.code AS code_analytique
              FROM resource r
              LEFT JOIN analytical_code ac ON ac.id = r.code_analytique_id
             WHERE r.id = $1 AND r.tenant_id = $2`,
@@ -880,6 +886,7 @@ export class DevisService {
           supplierId = supplierId ?? r.supplier_id ?? null;
           refFournisseur = refFournisseur ?? r.ref_fournisseur ?? null;
           conditionnement = conditionnement ?? r.conditionnement ?? null;
+          debourseTypeId = debourseTypeId ?? r.debourse_type_id ?? null;
         }
       }
 
@@ -889,9 +896,10 @@ export class DevisService {
              (tenant_id, devis_version_id, parent_line_id, type, code, code_analytique, designation, unit,
               quantity, quantity_formula, pu, perte, nature, cadence, prix_public,
               source_ouvrage_id, source_resource_id, sort_order, vendable, section_type,
-              unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement)
+              unite_achat, coeff_conversion, supplier_id, ref_fournisseur, conditionnement,
+              debourse_type_id)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                   $21,$22,$23,$24,$25) RETURNING *`,
+                   $21,$22,$23,$24,$25,$26) RETURNING *`,
           [
             tenantId,
             versionId,
@@ -918,6 +926,7 @@ export class DevisService {
             supplierId,
             refFournisseur,
             conditionnement,
+            debourseTypeId,
           ],
         )
       )[0];
@@ -1121,6 +1130,7 @@ export class DevisService {
            st_type_id = CASE WHEN $19 = '__KEEP__' THEN st_type_id ELSE NULLIF($19, '') END,
            ventilation_base = CASE WHEN $20 = '__KEEP__' THEN ventilation_base ELSE NULLIF($20, '') END,
            vendable = COALESCE($21, vendable),
+           debourse_type_id = CASE WHEN $22 = '__KEEP__' THEN debourse_type_id ELSE NULLIF($22, '')::uuid END,
            updated_at = now()
          WHERE id = $1`,
         [
@@ -1145,6 +1155,7 @@ export class DevisService {
           patch.stTypeId === undefined ? '__KEEP__' : (patch.stTypeId ?? ''),
           patch.ventilationBase === undefined ? '__KEEP__' : (patch.ventilationBase ?? ''),
           patch.vendable ?? null,
+          patch.debourseTypeId === undefined ? '__KEEP__' : (patch.debourseTypeId ?? ''),
         ],
       );
 

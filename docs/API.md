@@ -46,7 +46,7 @@
 |---|---|---|---|
 | POST | `/libraries` | `estimating.devis.write` | Crée une bibliothèque |
 | GET | `/libraries` | `estimating.devis.read` | Data-grid |
-| POST | `/libraries/:libraryId/resources` | `estimating.devis.write` | Crée une ressource (`nature` ; `codeProduit` unique société ; `codeAnalytiqueId` optionnel) |
+| POST | `/libraries/:libraryId/resources` | `estimating.devis.write` | Crée une ressource (`nature` ; `codeProduit` unique société ; `codeAnalytiqueId` optionnel ; `debourseTypeId` = type de déboursé, il porte les % FG et bénéfice du chiffrage et fixe la nature) |
 | GET | `/libraries/:libraryId/resources` | `estimating.devis.read` | Data-grid |
 | PATCH | `/libraries/:libraryId/resources/:resourceId` | `estimating.devis.write` | Change le déboursé → **recalcul ascendant** |
 | PUT | `/libraries/:libraryId/resources/:resourceId/code-analytique` | `estimating.devis.write` | Rattache la ressource à un code analytique (§5.8) ; code inconnu → 404 |
