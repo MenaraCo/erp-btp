@@ -1032,35 +1032,47 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                 </div>
               )}
 
-              {/* B.4 — récapitulatif de la feuille de vente : déboursé → revient → PV, par nature
-                  ET par type de sous-traitance, avec marges et coefficients réels. */}
+              {/* B.4 — récapitulatif de la feuille de vente : déboursé → revient → PV, par TYPE
+                  de déboursé, avec marges et coefficients réels. */}
               {tab === 'coeffs' && sale.data && (() => {
                 const items = sale.data.items ?? [];
                 const main = items.filter((i) => !('section' in i) || (i as { section?: string }).section === 'main');
                 const nats: Nat[] = ['labor', 'material', 'equipment', 'subcontract'];
                 const debParNature = (n: Nat) =>
                   main.reduce((acc, i) => acc + Number(i.debourseByNature?.[n] ?? 0), 0);
-                // types de ST : agrégés depuis les lignes (clé = id du type déclaré sur le devis)
-                const stIds = Array.from(new Set(main.flatMap((i) => Object.keys(i.debourseBySt ?? {}))));
-                const debParSt = (id: string) =>
+                // Déboursé rattaché à un TYPE (clé = id du type). Attention : le moteur le reverse
+                // AUSSI dans la nature du type — il faut donc le retrancher de la ligne « nature »
+                // pour ne pas compter deux fois la même somme.
+                const typeIds = Array.from(new Set(main.flatMap((i) => Object.keys(i.debourseBySt ?? {}))));
+                const debParType = (id: string) =>
                   main.reduce((acc, i) => acc + Number(i.debourseBySt?.[id] ?? 0), 0);
-                const labelSt = (id: string) => {
-                  const t = stTypes.find((x) => x.id === id);
-                  return t ? `${t.code ? t.code + ' — ' : ''}${t.label}` : `Sous-traitance « ${id} »`;
-                };
+                const typeOf = (id: string) => debTypes.find((t) => t.id === id);
+                const debTypeParNature = (n: Nat) =>
+                  typeIds.reduce(
+                    (acc, id) => (typeOf(id)?.baseNature === n ? acc + debParType(id) : acc),
+                    0,
+                  );
                 const cascade = (deb: number, fg: string, ben: string) => {
                   const revient = deb * (1 + Number(fg) / 100);
                   return { revient, pv: revient * (1 + Number(ben) / 100) };
                 };
                 const rows: { label: string; deb: number; fg: string; ben: string }[] = [
-                  ...nats
-                    .filter((n) => n !== 'subcontract' || debParNature(n) > 0.005)
-                    .map((n) => ({ label: NATURE_LABELS[n], deb: debParNature(n), fg: coef[n].fg, ben: coef[n].ben })),
-                  ...stIds.map((id) => {
-                    const t = stTypes.find((x) => x.id === id);
+                  // Part non typée de chaque nature (ressources sans type de déboursé).
+                  ...nats.map((n) => ({
+                    label: `${NATURE_LABELS[n]} (sans type)`,
+                    deb: debParNature(n) - debTypeParNature(n),
+                    fg: coef[n].fg,
+                    ben: coef[n].ben,
+                  })),
+                  // Une ligne par type de déboursé effectivement utilisé, à SES taux.
+                  ...typeIds.map((id) => {
+                    const t = typeOf(id);
+                    const nat = (t?.baseNature ?? 'subcontract') as Nat;
                     return {
-                      label: labelSt(id), deb: debParSt(id),
-                      fg: t?.tauxFg ?? coef.subcontract.fg, ben: t?.tauxBenefice ?? coef.subcontract.ben,
+                      label: t ? `${t.code} — ${t.label}` : `Type inconnu « ${id} »`,
+                      deb: debParType(id),
+                      fg: t?.tauxFg ?? coef[nat].fg,
+                      ben: t?.tauxBenefice ?? coef[nat].ben,
                     };
                   }),
                 ].filter((r) => r.deb > 0.005);
@@ -1073,7 +1085,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                   <div className="card" style={{ marginTop: 16 }}>
                     <h2 style={{ margin: 0 }}>Feuille de vente — récapitulatif</h2>
                     <p className="muted" style={{ marginTop: 4 }}>
-                      Déboursé → prix de revient → prix de vente, par nature et par type de sous-traitance.
+                      Déboursé → prix de revient → prix de vente, type de déboursé par type de déboursé.
                       Les frais de chantier sont déjà ventilés dans ces montants.
                     </p>
                     <table className="grid" style={{ marginTop: 8 }}>
