@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch, apiDownload, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
 import { usePreferences, fmtEuro, cleanNum } from '@/lib/preferences';
-import { downloadXlsx } from '@/lib/xlsx';
+import { downloadStyledXlsx, SheetCell, StyleKey } from '@/lib/xlsx';
 import { visibleForClient } from '@/lib/client-view';
 import { useWorkspace } from '@/lib/workspace';
 import { Montage, MontageLine } from './Montage';
@@ -100,6 +100,11 @@ function orderTree(lines: DevisLine[]): { line: DevisLine; depth: number }[] {
   };
   walk(null, 0);
   return out;
+}
+
+/** Assemble des morceaux d'intitulé en ignorant les vides : « TES1 » et non « — TES1 ». */
+function joinParts(...parts: (string | null | undefined)[]): string {
+  return parts.map((x) => (x ?? '').trim()).filter(Boolean).join(' — ') || '—';
 }
 
 function marginPct(value?: string, base?: string): string {
@@ -462,9 +467,23 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
       cur.montant += qty * pu;
       agg.set(key, cur);
     }
-    const rows: (string | number)[][] = [['Code', 'Désignation', 'Quantité', 'PU déboursé', 'Montant HT']];
-    for (const r of agg.values()) rows.push([r.code, r.designation, round(r.qty, 3), round(r.pu, 4), round(r.montant, 2)]);
-    downloadXlsx(`debours_${d?.numero || devisId}`, rows, 'Déboursé');
+    const rows: SheetCell[][] = [
+      [{ v: `Déboursé — ${joinParts(d?.numero, d?.designation)}`, s: 'title' }],
+      [{ v: 'Document interne : coûts directs, hors frais généraux et bénéfice.', s: 'subtitle' }],
+      [],
+      ['Code', 'Désignation', 'Quantité', 'PU déboursé', 'Montant HT'].map((h) => ({ v: h, s: 'header' as StyleKey })),
+    ];
+    for (const r of agg.values()) {
+      rows.push([
+        { v: r.code, s: 'num' }, { v: r.designation, s: 'text' },
+        { v: round(r.qty, 3), s: 'qty' }, { v: round(r.pu, 4), s: 'money' },
+        { v: round(r.montant, 2), s: 'money' },
+      ]);
+    }
+    downloadStyledXlsx(`debours_${d?.numero || devisId}`, rows, {
+      sheetName: 'Déboursé', cols: [14, 60, 12, 14, 16], merges: ['A1:E1', 'A2:E2'], freezeRows: 4,
+      theme: { primary: prefs.couleur_principale, accent: prefs.couleur_accent },
+    });
   }
 
   const [approOpen, setApproOpen] = useState(false);
@@ -475,9 +494,27 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
   });
   function exportAppro() {
     const num = (v: unknown) => (v == null || v === '' ? '' : Number(v));
-    const rows: (string | number)[][] = [['Code', 'Désignation', 'Qté emploi', 'Unité achat', 'Coeff', 'Qté appro', 'Prix public', 'Montant HT', 'Fournisseur']];
-    for (const r of appro.data ?? []) rows.push([r.code ?? '', r.designation, num(r.qteEmploi), r.uniteAchat ?? '', num(r.coeffConversion), num(r.qteAppro), num(r.prixPublic), num(r.montant), r.fournisseur ?? '']);
-    downloadXlsx(`appro_${d?.numero || devisId}`, rows, 'Appro');
+    const rows: SheetCell[][] = [
+      [{ v: `Calcul d'approvisionnement — ${joinParts(d?.numero, d?.designation)}`, s: 'title' }],
+      [{ v: 'Quantités converties en unités d’achat, par fournisseur.', s: 'subtitle' }],
+      [],
+      ['Code', 'Désignation', 'Qté emploi', 'Unité achat', 'Coeff', 'Qté appro', 'Prix public', 'Montant HT', 'Fournisseur']
+        .map((h) => ({ v: h, s: 'header' as StyleKey })),
+    ];
+    for (const r of appro.data ?? []) {
+      rows.push([
+        { v: r.code ?? '', s: 'num' }, { v: r.designation, s: 'text' },
+        { v: num(r.qteEmploi), s: 'qty' }, { v: r.uniteAchat ?? '', s: 'unit' },
+        { v: num(r.coeffConversion), s: 'qty' }, { v: num(r.qteAppro), s: 'qty' },
+        { v: num(r.prixPublic), s: 'money' }, { v: num(r.montant), s: 'money' },
+        { v: r.fournisseur ?? '', s: 'text' },
+      ]);
+    }
+    downloadStyledXlsx(`appro_${d?.numero || devisId}`, rows, {
+      sheetName: 'Appro', cols: [14, 48, 12, 12, 9, 12, 13, 15, 24],
+      merges: ['A1:I1', 'A2:I2'], freezeRows: 4,
+      theme: { primary: prefs.couleur_principale, accent: prefs.couleur_accent },
+    });
   }
 
   const cfgInit = useRef<string | null>(null);
@@ -581,46 +618,104 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
    * Export DPGF (Excel) : la décomposition du prix global et forfaitaire, une ligne par poste.
    * `avecPrix = false` produit le bordereau vierge à faire chiffrer.
    */
+  /**
+   * Édition Excel du devis — même mise en page que le PDF : bandeau société, identité du devis
+   * et du client, tableau à colonnes tenues, totaux en pied. `avecPrix = false` produit le
+   * BORDEREAU d'appel d'offre : les colonnes de prix restent vides, encadrées, prêtes à la saisie.
+   */
   function exportDpgf(avecPrix: boolean) {
-    // Bordereau : mêmes colonnes que le DPGF, mais les prix restent VIDES — c'est le
-    // destinataire de l'appel d'offre qui les saisit.
-    const rows: (string | number)[][] = [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT', 'Montant HT']];
+    const cli = affaireDetail.data?.affaire?.client ?? null;
+    const aff = affaireDetail.data?.affaire;
+    const dec = prefs.nb_decimales;
+    const R: SheetCell[][] = [];
+
+    // ── Bandeau : émetteur, puis nature du document et destinataire ──
+    R.push([{ v: prefs.company_name || 'Devis', s: 'title' }]);
+    R.push([{ v: avecPrix ? 'Décomposition du prix global et forfaitaire' : "Bordereau d'appel d'offre — prix à compléter", s: 'subtitle' }]);
+    R.push([]);
+    const ident: [string, string][] = [
+      ['Devis', joinParts(d?.numero, d?.designation)],
+      ['Affaire', joinParts(aff?.code, aff?.name)],
+      ['Client', cli?.name ?? '—'],
+      ['Version', String(versions.find((x) => x.id === versionId)?.version_no ?? 1)],
+      ['Date', new Date().toLocaleDateString('fr-FR')],
+    ];
+    for (const [k, v] of ident) {
+      R.push([{ v: k, s: 'label' }, { v, s: 'value' }]);
+    }
+    R.push([]);
+
+    // ── En-tête du tableau (figé au défilement) ──
+    const HEAD = ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT', 'Montant HT'];
+    R.push(HEAD.map((h) => ({ v: h, s: 'header' as StyleKey })));
+    const freezeRows = R.length;
+
     // Documents remis au client : mêmes règles qu'à l'écran et au PDF — pas de ligne de frais,
     // ni de titre qui ne contiendrait qu'elles.
     const vus = visibleForClient((lines.data ?? []) as DevisLine[]);
     for (const { line, depth } of orderTree((lines.data ?? []) as DevisLine[])) {
-      // Le sous-détail de déboursé ne fait pas partie du DPGF remis au client.
+      // Le sous-détail de déboursé ne fait pas partie du document remis au client.
       const parent = (lines.data ?? []).find((x) => x.id === line.parent_line_id);
       if (parent?.type === 'ouvrage') continue;
       if (line.type === 'texte') continue;
       if (!vus.has(line.id)) continue;
+
       const item = itemById.get(line.id);
       const isTitre = line.type === 'titre' || line.type === 'sous_titre';
-      const qty = line.quantity != null ? Number(line.quantity) : '';
-      const pv = item ? Number(item.pv) : '';
-      const pu = item && qty ? Number(item.pv) / Number(qty) : '';
-      rows.push([
-        line.numero ?? '',
-        `${'    '.repeat(depth)}${line.designation}`,
-        isTitre ? '' : (line.unit ?? ''),
-        isTitre ? '' : qty,
-        avecPrix && !isTitre ? (pu === '' ? '' : round(pu, prefs.nb_decimales)) : '',
-        avecPrix ? (pv === '' ? '' : round(pv, prefs.nb_decimales)) : '',
+      const qty = line.quantity != null ? Number(line.quantity) : null;
+      const pv = item ? Number(item.pv) : null;
+      const pu = item && qty ? Number(item.pv) / qty : null;
+
+      if (isTitre) {
+        const st: StyleKey = depth === 0 ? 'group1' : 'group2';
+        R.push([
+          { v: line.numero ?? '', s: st },
+          { v: `${'    '.repeat(depth)}${line.designation}`, s: st },
+          { v: '', s: st }, { v: '', s: st }, { v: '', s: st },
+          // Le sous-total d'un titre n'a de sens que sur un document chiffré.
+          avecPrix ? { v: titrePvByRoot.get(line.id) ?? null, s: 'moneyBold' } : { v: '', s: st },
+        ]);
+        continue;
+      }
+      R.push([
+        { v: line.numero ?? '', s: 'num' },
+        { v: `${'    '.repeat(depth)}${line.designation}`, s: 'text' },
+        { v: line.unit ?? '', s: 'unit' },
+        { v: qty, s: 'qty' },
+        avecPrix ? { v: pu != null ? round(pu, dec) : null, s: 'money' } : { v: '', s: 'fill' },
+        avecPrix ? { v: pv != null ? round(pv, dec) : null, s: 'money' } : { v: '', s: 'fill' },
       ]);
     }
+
+    // ── Pied : totaux chiffrés, ou cases à remplir pour le bordereau ──
+    R.push([]);
+    const pied = (libelle: string, montant: number | null) =>
+      R.push([
+        null, null, null, null,
+        { v: libelle, s: 'totalLabel' },
+        montant != null ? { v: round(montant, dec), s: 'totalMoney' } : { v: '', s: 'fill' },
+      ]);
     if (avecPrix && sale.data) {
-      rows.push([]);
-      for (const fd of sale.data.fraisDetail ?? []) {
-        rows.push(['', fd.designation, '', '', '', round(Number(fd.montant), prefs.nb_decimales)]);
-      }
-      rows.push(['', 'TOTAL HT', '', '', '', round(Number(sale.data.totalPvHt), prefs.nb_decimales)]);
-      rows.push(['', 'TVA', '', '', '', round(Number(sale.data.tva), prefs.nb_decimales)]);
-      rows.push(['', 'TOTAL TTC', '', '', '', round(Number(sale.data.totalTtc), prefs.nb_decimales)]);
+      for (const fd of sale.data.fraisDetail ?? []) pied(fd.designation, Number(fd.montant));
+      pied('TOTAL HT', Number(sale.data.totalPvHt));
+      pied('TVA', Number(sale.data.tva));
+      pied('TOTAL TTC', Number(sale.data.totalTtc));
+    } else {
+      pied('TOTAL HT', null);
+      pied('TVA', null);
+      pied('TOTAL TTC', null);
     }
-    downloadXlsx(
+
+    downloadStyledXlsx(
       `${avecPrix ? 'DPGF' : 'Bordereau'}_${d?.numero || d?.designation || devisId}`,
-      rows,
-      avecPrix ? 'DPGF' : 'Bordereau',
+      R,
+      {
+        sheetName: avecPrix ? 'DPGF' : 'Bordereau',
+        cols: [10, 62, 8, 12, 14, 16],
+        merges: ['A1:F1', 'A2:F2'],
+        freezeRows,
+        theme: { primary: prefs.couleur_principale, accent: prefs.couleur_accent },
+      },
     );
   }
 
