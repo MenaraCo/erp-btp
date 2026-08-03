@@ -46,16 +46,6 @@ const fallback = (s: string): StatusLook => ({
   label: s, dot: '#94a3b8', bg: '#f8fafc', border: '#e2e8f0', text: '#475569',
 });
 
-/** Verbe de l'action, à la place du simple nom d'état : on choisit ce qu'on FAIT. */
-const ACTION: Record<string, string> = {
-  open: 'Remettre en cours',
-  sent: 'Marquer envoyé',
-  won: 'Marquer gagné',
-  lost: 'Marquer perdu',
-  followup: 'Relancer',
-  revision: 'Mettre en révision',
-};
-
 export function StatusControl({
   devisId,
   status,
@@ -72,6 +62,7 @@ export function StatusControl({
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const next = TRANSITIONS[status] ?? [];
   const look = LOOK[status] ?? fallback(status);
 
@@ -88,8 +79,12 @@ export function StatusControl({
   // Le menu est rendu dans <body> : l'éditeur a des conteneurs qui rogneraient un survol absolu.
   useEffect(() => {
     if (!open) return;
+    // Le menu vit dans un portail : sans l'exclure ici, le `mousedown` sur une action fermerait
+    // le menu — donc démonterait le bouton — avant que le `click` ne parte. Rien ne se passait.
     const close = (e: MouseEvent) => {
-      if (!btnRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', close);
@@ -139,6 +134,7 @@ export function StatusControl({
 
       {open && pos && createPortal(
         <div
+          ref={menuRef}
           style={{
             position: 'fixed', top: pos.top, left: pos.left, zIndex: 3000,
             minWidth: 190, padding: 4, borderRadius: 10,
@@ -165,7 +161,7 @@ export function StatusControl({
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
               >
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: l.dot, flexShrink: 0 }} />
-                {ACTION[to] ?? l.label}
+                {l.label}
               </button>
             );
           })}
