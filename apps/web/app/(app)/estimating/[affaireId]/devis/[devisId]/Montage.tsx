@@ -1,10 +1,11 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtEuro, fmtNum, cleanNum } from '@/lib/preferences';
+import { visibleForClient } from '@/lib/client-view';
 
 export interface SaleLineInfo { pv: string; forced: boolean }
 export type NatureBreak = Record<'labor' | 'material' | 'equipment' | 'subcontract', string>;
@@ -178,8 +179,14 @@ export function Montage({
   decimals?: number; acceptDrop?: boolean;
 }) {
   const vente = mode === 'vente';
+  // En vue client, les lignes de frais (FP / FS / F*) n'existent pas : leur coût est déjà réparti
+  // dans les prix. On les retire de l'arbre — et avec elles les titres qui ne contiendraient
+  // qu'elles — exactement comme à l'aperçu et au PDF.
+  const clientVisible = useMemo(() => (vente ? visibleForClient(lines) : null), [vente, lines]);
   const childrenOf = (pid: string | null) =>
-    lines.filter((l) => l.parent_line_id === pid).sort((a, b) => a.sort_order - b.sort_order);
+    lines
+      .filter((l) => l.parent_line_id === pid && (!clientVisible || clientVisible.has(l.id)))
+      .sort((a, b) => a.sort_order - b.sort_order);
 
   const subtree = (l: MontageLine): number => {
     if (l.type === 'ouvrage' || l.type === 'ressource') return Number(deboursById.get(l.id) ?? 0);

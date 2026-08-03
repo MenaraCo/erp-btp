@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import PDFDocument from 'pdfkit';
 import { TenantContext } from '../../core/tenancy/tenant-context';
+import { visibleForClient, ClientViewLine } from './devis-client-view';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { VenteService } from './vente.service';
 import { computeLineNumbers } from './devis-numbering';
@@ -18,6 +19,8 @@ interface DevisLineRow {
   sort_order: number;
   num_custom: string | null;
   section_type: 'option' | 'variante' | null;
+  /** false = ligne de FRAIS : son coût est réparti dans les prix, elle ne se montre pas au client. */
+  vendable: boolean;
 }
 
 interface CompanyRow {
@@ -86,7 +89,7 @@ export class DevisPdfService {
       }
       const lines: DevisLineRow[] = await em.query(
         `SELECT id, parent_line_id, type, designation, unit, quantity, pu, sort_order,
-                num_custom, section_type
+                num_custom, section_type, vendable
            FROM devis_line WHERE devis_version_id = $1
           ORDER BY sort_order ASC, created_at ASC`,
         [versionId],
@@ -360,10 +363,26 @@ export class DevisPdfService {
           if (child.type !== 'ouvrage') walk(child.id, render);
         }
       };
+      // Ce que le client voit : ni lignes de frais, ni titre qui ne contiendrait qu'elles
+      // (règle partagée avec l'aperçu et l'écran « Devis client »).
+      const vuClient = visibleForClient(
+        lines.map((l) => ({
+          id: l.id,
+          parentLineId: l.parent_line_id,
+          type: l.type,
+          vendable: l.vendable !== false,
+        })),
+        (l: ClientViewLine) => {
+          const sec = sectionById.get(l.id);
+          return Boolean(sec) && sec !== 'main';
+        },
+      );
+
       walk(null, (line) => {
         // Options et variantes sont hors du devis principal (édition dédiée : E.3).
         if (sectionById.get(line.id) && sectionById.get(line.id) !== 'main') return;
         if (!VISIBLE.has(line.type)) return;
+        if (!vuClient.has(line.id)) return;
 
         const depth = depths.get(line.id) ?? 0;
         const indent = M + Math.min(depth, 3) * 10;

@@ -9,6 +9,7 @@ import { apiFetch, apiDownload, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
 import { usePreferences, fmtEuro, cleanNum } from '@/lib/preferences';
 import { downloadXlsx } from '@/lib/xlsx';
+import { visibleForClient } from '@/lib/client-view';
 import { useWorkspace } from '@/lib/workspace';
 import { Montage, MontageLine } from './Montage';
 import { LibraryDrawer } from './LibraryDrawer';
@@ -366,12 +367,16 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     () => new Set((lines.data ?? []).filter((l) => l.type === 'ouvrage').map((l) => l.id)),
     [lines.data],
   );
-  const clientLines = useMemo(
-    () => ordered.filter(
-      (o) => !(o.line.type === 'ressource' && o.line.parent_line_id && ouvrageIds.has(o.line.parent_line_id)),
-    ),
-    [ordered, ouvrageIds],
-  );
+  // Vue client : ni sous-détail d'ouvrage, ni ligne de frais (son coût est déjà dans les prix),
+  // ni titre qui ne contiendrait que des frais. Même règle que le PDF.
+  const clientLines = useMemo(() => {
+    const vus = visibleForClient(lines.data ?? []);
+    return ordered.filter(
+      (o) =>
+        !(o.line.type === 'ressource' && o.line.parent_line_id && ouvrageIds.has(o.line.parent_line_id)) &&
+        vus.has(o.line.id),
+    );
+  }, [ordered, ouvrageIds, lines.data]);
   const titreRecap = useMemo(() => {
     const byId = new Map((lines.data ?? []).map((l) => [l.id, l]));
     const rootOf = (id: string) => {
