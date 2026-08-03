@@ -81,7 +81,7 @@ interface Preferences { id: string; taux_fg_default: string; taux_ben_default: s
 
 /* ─────────── tabs ─────────── */
 
-const TABS = ['Entreprise', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Préférences'] as const;
+const TABS = ['Entreprise', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Préférences'] as const;
 type Tab = typeof TABS[number];
 
 /* ═══════════════════════════════════════════════════════════
@@ -115,6 +115,7 @@ export default function ParamsPage() {
       </div>
 
       {token && tab === 'Entreprise' && <TabEntreprise token={token} />}
+      {token && tab === 'Types de déboursé' && <TabDebourseTypes token={token} />}
       {token && tab === 'Familles' && <TabFamilles token={token} />}
       {token && tab === 'Codes analytiques' && <TabCodes token={token} />}
       {token && tab === 'Lots' && <TabLots token={token} />}
@@ -616,6 +617,159 @@ function TabCodes({ token }: { token: string }) {
           <Row style={{ marginTop: 12, justifyContent: 'flex-end' }}>
             <button className="btn-secondary btn" onClick={() => setEditing(null)}>Annuler</button>
             <button className="btn" onClick={() => update.mutate(editing)}>Modifier</button>
+          </Row>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ─────────── Types de déboursé ─────────── */
+
+interface DebourseType {
+  id: string;
+  code: string;
+  label: string;
+  baseNature: string;
+  builtin: boolean;
+  devisVersionId: string | null;
+}
+
+/** Les quatre natures qui portent la gestion en aval (budgets de chantier, analytique, compta). */
+const BASE_NATURES = [
+  { v: 'labor', l: "Main d'œuvre" },
+  { v: 'material', l: 'Matériaux' },
+  { v: 'equipment', l: 'Matériel' },
+  { v: 'subcontract', l: 'Sous-traitance' },
+] as const;
+
+function TabDebourseTypes({ token }: { token: string }) {
+  const qc = useQueryClient();
+  const api = useApi();
+  const { data: types = [] } = useQuery<DebourseType[]>({
+    queryKey: ['debourse-types'],
+    queryFn: () => api<DebourseType[]>('/debourse-types'),
+    enabled: Boolean(token),
+  });
+  const [form, setForm] = useState({ code: '', label: '', baseNature: 'subcontract' });
+  const [editing, setEditing] = useState<DebourseType | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const done = () => {
+    setError(null);
+    qc.invalidateQueries({ queryKey: ['debourse-types'] });
+  };
+  const fail = (e: unknown) =>
+    setError(e instanceof Error ? e.message : 'Opération impossible.');
+
+  const create = useMutation({
+    mutationFn: () => api('/debourse-types', { method: 'POST', body: form }),
+    onSuccess: () => { done(); setForm({ code: '', label: '', baseNature: 'subcontract' }); },
+    onError: fail,
+  });
+  const update = useMutation({
+    mutationFn: (t: DebourseType) =>
+      api(`/debourse-types/${t.id}`, {
+        method: 'PUT',
+        body: { code: t.code, label: t.label, baseNature: t.baseNature },
+      }),
+    onSuccess: () => { done(); setEditing(null); },
+    onError: fail,
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => api(`/debourse-types/${id}`, { method: 'DELETE' }),
+    onSuccess: done,
+    onError: fail,
+  });
+
+  const natureLabel = (v: string) => BASE_NATURES.find((n) => n.v === v)?.l ?? v;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card title={`Types de déboursé${types.length > 0 ? ` (${types.length})` : ''}`}>
+        <p className="muted" style={{ margin: '0 0 12px', fontSize: 11 }}>
+          Vos postes de coût, tels qu’ils apparaissent sur les ressources, les ouvrages et la
+          feuille de vente — chacun avec ses propres % FG et % bénéfice dans chaque devis. Le
+          rattachement à une nature de base commande la suite : budgets de chantier, axe
+          analytique, export comptable.
+        </p>
+        {error && <div className="error" style={{ marginBottom: 10 }}>{error}</div>}
+        <table className="grid">
+          <thead>
+            <tr>
+              <th style={{ width: 90 }}>Code</th>
+              <th>Intitulé</th>
+              <th style={{ width: 200 }}>Nature de rattachement</th>
+              <th style={{ width: 80 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {types.map((t) => (
+              <tr key={t.id}>
+                <td className="code-cell">{t.code}</td>
+                <td>{t.label}</td>
+                <td className="muted">{natureLabel(t.baseNature)}</td>
+                <td style={{ textAlign: 'right', paddingRight: 8 }}>
+                  <IconBtn title="Modifier" color="#64748b" onClick={() => setEditing(t)}>
+                    <Pencil size={12} />
+                  </IconBtn>
+                  <IconBtn
+                    title="Supprimer"
+                    color="#dc2626"
+                    onClick={() => {
+                      if (confirm(`Supprimer le type « ${t.label} » ?`)) del.mutate(t.id);
+                    }}
+                  >
+                    <Trash2 size={11} />
+                  </IconBtn>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Row style={{ marginTop: 12 }}>
+          <Field label="Code">
+            <input className="input" style={{ width: 90 }} placeholder="STM" value={form.code}
+              onChange={(e) => setForm({ ...form, code: e.target.value })} />
+          </Field>
+          <Field label="Intitulé">
+            <input className="input" style={{ width: 260 }} placeholder="ST Moyens" value={form.label}
+              onChange={(e) => setForm({ ...form, label: e.target.value })} />
+          </Field>
+          <Field label="Nature de rattachement">
+            <select className="input" style={{ width: 200 }} value={form.baseNature}
+              onChange={(e) => setForm({ ...form, baseNature: e.target.value })}>
+              {BASE_NATURES.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+            </select>
+          </Field>
+          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()}>
+            + Ajouter
+          </button>
+        </Row>
+      </Card>
+      {editing && (
+        <Modal title="Modifier le type de déboursé" onClose={() => setEditing(null)}>
+          <Field label="Code">
+            <input className="input" style={{ width: 100 }} value={editing.code}
+              onChange={(e) => setEditing({ ...editing, code: e.target.value })} />
+          </Field>
+          <Field label="Intitulé">
+            <input className="input" style={{ width: 300 }} value={editing.label}
+              onChange={(e) => setEditing({ ...editing, label: e.target.value })} />
+          </Field>
+          <Field label="Nature de rattachement">
+            <select className="input" style={{ width: 220 }} value={editing.baseNature}
+              onChange={(e) => setEditing({ ...editing, baseNature: e.target.value })}>
+              {BASE_NATURES.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+            </select>
+          </Field>
+          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+            Changer la nature de rattachement déplace ce poste dans les budgets et les tableaux
+            analytiques des prochains chantiers ; les chantiers déjà lancés ne bougent pas.
+          </p>
+          <Row style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+            <button className="btn-secondary btn" onClick={() => setEditing(null)}>Annuler</button>
+            <button className="btn" onClick={() => update.mutate(editing!)}>Modifier</button>
           </Row>
         </Modal>
       )}

@@ -16,6 +16,8 @@ import { VenteService } from './vente.service';
 import { VenteController } from './vente.controller';
 import { WorkflowService } from './workflow.service';
 import { WorkflowController } from './workflow.controller';
+import { DebourseTypeService } from './debourse-type.service';
+import { DebourseTypeController } from './debourse-type.controller';
 import { DevisPdfService } from './devis-pdf.service';
 import { DevisPdfController } from './devis-pdf.controller';
 import { ImportService } from './import/import.service';
@@ -38,6 +40,7 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     TenancyModule,
   ],
   providers: [
+    DebourseTypeService,
     LibrariesService,
     OuvragesService,
     DevisService,
@@ -48,6 +51,7 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     EstimatingSearchProvider,
   ],
   controllers: [
+    DebourseTypeController,
     LibrariesController,
     OuvragesController,
     DevisController,

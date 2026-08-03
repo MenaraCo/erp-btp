@@ -30,6 +30,16 @@
 | DELETE | `/suppliers/:id` | `directory.write` | Suppression douce ; inconnu → 404 |
 | GET | `/search?q=` | `directory.read` | Recherche universelle (clients, fournisseurs, biblio, ressources) |
 
+### Types de déboursé (référentiel société)
+
+| Méthode | Route | Permission | Description |
+| --- | --- | --- | --- |
+| GET | `/debourse-types?devisVersionId=` | `estimating.devis.read` | Types utilisables : ceux de la société, plus ceux du devis quand il est précisé. Les 4 types de base (MO, M, MAT, ST) sont créés à la première lecture |
+| POST | `/debourse-types` | `estimating.devis.write` | Crée un type `{ code, label, baseNature, devisVersionId? }`. `devisVersionId` renseigné = type propre à ce devis. Code déjà pris dans le périmètre → 409 ; nature de rattachement hors des 4 natures → 400 |
+| PUT | `/debourse-types/:id` | `estimating.devis.write` | Modifie code / intitulé / nature de rattachement |
+| POST | `/debourse-types/:id/promote` | `estimating.devis.write` | Remonte un type de devis au référentiel société |
+| DELETE | `/debourse-types/:id` | `estimating.devis.write` | Supprime un type |
+
 ## Études de prix (capacité `estimating.bid`)
 
 | Méthode | Route | Permission | Notes |
