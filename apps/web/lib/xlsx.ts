@@ -155,6 +155,12 @@ const styleId = (k?: StyleKey) => (k ? STYLE_ORDER.indexOf(k) + 1 : 0);
 export interface StyledCell {
   v: string | number | null;
   s?: StyleKey;
+  /**
+   * Formule Excel, SANS le « = » (ex. `ROUND(D12*E12,2)`). Le classeur se recalcule alors tout
+   * seul : changer une quantité mets à jour montants, sous-totaux et totaux. `v` sert de valeur
+   * en cache, affichée par les lecteurs qui ne recalculent pas à l'ouverture.
+   */
+  f?: string;
 }
 export type SheetCell = string | number | null | StyledCell;
 
@@ -269,6 +275,11 @@ function styledSheetXml(rows: SheetCell[][], opts: SheetOptions): string {
             raw !== null && typeof raw === 'object' ? raw : { v: raw as string | number | null };
           const ref = `${colName(ci)}${ri + 1}`;
           const st = cell.s ? ` s="${styleId(cell.s)}"` : '';
+          if (cell.f) {
+            const cached =
+              typeof cell.v === 'number' && Number.isFinite(cell.v) ? `<v>${cell.v}</v>` : '';
+            return `<c r="${ref}"${st}><f>${escapeXml(cell.f)}</f>${cached}</c>`;
+          }
           if (typeof cell.v === 'number' && Number.isFinite(cell.v)) {
             return `<c r="${ref}"${st}><v>${cell.v}</v></c>`;
           }
@@ -328,7 +339,7 @@ export function downloadStyledXlsx(
     {
       name: 'xl/workbook.xml',
       data: enc.encode(
-        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${safeSheet}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${safeSheet}" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="0" fullCalcOnLoad="1"/></workbook>`,
       ),
     },
     {

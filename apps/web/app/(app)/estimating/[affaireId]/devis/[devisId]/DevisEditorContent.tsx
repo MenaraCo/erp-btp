@@ -473,11 +473,26 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
       [],
       ['Code', 'Désignation', 'Quantité', 'PU déboursé', 'Montant HT'].map((h) => ({ v: h, s: 'header' as StyleKey })),
     ];
+    const premiere = rows.length + 1;
     for (const r of agg.values()) {
+      const l = rows.length + 1;
       rows.push([
         { v: r.code, s: 'num' }, { v: r.designation, s: 'text' },
         { v: round(r.qty, 3), s: 'qty' }, { v: round(r.pu, 4), s: 'money' },
-        { v: round(r.montant, 2), s: 'money' },
+        { v: round(r.montant, 2), f: `ROUND(C${l}*D${l},2)`, s: 'money' },
+      ]);
+    }
+    const derniere = rows.length;
+    if (derniere >= premiere) {
+      rows.push([]);
+      rows.push([
+        null, null, null,
+        { v: 'TOTAL DÉBOURSÉ', s: 'totalLabel' },
+        {
+          v: round([...agg.values()].reduce((a, r) => a + r.montant, 0), 2),
+          f: `SUM(E${premiere}:E${derniere})`,
+          s: 'totalMoney',
+        },
       ]);
     }
     downloadStyledXlsx(`debours_${d?.numero || devisId}`, rows, {
@@ -501,13 +516,30 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
       ['Code', 'Désignation', 'Qté emploi', 'Unité achat', 'Coeff', 'Qté appro', 'Prix public', 'Montant HT', 'Fournisseur']
         .map((h) => ({ v: h, s: 'header' as StyleKey })),
     ];
+    const premiere = rows.length + 1;
     for (const r of appro.data ?? []) {
+      const l = rows.length + 1;
       rows.push([
         { v: r.code ?? '', s: 'num' }, { v: r.designation, s: 'text' },
         { v: num(r.qteEmploi), s: 'qty' }, { v: r.uniteAchat ?? '', s: 'unit' },
         { v: num(r.coeffConversion), s: 'qty' }, { v: num(r.qteAppro), s: 'qty' },
-        { v: num(r.prixPublic), s: 'money' }, { v: num(r.montant), s: 'money' },
+        { v: num(r.prixPublic), s: 'money' },
+        { v: num(r.montant), f: `ROUND(F${l}*G${l},2)`, s: 'money' },
         { v: r.fournisseur ?? '', s: 'text' },
+      ]);
+    }
+    const derniere = rows.length;
+    if (derniere >= premiere) {
+      rows.push([]);
+      rows.push([
+        null, null, null, null, null, null,
+        { v: 'TOTAL', s: 'totalLabel' },
+        {
+          v: round((appro.data ?? []).reduce((a, r) => a + (Number(r.montant) || 0), 0), 2),
+          f: `SUM(H${premiere}:H${derniere})`,
+          s: 'totalMoney',
+        },
+        null,
       ]);
     }
     downloadStyledXlsx(`appro_${d?.numero || devisId}`, rows, {
@@ -623,13 +655,18 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
    * et du client, tableau à colonnes tenues, totaux en pied. `avecPrix = false` produit le
    * BORDEREAU d'appel d'offre : les colonnes de prix restent vides, encadrées, prêtes à la saisie.
    */
+  /**
+   * Édition Excel du devis — même mise en page que le PDF, mais VIVANTE : les montants, les
+   * sous-totaux et les totaux sont des FORMULES. Changer une quantité ou un prix unitaire met
+   * tout à jour, chez nous comme chez le destinataire. `avecPrix = false` produit le BORDEREAU
+   * d'appel d'offre : les prix unitaires restent à saisir, mais les formules sont déjà en place.
+   */
   function exportDpgf(avecPrix: boolean) {
-    const cli = affaireDetail.data?.affaire?.client ?? null;
     const aff = affaireDetail.data?.affaire;
-    const dec = prefs.nb_decimales;
+    const cli = aff?.client ?? null;
     const R: SheetCell[][] = [];
 
-    // ── Bandeau : émetteur, puis nature du document et destinataire ──
+    // ── Bandeau : émetteur, nature du document, identité ──
     R.push([{ v: prefs.company_name || 'Devis', s: 'title' }]);
     R.push([{ v: avecPrix ? 'Décomposition du prix global et forfaitaire' : "Bordereau d'appel d'offre — prix à compléter", s: 'subtitle' }]);
     R.push([]);
@@ -640,71 +677,105 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
       ['Version', String(versions.find((x) => x.id === versionId)?.version_no ?? 1)],
       ['Date', new Date().toLocaleDateString('fr-FR')],
     ];
-    for (const [k, v] of ident) {
-      R.push([{ v: k, s: 'label' }, { v, s: 'value' }]);
-    }
+    for (const [k, v] of ident) R.push([{ v: k, s: 'label' }, { v, s: 'value' }]);
     R.push([]);
 
-    // ── En-tête du tableau (figé au défilement) ──
     const HEAD = ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT', 'Montant HT'];
     R.push(HEAD.map((h) => ({ v: h, s: 'header' as StyleKey })));
     const freezeRows = R.length;
 
-    // Documents remis au client : mêmes règles qu'à l'écran et au PDF — pas de ligne de frais,
-    // ni de titre qui ne contiendrait qu'elles.
-    const vus = visibleForClient((lines.data ?? []) as DevisLine[]);
-    for (const { line, depth } of orderTree((lines.data ?? []) as DevisLine[])) {
-      // Le sous-détail de déboursé ne fait pas partie du document remis au client.
-      const parent = (lines.data ?? []).find((x) => x.id === line.parent_line_id);
-      if (parent?.type === 'ouvrage') continue;
-      if (line.type === 'texte') continue;
-      if (!vus.has(line.id)) continue;
+    // Documents remis au client : ni ligne de frais, ni titre qui ne contiendrait qu'elles.
+    const all = (lines.data ?? []) as DevisLine[];
+    const vus = visibleForClient(all);
+    const retenues = orderTree(all).filter(({ line }) => {
+      const parent = all.find((x) => x.id === line.parent_line_id);
+      if (parent?.type === 'ouvrage') return false; // sous-détail de déboursé
+      if (line.type === 'texte') return false;
+      return vus.has(line.id);
+    });
 
-      const item = itemById.get(line.id);
+    // Chaque ligne connaîtra son numéro de ligne Excel : les sous-totaux y feront référence.
+    const rowOf = new Map<string, number>();
+    retenues.forEach(({ line }, i) => rowOf.set(line.id, R.length + i + 1));
+    const enfantsPortantUnMontant = (parentId: string) =>
+      retenues
+        .filter(({ line }) => line.parent_line_id === parentId)
+        .map(({ line }) => rowOf.get(line.id))
+        .filter((n): n is number => n != null);
+    /** Sous-total d'un titre, mis en cache dans le fichier pour les lecteurs qui ne recalculent pas. */
+    const pvSousArbre = (parentId: string): number =>
+      retenues
+        .filter(({ line }) => line.parent_line_id === parentId)
+        .reduce((acc, { line }) => {
+          const it = itemById.get(line.id);
+          return acc + (it ? Number(it.pv) : pvSousArbre(line.id));
+        }, 0);
+
+    for (const { line, depth } of retenues) {
+      const ligne = rowOf.get(line.id)!;
       const isTitre = line.type === 'titre' || line.type === 'sous_titre';
-      const qty = line.quantity != null ? Number(line.quantity) : null;
-      const pv = item ? Number(item.pv) : null;
-      const pu = item && qty ? Number(item.pv) / qty : null;
 
       if (isTitre) {
         const st: StyleKey = depth === 0 ? 'group1' : 'group2';
+        // Sous-total = somme des SEULS enfants directs : les sous-titres portant déjà leur
+        // propre somme, additionner toute la plage compterait deux fois les mêmes montants.
+        const refs = enfantsPortantUnMontant(line.id).map((n) => `F${n}`);
         R.push([
           { v: line.numero ?? '', s: st },
           { v: `${'    '.repeat(depth)}${line.designation}`, s: st },
           { v: '', s: st }, { v: '', s: st }, { v: '', s: st },
-          // Le sous-total d'un titre n'a de sens que sur un document chiffré.
-          avecPrix ? { v: titrePvByRoot.get(line.id) ?? null, s: 'moneyBold' } : { v: '', s: st },
+          refs.length
+            ? { v: avecPrix ? round(pvSousArbre(line.id), 2) : null, f: `SUM(${refs.join(',')})`, s: 'moneyBold' }
+            : { v: '', s: st },
         ]);
         continue;
       }
+
+      const item = itemById.get(line.id);
+      const qty = line.quantity != null ? Number(line.quantity) : null;
+      // P.U. exact (et non arrondi à l'affichage) : la formule Qté × P.U. retombe alors AU CENTIME
+      // sur le montant calculé par la feuille de vente. Le format n'en montre que deux décimales.
+      // P.U. gardé à 6 décimales — et non arrondi au centime — pour que la formule Qté × P.U.
+      // retombe AU CENTIME sur le montant de la feuille de vente, quelle que soit la quantité.
+      // Les 6 décimales évitent aussi l'artefact de virgule flottante visible sinon dans la
+      // barre de formule ; le format d'affichage n'en montre que deux.
+      const pu = item && qty ? round(Number(item.pv) / qty, 6) : null;
       R.push([
         { v: line.numero ?? '', s: 'num' },
         { v: `${'    '.repeat(depth)}${line.designation}`, s: 'text' },
         { v: line.unit ?? '', s: 'unit' },
         { v: qty, s: 'qty' },
-        avecPrix ? { v: pu != null ? round(pu, dec) : null, s: 'money' } : { v: '', s: 'fill' },
-        avecPrix ? { v: pv != null ? round(pv, dec) : null, s: 'money' } : { v: '', s: 'fill' },
+        avecPrix ? { v: pu, s: 'money' } : { v: '', s: 'fill' },
+        { v: avecPrix && item ? round(Number(item.pv), 2) : null, f: `ROUND(D${ligne}*E${ligne},2)`, s: 'money' },
       ]);
     }
 
-    // ── Pied : totaux chiffrés, ou cases à remplir pour le bordereau ──
+    // ── Pied : tout s'enchaîne par formules jusqu'au TTC ──
     R.push([]);
-    const pied = (libelle: string, montant: number | null) =>
+    const racines = retenues.filter(({ line }) => !line.parent_line_id).map(({ line }) => `F${rowOf.get(line.id)}`);
+    const pied = (libelle: string, valeur: number | null, formule?: string) => {
       R.push([
         null, null, null, null,
         { v: libelle, s: 'totalLabel' },
-        montant != null ? { v: round(montant, dec), s: 'totalMoney' } : { v: '', s: 'fill' },
+        { v: valeur, f: formule, s: 'totalMoney' },
       ]);
-    if (avecPrix && sale.data) {
-      for (const fd of sale.data.fraisDetail ?? []) pied(fd.designation, Number(fd.montant));
-      pied('TOTAL HT', Number(sale.data.totalPvHt));
-      pied('TVA', Number(sale.data.tva));
-      pied('TOTAL TTC', Number(sale.data.totalTtc));
-    } else {
-      pied('TOTAL HT', null);
-      pied('TVA', null);
-      pied('TOTAL TTC', null);
+      return R.length; // n° de la ligne créée, pour les formules suivantes
+    };
+    const lTravaux = pied('Sous-total travaux', avecPrix ? Number(sale.data?.pvHorsFrais ?? 0) : null,
+      racines.length ? `SUM(${racines.join(',')})` : undefined);
+
+    const refsHt = [`F${lTravaux}`];
+    for (const fd of sale.data?.fraisDetail ?? []) {
+      refsHt.push(`F${pied(fd.designation, avecPrix ? Number(fd.montant) : null)}`);
     }
+    const remise = Number(sale.data?.remise ?? 0);
+    if (remise > 0) {
+      refsHt.push(`F${pied('Remise', avecPrix ? -remise : null)}`);
+    }
+    const lHt = pied('TOTAL HT', avecPrix ? Number(sale.data?.totalPvHt ?? 0) : null, `SUM(${refsHt.join(',')})`);
+    const taux = (Number(tva) || 0) / 100;
+    const lTva = pied(`TVA ${Number(tva) || 0} %`, avecPrix ? Number(sale.data?.tva ?? 0) : null, `ROUND(F${lHt}*${taux},2)`);
+    pied('TOTAL TTC', avecPrix ? Number(sale.data?.totalTtc ?? 0) : null, `F${lHt}+F${lTva}`);
 
     downloadStyledXlsx(
       `${avecPrix ? 'DPGF' : 'Bordereau'}_${d?.numero || d?.designation || devisId}`,

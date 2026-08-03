@@ -1005,33 +1005,6 @@ function DebourseTypeSelect({ value, versionId, token, readOnly, onChange }: {
   );
 }
 
-/** Types de sous-traitance déclarés sur CE devis (onglet « Coefficients & frais »). */
-interface StType { id: string; code?: string | null; label: string }
-function StTypeSelect({ value, versionId, token, readOnly, onChange }: {
-  value: string; versionId: string; token: string | null; readOnly: boolean;
-  onChange: (v: string) => void;
-}) {
-  const { data } = useQuery({
-    queryKey: ['sale-config', versionId], enabled: Boolean(token && versionId), retry: false,
-    queryFn: () => apiFetch<{ stTypes?: StType[] }>(`/versions/${versionId}/sale-sheet/config`, { token }),
-  });
-  const types = data?.stTypes ?? [];
-  return (
-    <>
-      <select value={value} disabled={readOnly || types.length === 0} onChange={(e) => onChange(e.target.value)}
-        style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, background: readOnly ? '#f8fafc' : '#fff' }}>
-        <option value="">— taux de la nature —</option>
-        {types.map((t) => <option key={t.id} value={t.id}>{t.code ? `${t.code} — ` : ''}{t.label}</option>)}
-      </select>
-      {types.length === 0 && (
-        <span className="muted" style={{ fontSize: 10 }}>
-          Aucun type défini — onglet « Coefficients &amp; frais ».
-        </span>
-      )}
-    </>
-  );
-}
-
 interface ParamCode { id: string; code: string; label: string; famille_id: string }
 interface ParamFamille { id: string; code: string; label: string }
 
