@@ -582,15 +582,18 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
    * `avecPrix = false` produit le bordereau vierge à faire chiffrer.
    */
   function exportDpgf(avecPrix: boolean) {
-    const rows: (string | number)[][] = [[
-      'N°', 'Désignation', 'Unité', 'Quantité',
-      ...(avecPrix ? ['P.U. HT', 'Montant HT'] : ['P.U. HT', 'Montant HT']),
-    ]];
+    // Bordereau : mêmes colonnes que le DPGF, mais les prix restent VIDES — c'est le
+    // destinataire de l'appel d'offre qui les saisit.
+    const rows: (string | number)[][] = [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT', 'Montant HT']];
+    // Documents remis au client : mêmes règles qu'à l'écran et au PDF — pas de ligne de frais,
+    // ni de titre qui ne contiendrait qu'elles.
+    const vus = visibleForClient((lines.data ?? []) as DevisLine[]);
     for (const { line, depth } of orderTree((lines.data ?? []) as DevisLine[])) {
       // Le sous-détail de déboursé ne fait pas partie du DPGF remis au client.
       const parent = (lines.data ?? []).find((x) => x.id === line.parent_line_id);
       if (parent?.type === 'ouvrage') continue;
       if (line.type === 'texte') continue;
+      if (!vus.has(line.id)) continue;
       const item = itemById.get(line.id);
       const isTitre = line.type === 'titre' || line.type === 'sous_titre';
       const qty = line.quantity != null ? Number(line.quantity) : '';
@@ -1261,7 +1264,11 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                         <button className="btn-secondary" onClick={downloadPdf} disabled={!versionId}>Télécharger le PDF</button>
                         <button className="btn-secondary" onClick={downloadBordereau} disabled={!versionId}
                           title="Édition d'appel d'offre : structure et quantités, prix à compléter">
-                          Bordereau (sans prix)
+                          Bordereau PDF
+                        </button>
+                        <button className="btn-secondary" onClick={() => exportDpgf(false)} disabled={!versionId}
+                          title="Même bordereau au format Excel : le destinataire saisit ses prix dans les colonnes vides">
+                          Bordereau Excel
                         </button>
                         <button className="btn-secondary" onClick={() => exportDpgf(true)} disabled={!versionId}
                           title="Décomposition du prix global et forfaitaire, avec les prix">
