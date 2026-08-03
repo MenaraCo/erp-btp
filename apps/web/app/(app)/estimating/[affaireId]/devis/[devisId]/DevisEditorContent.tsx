@@ -6,14 +6,13 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiDownload, ApiError } from '@/lib/api';
-import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
 import { usePreferences, fmtEuro, cleanNum } from '@/lib/preferences';
 import { downloadStyledXlsx, SheetCell, StyleKey } from '@/lib/xlsx';
 import { visibleForClient } from '@/lib/client-view';
 import { useWorkspace } from '@/lib/workspace';
 import { Montage, MontageLine } from './Montage';
 import { LibraryDrawer } from './LibraryDrawer';
-import { WorkflowBar } from './WorkflowBar';
+import { StatusControl } from './StatusControl';
 
 const round = (v: number, n: number) => Number((Number(v) || 0).toFixed(n));
 
@@ -857,9 +856,15 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 0, marginBottom: 8, flexWrap: 'wrap' }}>
-            <span className={d.status === 'won' ? 'badge success' : d.status === 'lost' ? 'badge danger' : d.status === 'sent' ? 'badge info' : 'badge'}>
-              {AFFAIRE_STATUS_LABELS[d.status] ?? d.status}
-            </span>
+            <StatusControl
+              devisId={devisId}
+              status={d.status}
+              readOnly={isPanel2}
+              onChanged={() => {
+                qc.invalidateQueries({ queryKey: ['devis', devisId] });
+                qc.invalidateQueries({ queryKey: ['affaire', affaireId] });
+              }}
+            />
             <span style={{ color: 'var(--muted)', fontSize: 11 }}>{d.type}</span>
             <span style={{ color: 'var(--border)', fontSize: 11 }}>·</span>
             {!isPanel2 && !changingAffaire ? (
@@ -902,16 +907,7 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
             )}
           </div>
 
-          {!isPanel2 && (
-            <WorkflowBar
-              devisId={devisId}
-              status={d.status}
-              onChanged={() => {
-                qc.invalidateQueries({ queryKey: ['devis', devisId] });
-                qc.invalidateQueries({ queryKey: ['affaire', affaireId] });
-              }}
-            />
-          )}
+
 
           {!isLatest && (
             <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, padding: '8px 14px', marginBottom: 8, fontSize: 13, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
