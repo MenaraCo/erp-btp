@@ -67,6 +67,14 @@ export class DevisController {
     return this.devis.updateDevis(devisId, body ?? {});
   }
 
+  /** Planning des études : les affaires avec leurs jalons, leur délai et les compteurs d'en-tête. */
+  @Get('affaires-planning')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  planningAffaires(@Query('aujourdhui') aujourdhui?: string) {
+    return this.devis.planningAffaires(aujourdhui);
+  }
+
   @Patch('devis/:devisId/planning')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')

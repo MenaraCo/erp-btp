@@ -1,202 +1,215 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
+import { AlertTriangle, CalendarCheck, Clock, FileText } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
-import { AFFAIRE_STATUS_LABELS } from '@/lib/format';
 
-interface DevisRow {
+/**
+ * Planning des études, au niveau AFFAIRE : c'est elle qui porte les jalons (une seule date de
+ * remise pour tous ses lots). L'affectation d'un devis à un chargé d'étude se règle, elle, dans
+ * « Paramètres du devis » — d'où le retrait de l'ancien tableau par devis, qui faisait doublon.
+ *
+ * Le délai est calculé par l'API (module pur `planning-delai`), jamais ici : les badges de chaque
+ * ligne et les compteurs d'en-tête sortent ainsi de la même règle et ne peuvent pas diverger.
+ */
+interface Delai {
+  etat: 'sans_echeance' | 'a_lheure' | 'avance' | 'depasse';
+  jours: number | null;
+  rendu: boolean;
+}
+interface AffairePlanning {
   id: string;
-  numero: string | null;
-  designation: string;
+  code: string;
+  name: string;
   status: string;
-  affaire_code: string;
-  affaire_name: string;
   responsable: string | null;
-  priorite: string;
-  date_debut: string | null;
-  date_echeance: string | null;
+  conducteur: string | null;
+  client_name: string | null;
+  devis_count: number;
+  date_limite_remise: string | null;
+  date_retour_effectif: string | null;
+  date_debut_etudes: string | null;
+  date_fin_etudes: string | null;
+  date_debut_travaux: string | null;
+  date_fin_travaux: string | null;
+  delai: Delai;
+  close: boolean;
+}
+interface PlanningData {
+  aujourdhui: string;
+  affaires: AffairePlanning[];
+  compteurs: { enCours: number; rendues: number; depassees: number; sansEcheance: number };
 }
 
-const PRIORITES = ['basse', 'normale', 'urgente', 'critique'];
-const PRIO_COLOR: Record<string, string> = {
-  basse: '#94a3b8', normale: '#2563eb', urgente: '#e8550a', critique: '#dc2626',
+const STATUT_LABELS: Record<string, string> = {
+  en_cours: 'En cours', gagnee: 'Gagnée', gagnee_partielle: 'Gagnée partiellement', perdue: 'Perdue',
 };
-const DONE = new Set(['won', 'lost']);
+const statutBadge = (s: string) =>
+  s === 'gagnee' ? 'badge success' : s === 'perdue' ? 'badge danger'
+    : s === 'gagnee_partielle' ? 'badge info' : 'badge';
 
-function daysBetween(a: Date, b: Date) {
-  return Math.round((b.getTime() - a.getTime()) / 86400000);
+/** Date courte : « 15 juin ». Un planning se lit d'un coup d'œil, pas en déchiffrant du 2026-06-15. */
+function jour(v: string | null): string {
+  if (!v) return '—';
+  const d = new Date(`${v}T12:00:00`);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+}
+
+/** Le verdict de délai, dit en français. */
+function DelaiBadge({ d }: { d: Delai }) {
+  if (d.etat === 'sans_echeance') return <span className="muted">—</span>;
+  if (d.etat === 'depasse') {
+    return (
+      <span className="badge danger" title={d.rendu ? 'Remis après l’échéance' : 'Échéance passée'}>
+        {d.rendu ? `Remis +${-d.jours!}j` : `Dépassé ${-d.jours!}j`}
+      </span>
+    );
+  }
+  if (d.etat === 'a_lheure') return <span className="badge info">Le jour même</span>;
+  return (
+    <span className="badge success" title={d.rendu ? 'Remis en avance' : 'Il reste du temps'}>
+      {d.jours}j {d.rendu ? 'd’avance' : 'restants'}
+    </span>
+  );
 }
 
 export default function PlanningEtudesPage() {
   const { token } = useAuth();
-  const qc = useQueryClient();
-  const [view, setView] = useState<'tableau' | 'gantt'>('tableau');
+  const [affaireFiltre, setAffaireFiltre] = useState('');
+  const [respFiltre, setRespFiltre] = useState('');
 
-  const list = useQuery({
-    queryKey: ['devis-list'],
+  const planning = useQuery({
+    queryKey: ['affaires-planning'],
     enabled: Boolean(token),
-    queryFn: () => apiFetch<DevisRow[]>('/devis', { token }),
+    queryFn: () => apiFetch<PlanningData>('/affaires-planning', { token }),
   });
 
-  const setPlanning = useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
-      apiFetch(`/devis/${id}/planning`, { method: 'PATCH', body: patch, token }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['devis-list'] }),
-  });
-
-  // études en cours (hors gagnés/perdus)
-  const etudes = useMemo(
-    () => (list.data ?? []).filter((d) => !DONE.has(d.status)),
-    [list.data],
+  const affaires = useMemo(() => planning.data?.affaires ?? [], [planning.data]);
+  const responsables = useMemo(
+    () => Array.from(new Set(affaires.map((a) => a.responsable).filter(Boolean) as string[])).sort(),
+    [affaires],
+  );
+  const lignes = useMemo(
+    () => affaires.filter((a) =>
+      (!affaireFiltre || a.id === affaireFiltre) &&
+      (!respFiltre || a.responsable === respFiltre)),
+    [affaires, affaireFiltre, respFiltre],
   );
 
-  // Fenêtre Gantt : aujourd'hui − 7j → +84j
-  const win = useMemo(() => {
-    const start = new Date();
-    start.setDate(start.getDate() - 7);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 91);
-    const totalDays = daysBetween(start, end);
-    const weeks: Date[] = [];
-    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 7)) weeks.push(new Date(d));
-    return { start, end, totalDays, weeks };
-  }, []);
-
-  const ganttRows = etudes.filter((d) => d.date_debut && d.date_echeance);
-
-  // KPI + regroupement par affaire.
-  const today = new Date().toISOString().slice(0, 10);
-  const kpis = useMemo(() => ({
-    affaires: new Set(etudes.map((d) => d.affaire_code)).size,
-    offresRendues: etudes.filter((d) => d.status === 'sent').length,
-    delaiDepasse: etudes.filter((d) => d.date_echeance && d.date_echeance < today).length,
-    sansDate: etudes.filter((d) => !d.date_echeance).length,
-  }), [etudes, today]);
-
-  const ganttByAffaire = useMemo(() => {
-    const m = new Map<string, { name: string; rows: DevisRow[] }>();
-    for (const d of ganttRows) {
-      const g = m.get(d.affaire_code) ?? { name: d.affaire_name, rows: [] };
-      g.rows.push(d);
-      m.set(d.affaire_code, g);
-    }
-    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [ganttRows]);
+  const c = planning.data?.compteurs;
+  const cartes = [
+    { l: 'Affaires en cours', v: c?.enCours ?? 0, Icon: FileText, color: '#2563eb', bg: '#eff6ff' },
+    { l: 'Offres rendues', v: c?.rendues ?? 0, Icon: CalendarCheck, color: '#16a34a', bg: '#f0fdf4' },
+    { l: 'Délai dépassé', v: c?.depassees ?? 0, Icon: AlertTriangle, color: '#dc2626', bg: '#fef2f2' },
+    { l: 'Sans date limite', v: c?.sansEcheance ?? 0, Icon: Clock, color: '#d97706', bg: '#fffbeb' },
+  ];
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Planning des études</h1>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className={view === 'tableau' ? 'btn' : 'btn-secondary'} onClick={() => setView('tableau')}>Tableau</button>
-          <button className={view === 'gantt' ? 'btn' : 'btn-secondary'} onClick={() => setView('gantt')}>Gantt</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ marginBottom: 2 }}>Planning des études</h1>
+          <p className="muted" style={{ marginTop: 0 }}>
+            {affaires.length} affaire(s) · {affaires.reduce((n, a) => n + a.devis_count, 0)} devis
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <select className="input" style={{ minWidth: 200 }} value={affaireFiltre}
+            onChange={(e) => setAffaireFiltre(e.target.value)}>
+            <option value="">Toutes les affaires</option>
+            {affaires.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+          </select>
+          <select className="input" style={{ minWidth: 180 }} value={respFiltre}
+            onChange={(e) => setRespFiltre(e.target.value)}>
+            <option value="">Tous les responsables</option>
+            {responsables.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
         </div>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Devis en étude — responsable, priorité et échéances.</p>
 
-      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 16 }}>
-        <PlanningKpi n={kpis.affaires} label="Affaires en cours" color="var(--primary)" />
-        <PlanningKpi n={kpis.offresRendues} label="Offres rendues" color="#16a34a" />
-        <PlanningKpi n={kpis.delaiDepasse} label="Délai dépassé" color="#dc2626" />
-        <PlanningKpi n={kpis.sansDate} label="Sans date limite" color="#d97706" />
+      <div className="card-grid" style={{ marginTop: 12 }}>
+        {cartes.map((k) => (
+          <div key={k.l} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{
+              width: 34, height: 34, borderRadius: 9, background: k.bg, color: k.color,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <k.Icon size={17} />
+            </span>
+            <span>
+              <span className="stat" style={{ display: 'block', lineHeight: 1.1, color: k.color }}>{k.v}</span>
+              <span className="muted" style={{ fontSize: 11 }}>{k.l}</span>
+            </span>
+          </div>
+        ))}
       </div>
 
-      {view === 'tableau' && (
-        <div className="card" style={{ marginTop: 12 }}>
-          {etudes.length > 0 ? (
-            <table className="grid">
-              <thead><tr>
-                <th>Devis</th><th>Affaire</th><th>Statut</th><th>Responsable</th><th>Priorité</th><th>Début</th><th>Échéance</th>
-              </tr></thead>
-              <tbody>
-                {etudes.map((d) => (
-                  <tr key={d.id}>
-                    <td>{d.numero ? <span className="code-cell">{d.numero} </span> : null}{d.designation}</td>
-                    <td className="muted">{d.affaire_code}</td>
-                    <td><span className="badge">{AFFAIRE_STATUS_LABELS[d.status] ?? d.status}</span></td>
-                    <td>
-                      <input style={{ width: 130 }} defaultValue={d.responsable ?? ''}
-                        onBlur={(e) => e.target.value !== (d.responsable ?? '') && setPlanning.mutate({ id: d.id, patch: { responsable: e.target.value || null } })} />
-                    </td>
-                    <td>
-                      <select value={d.priorite} onChange={(e) => setPlanning.mutate({ id: d.id, patch: { priorite: e.target.value } })}
-                        style={{ borderLeft: `3px solid ${PRIO_COLOR[d.priorite] ?? '#94a3b8'}` }}>
-                        {PRIORITES.map((p) => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                    </td>
-                    <td>
-                      <input type="date" defaultValue={d.date_debut ?? ''}
-                        onChange={(e) => setPlanning.mutate({ id: d.id, patch: { dateDebut: e.target.value || null } })} />
-                    </td>
-                    <td>
-                      <input type="date" defaultValue={d.date_echeance ?? ''}
-                        onChange={(e) => setPlanning.mutate({ id: d.id, patch: { dateEcheance: e.target.value || null } })} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <p className="muted">Aucun devis en étude.</p>}
-        </div>
-      )}
-
-      {view === 'gantt' && (
-        <div className="card" style={{ marginTop: 12, overflowX: 'auto' }}>
-          {ganttRows.length > 0 ? (
-            <div style={{ minWidth: 760 }}>
-              {/* en-tête semaines */}
-              <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', paddingBottom: 4 }}>
-                <div style={{ width: 220, flexShrink: 0 }} className="label">Devis</div>
-                <div style={{ flex: 1, display: 'flex', position: 'relative' }}>
-                  {win.weeks.map((w, i) => (
-                    <div key={i} style={{ flex: 1, fontSize: 9, color: 'var(--muted)', borderLeft: '1px solid var(--border)', paddingLeft: 3 }}>
-                      {w.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              {/* lignes groupées par affaire */}
-              {ganttByAffaire.map(([code, group]) => (
-                <div key={code}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0 2px', marginTop: 4 }}>
-                    <span className="code-cell" style={{ fontSize: 11 }}>{code}</span>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-strong)' }}>{group.name}</span>
-                  </div>
-                  {group.rows.map((d) => {
-                    const s = new Date(d.date_debut!); const e = new Date(d.date_echeance!);
-                    const left = Math.max(0, daysBetween(win.start, s) / win.totalDays) * 100;
-                    const width = Math.max(1.5, (daysBetween(s, e) || 1) / win.totalDays * 100);
-                    const late = d.date_echeance != null && d.date_echeance < today;
-                    return (
-                      <div key={d.id} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid var(--surface)' }}>
-                        <div style={{ width: 220, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11, paddingLeft: 14 }}>
-                          {d.numero ? <span className="code-cell">{d.numero} </span> : null}{d.designation}
-                        </div>
-                        <div style={{ flex: 1, position: 'relative', height: 18 }}>
-                          <div title={`${d.responsable ?? ''} · ${d.priorite}${late ? ' · en retard' : ''}`}
-                            style={{ position: 'absolute', left: `${left}%`, width: `${Math.min(width, 100 - left)}%`, height: 14, top: 2, background: PRIO_COLOR[d.priorite] ?? '#94a3b8', borderRadius: 3, opacity: 0.85, boxShadow: late ? '0 0 0 2px #dc2626' : 'none' }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        {planning.isLoading && <p className="muted">Chargement…</p>}
+        {planning.isError && <p className="muted">Planning indisponible.</p>}
+        {planning.data && (
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>Affaire</th>
+                <th>Client</th>
+                <th>Statut</th>
+                <th>Date limite</th>
+                <th>Retour effectif</th>
+                <th>Études</th>
+                <th>Réalisation</th>
+                <th>Délai</th>
+                <th style={{ textAlign: 'right' }}>Devis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lignes.map((a) => (
+                <tr key={a.id}>
+                  <td>
+                    <Link href={`/estimating/${a.id}`} className="link">
+                      <span className="code-cell">{a.code}</span> {a.name}
+                    </Link>
+                    {a.responsable && <div className="muted" style={{ fontSize: 10.5 }}>{a.responsable}</div>}
+                  </td>
+                  <td className="muted">{a.client_name ?? '—'}</td>
+                  <td><span className={statutBadge(a.status)}>{STATUT_LABELS[a.status] ?? a.status}</span></td>
+                  <td style={{
+                    color: a.delai.etat === 'depasse' ? '#b91c1c' : undefined,
+                    fontWeight: a.date_limite_remise ? 600 : 400,
+                  }}>
+                    {jour(a.date_limite_remise)}
+                  </td>
+                  <td style={{ color: a.date_retour_effectif ? '#15803d' : undefined }}>
+                    {jour(a.date_retour_effectif)}
+                  </td>
+                  <td className="muted">
+                    {a.date_debut_etudes || a.date_fin_etudes
+                      ? `${jour(a.date_debut_etudes)} → ${jour(a.date_fin_etudes)}`
+                      : '—'}
+                  </td>
+                  <td className="muted">
+                    {a.date_debut_travaux || a.date_fin_travaux
+                      ? `${jour(a.date_debut_travaux)} → ${jour(a.date_fin_travaux)}`
+                      : '—'}
+                  </td>
+                  <td><DelaiBadge d={a.delai} /></td>
+                  <td style={{ textAlign: 'right' }}>{a.devis_count}</td>
+                </tr>
               ))}
-            </div>
-          ) : <p className="muted">Renseignez des dates (début + échéance) dans l’onglet Tableau pour afficher le Gantt.</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PlanningKpi({ n, label, color }: { n: number; label: string; color: string }) {
-  return (
-    <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{ fontSize: 26, fontWeight: 700, color }}>{n}</div>
-      <div className="muted" style={{ fontSize: 12 }}>{label}</div>
+              {lignes.length === 0 && (
+                <tr><td colSpan={9} className="muted">Aucune affaire ne correspond à ce filtre.</td></tr>
+              )}
+            </tbody>
+          </table>
+        )}
+        <p className="muted" style={{ fontSize: 11, marginBottom: 0, marginTop: 10 }}>
+          Les jalons se saisissent sur la fiche de l’affaire. L’affectation d’un devis à un chargé
+          d’étude se règle dans « Paramètres du devis ».
+        </p>
+      </div>
     </div>
   );
 }

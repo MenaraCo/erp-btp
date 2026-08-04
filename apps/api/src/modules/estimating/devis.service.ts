@@ -18,6 +18,7 @@ import {
   UnknownVariableError,
 } from './metre-eval';
 import { deriveAffaireStatus } from './affaire-derived-status';
+import { compterPlanning, evaluerDelai } from './planning-delai';
 import { computeLineNumbers, NumberingLine } from './devis-numbering';
 import { DevisStatus } from './devis-workflow';
 import { VenteService } from './vente.service';
@@ -700,6 +701,51 @@ export class DevisService {
         await this.recomputeAffaireStatus(em, patch.affaire_id);
       }
       return (await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]))[0];
+    });
+  }
+
+  /**
+   * Planning des études, au niveau AFFAIRE : c'est elle qui porte les jalons (une seule date de
+   * remise pour tous ses lots). Renvoie chaque affaire avec ses dates, son délai évalué et le
+   * nombre de devis, plus les compteurs d'en-tête — calculés sur la MÊME règle que les badges,
+   * pour qu'un chiffre du bandeau corresponde toujours aux lignes qu'on voit.
+   */
+  planningAffaires(aujourdhui?: string) {
+    const tenantId = this.context.requireTenantId();
+    const jour = aujourdhui ?? new Date().toISOString().slice(0, 10);
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT a.id, a.code, a.name, a.status, a.responsable, a.conducteur,
+                a.date_limite_remise, a.date_retour_effectif,
+                a.date_debut_etudes, a.date_fin_etudes,
+                a.date_debut_travaux, a.date_fin_travaux,
+                c.name AS client_name,
+                (SELECT COUNT(*)::int FROM devis d WHERE d.affaire_id = a.id) AS devis_count
+           FROM affaire a
+           LEFT JOIN client c ON c.id = a.client_id
+          WHERE a.deleted_at IS NULL
+          ORDER BY a.date_limite_remise NULLS LAST, a.code`,
+      );
+      const affaires = rows.map((r: Record<string, unknown>) => {
+        const dates = affaireDto(r) as Record<string, string | null>;
+        const close = r.status === 'gagnee' || r.status === 'perdue';
+        return {
+          ...r,
+          ...dates,
+          // Durée d'étude prévue, en jours : ce que le planning affiche en barre.
+          delai: evaluerDelai(dates.date_limite_remise, dates.date_retour_effectif, jour),
+          close,
+        };
+      });
+      const compteurs = compterPlanning(
+        affaires.map((a: { date_limite_remise: string | null; date_retour_effectif: string | null; close: boolean }) => ({
+          dateLimite: a.date_limite_remise,
+          dateRetour: a.date_retour_effectif,
+          close: a.close,
+        })),
+        jour,
+      );
+      return { aujourdhui: jour, affaires, compteurs };
     });
   }
 
