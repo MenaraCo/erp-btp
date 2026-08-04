@@ -76,10 +76,15 @@ function DelaiBadge({ d }: { d: Delai }) {
   );
 }
 
+type Vue = 'gantt' | 'tableau' | 'calendrier' | 'charge';
+
 export default function PlanningEtudesPage() {
   const { token } = useAuth();
+  const [vue, setVue] = useState<Vue>('tableau');
   const [affaireFiltre, setAffaireFiltre] = useState('');
   const [respFiltre, setRespFiltre] = useState('');
+  /** Décalage en mois par rapport au mois courant : les vues à échelle de temps le partagent. */
+  const [decalage, setDecalage] = useState(0);
 
   const planning = useQuery({
     queryKey: ['affaires-planning'],
@@ -116,7 +121,22 @@ export default function PlanningEtudesPage() {
             {affaires.length} affaire(s) · {affaires.reduce((n, a) => n + a.devis_count, 0)} devis
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 4, background: '#f1f5f9', padding: 3, borderRadius: 8 }}>
+            {([
+              ['gantt', 'Gantt'], ['tableau', 'Tableau'],
+              ['calendrier', 'Calendrier'], ['charge', 'Charge'],
+            ] as [Vue, string][]).map(([v, l]) => (
+              <button key={v} type="button" onClick={() => setVue(v)}
+                style={{
+                  border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, cursor: 'pointer',
+                  fontWeight: vue === v ? 700 : 500,
+                  background: vue === v ? '#fff' : 'transparent',
+                  color: vue === v ? 'var(--primary)' : '#64748b',
+                  boxShadow: vue === v ? '0 1px 3px rgba(15,23,42,.12)' : 'none',
+                }}>{l}</button>
+            ))}
+          </div>
           <select className="input" style={{ minWidth: 200 }} value={affaireFiltre}
             onChange={(e) => setAffaireFiltre(e.target.value)}>
             <option value="">Toutes les affaires</option>
@@ -147,7 +167,17 @@ export default function PlanningEtudesPage() {
         ))}
       </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
+      {vue !== 'tableau' && planning.data && (
+        <FenetreTemps
+          vue={vue}
+          lignes={lignes}
+          decalage={decalage}
+          setDecalage={setDecalage}
+          aujourdhui={planning.data.aujourdhui}
+        />
+      )}
+
+      <div className="card" style={{ marginTop: 16, display: vue === 'tableau' ? undefined : 'none' }}>
         {planning.isLoading && <p className="muted">Chargement…</p>}
         {planning.isError && <p className="muted">Planning indisponible.</p>}
         {planning.data && (
@@ -210,6 +240,287 @@ export default function PlanningEtudesPage() {
           d’étude se règle dans « Paramètres du devis ».
         </p>
       </div>
+    </div>
+  );
+}
+
+/* ─────────── Vues à échelle de temps : Gantt, Calendrier, Charge ─────────── */
+
+const MOIS = ['janv.', 'févr.', 'mars', 'avril', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const d0 = (v: string) => new Date(`${v}T12:00:00`);
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** Les six jalons, avec leur teinte — la même dans le Gantt, le calendrier et la légende. */
+const JALONS = [
+  { k: 'date_limite_remise', l: 'Date limite (client)', c: '#f97316' },
+  { k: 'date_retour_effectif', l: 'Retour effectif', c: '#16a34a' },
+  { k: 'date_debut_etudes', l: 'Début études', c: '#2563eb' },
+  { k: 'date_fin_etudes', l: 'Fin études', c: '#a855f7' },
+  { k: 'date_debut_travaux', l: 'Début travaux', c: '#0ea5e9' },
+  { k: 'date_fin_travaux', l: 'Fin travaux', c: '#059669' },
+] as const;
+
+/**
+ * Cadre commun aux vues datées : une fenêtre de quatre mois qu'on fait défiler, et la même
+ * échelle pour tout le monde — deux vues qui ne partagent pas leur échelle ne se comparent pas.
+ */
+function FenetreTemps({ vue, lignes, decalage, setDecalage, aujourdhui }: {
+  vue: Vue; lignes: AffairePlanning[]; decalage: number;
+  setDecalage: (n: number) => void; aujourdhui: string;
+}) {
+  const debut = useMemo(() => {
+    const d = d0(aujourdhui);
+    return new Date(d.getFullYear(), d.getMonth() + decalage, 1);
+  }, [aujourdhui, decalage]);
+  const nbMois = vue === 'calendrier' ? 1 : 4;
+  const fin = useMemo(
+    () => new Date(debut.getFullYear(), debut.getMonth() + nbMois, 1),
+    [debut, nbMois],
+  );
+  const titre = vue === 'calendrier'
+    ? `${MOIS[debut.getMonth()]} ${debut.getFullYear()}`
+    : `${MOIS[debut.getMonth()]} ${debut.getFullYear()} — ${MOIS[(debut.getMonth() + nbMois - 1) % 12]} ${new Date(debut.getFullYear(), debut.getMonth() + nbMois - 1, 1).getFullYear()}`;
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <button type="button" className="btn-secondary" style={{ padding: '2px 10px' }}
+          onClick={() => setDecalage(decalage - 1)}>‹</button>
+        <strong style={{ fontSize: 13 }}>{titre}</strong>
+        <button type="button" className="btn-secondary" style={{ padding: '2px 10px' }}
+          onClick={() => setDecalage(decalage + 1)}>›</button>
+        {decalage !== 0 && (
+          <button type="button" className="btn-ghost" style={{ fontSize: 11 }}
+            onClick={() => setDecalage(0)}>Aujourd’hui</button>
+        )}
+      </div>
+
+      {vue === 'gantt' && <Gantt lignes={lignes} debut={debut} fin={fin} aujourdhui={aujourdhui} />}
+      {vue === 'calendrier' && <Calendrier lignes={lignes} mois={debut} aujourdhui={aujourdhui} />}
+      {vue === 'charge' && <Charge lignes={lignes} debut={debut} fin={fin} aujourdhui={aujourdhui} />}
+
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 12, fontSize: 11 }} className="muted">
+        {(vue === 'calendrier' ? JALONS : [
+          { l: 'Période d’études', c: '#2563eb' }, { l: 'Période de réalisation', c: '#16a34a' },
+        ]).map((j) => (
+          <span key={j.l} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: j.c }} />{j.l}
+          </span>
+        ))}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 2, height: 11, background: '#dc2626' }} />Aujourd’hui
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Barre positionnée dans la fenêtre, en pourcentage — indépendante de la largeur de l'écran. */
+function barre(de: string | null, a: string | null, debut: Date, fin: Date) {
+  if (!de && !a) return null;
+  const d = d0(de ?? a!).getTime();
+  const f = d0(a ?? de!).getTime();
+  const t0 = debut.getTime();
+  const t1 = fin.getTime();
+  if (f < t0 || d > t1) return null; // hors fenêtre
+  const gauche = Math.max(0, ((d - t0) / (t1 - t0)) * 100);
+  const droite = Math.min(100, ((f - t0) / (t1 - t0)) * 100);
+  return { gauche, largeur: Math.max(1.2, droite - gauche) };
+}
+
+function TraitAujourdhui({ debut, fin, aujourdhui }: { debut: Date; fin: Date; aujourdhui: string }) {
+  const p = ((d0(aujourdhui).getTime() - debut.getTime()) / (fin.getTime() - debut.getTime())) * 100;
+  if (p < 0 || p > 100) return null;
+  return (
+    <div style={{ position: 'absolute', left: `${p}%`, top: 0, bottom: 0, width: 2, background: '#dc2626', zIndex: 1 }} />
+  );
+}
+
+/** En-tête de mois, commun au Gantt et à la charge. */
+function EnTeteMois({ debut, fin }: { debut: Date; fin: Date }) {
+  const mois: Date[] = [];
+  for (let d = new Date(debut); d < fin; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) mois.push(d);
+  return (
+    <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+      {mois.map((m) => (
+        <div key={m.toISOString()} style={{
+          flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600, padding: '4px 0', color: '#64748b',
+        }}>
+          {MOIS[m.getMonth()]} <span style={{ fontWeight: 400 }}>{m.getFullYear()}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Gantt({ lignes, debut, fin, aujourdhui }: {
+  lignes: AffairePlanning[]; debut: Date; fin: Date; aujourdhui: string;
+}) {
+  const visibles = lignes.filter((a) =>
+    barre(a.date_debut_etudes, a.date_fin_etudes, debut, fin) ||
+    barre(a.date_debut_travaux, a.date_fin_travaux, debut, fin));
+  if (visibles.length === 0) {
+    return <p className="muted">Aucune affaire jalonnée sur cette période. Renseignez les dates sur la fiche de l’affaire.</p>;
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex' }}>
+        <div style={{ width: 260, flexShrink: 0 }} />
+        <div style={{ flex: 1 }}><EnTeteMois debut={debut} fin={fin} /></div>
+      </div>
+      {visibles.map((a) => {
+        const etu = barre(a.date_debut_etudes, a.date_fin_etudes, debut, fin);
+        const tra = barre(a.date_debut_travaux, a.date_fin_travaux, debut, fin);
+        return (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #f1f5f9' }}>
+            <div style={{ width: 260, flexShrink: 0, padding: '7px 8px 7px 0', fontSize: 12 }}>
+              <Link href={`/estimating/${a.id}`} className="link">
+                <span className="code-cell">{a.code}</span> {a.name}
+              </Link>
+            </div>
+            <div style={{ flex: 1, position: 'relative', height: 30 }}>
+              <TraitAujourdhui debut={debut} fin={fin} aujourdhui={aujourdhui} />
+              {etu && (
+                <div title={`Études : ${jour(a.date_debut_etudes)} → ${jour(a.date_fin_etudes)}`}
+                  style={{
+                    position: 'absolute', left: `${etu.gauche}%`, width: `${etu.largeur}%`,
+                    top: 5, height: 9, borderRadius: 5, background: '#bfdbfe', border: '1px solid #2563eb',
+                  }} />
+              )}
+              {tra && (
+                <div title={`Travaux : ${jour(a.date_debut_travaux)} → ${jour(a.date_fin_travaux)}`}
+                  style={{
+                    position: 'absolute', left: `${tra.gauche}%`, width: `${tra.largeur}%`,
+                    top: 17, height: 9, borderRadius: 5, background: '#bbf7d0', border: '1px solid #16a34a',
+                  }} />
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Calendrier({ lignes, mois, aujourdhui }: {
+  lignes: AffairePlanning[]; mois: Date; aujourdhui: string;
+}) {
+  // Les jalons du mois, rangés par jour : un même jour peut en porter plusieurs.
+  const parJour = new Map<string, { l: string; c: string; code: string }[]>();
+  for (const a of lignes) {
+    for (const j of JALONS) {
+      const v = a[j.k];
+      if (!v) continue;
+      const d = d0(v);
+      if (d.getMonth() !== mois.getMonth() || d.getFullYear() !== mois.getFullYear()) continue;
+      const arr = parJour.get(v) ?? [];
+      arr.push({ l: j.l, c: j.c, code: a.code });
+      parJour.set(v, arr);
+    }
+  }
+  const premier = new Date(mois.getFullYear(), mois.getMonth(), 1);
+  // Semaine commençant le lundi (getDay : 0 = dimanche).
+  const decalageLundi = (premier.getDay() + 6) % 7;
+  const nbJours = new Date(mois.getFullYear(), mois.getMonth() + 1, 0).getDate();
+  const cases: (Date | null)[] = [
+    ...Array.from({ length: decalageLundi }, () => null),
+    ...Array.from({ length: nbJours }, (_, i) => new Date(mois.getFullYear(), mois.getMonth(), i + 1)),
+  ];
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, background: 'var(--border)', border: '1px solid var(--border)' }}>
+        {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
+          <div key={d} style={{ background: '#f8fafc', padding: '5px 6px', fontSize: 11, fontWeight: 600, color: '#64748b', textAlign: 'center' }}>{d}</div>
+        ))}
+        {cases.map((d, i) => {
+          const k = d ? iso(d) : null;
+          const evts = k ? parJour.get(k) ?? [] : [];
+          const cejour = k === aujourdhui;
+          return (
+            <div key={i} style={{
+              background: d ? (cejour ? '#fff7ed' : '#fff') : '#f8fafc',
+              minHeight: 84, padding: '4px 5px',
+            }}>
+              {d && (
+                <div style={{ fontSize: 11, fontWeight: cejour ? 700 : 500, color: cejour ? '#c2410c' : '#64748b' }}>
+                  {d.getDate()}
+                </div>
+              )}
+              {evts.map((e, n) => (
+                <div key={n} title={`${e.code} — ${e.l}`} style={{
+                  marginTop: 2, padding: '1px 4px', borderRadius: 3, fontSize: 10,
+                  background: `${e.c}1a`, color: e.c, border: `1px solid ${e.c}55`,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {e.code} — {e.l}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Charge({ lignes, debut, fin, aujourdhui }: {
+  lignes: AffairePlanning[]; debut: Date; fin: Date; aujourdhui: string;
+}) {
+  // Une ligne par responsable : qui porte quoi, et quand. « Non attribué » se voit aussi — c'est
+  // souvent là que se cachent les affaires oubliées.
+  const parResp = new Map<string, AffairePlanning[]>();
+  for (const a of lignes) {
+    const k = a.responsable ?? '';
+    parResp.set(k, [...(parResp.get(k) ?? []), a]);
+  }
+  const groupes = [...parResp.entries()].sort((a, b) => (a[0] || 'zz').localeCompare(b[0] || 'zz'));
+
+  return (
+    <div>
+      <div style={{ display: 'flex' }}>
+        <div style={{ width: 220, flexShrink: 0 }} />
+        <div style={{ flex: 1 }}><EnTeteMois debut={debut} fin={fin} /></div>
+      </div>
+      {groupes.map(([resp, aff]) => (
+        <div key={resp || 'na'} style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid #f1f5f9' }}>
+          <div style={{ width: 220, flexShrink: 0, padding: '8px 8px 8px 0' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: resp ? '#334155' : '#94a3b8' }}>
+              {resp || 'Non attribué'}
+            </div>
+            <div className="muted" style={{ fontSize: 10.5 }}>{aff.length} affaire(s)</div>
+          </div>
+          <div style={{ flex: 1, position: 'relative', padding: '6px 0' }}>
+            <TraitAujourdhui debut={debut} fin={fin} aujourdhui={aujourdhui} />
+            {aff.map((a) => {
+              const etu = barre(a.date_debut_etudes, a.date_fin_etudes, debut, fin);
+              const tra = barre(a.date_debut_travaux, a.date_fin_travaux, debut, fin);
+              if (!etu && !tra) return null;
+              return (
+                <div key={a.id} style={{ position: 'relative', height: 16 }}>
+                  {etu && (
+                    <div title={`${a.code} — études`} style={{
+                      position: 'absolute', left: `${etu.gauche}%`, width: `${etu.largeur}%`,
+                      top: 3, height: 10, borderRadius: 5, background: '#bfdbfe', border: '1px solid #2563eb',
+                      fontSize: 9, color: '#1d4ed8', overflow: 'hidden', paddingLeft: 3, lineHeight: '9px',
+                    }}>{a.code}</div>
+                  )}
+                  {tra && (
+                    <div title={`${a.code} — travaux`} style={{
+                      position: 'absolute', left: `${tra.gauche}%`, width: `${tra.largeur}%`,
+                      top: 3, height: 10, borderRadius: 5, background: '#bbf7d0', border: '1px solid #16a34a',
+                    }} />
+                  )}
+                </div>
+              );
+            })}
+            {aff.every((a) => !barre(a.date_debut_etudes, a.date_fin_etudes, debut, fin)
+              && !barre(a.date_debut_travaux, a.date_fin_travaux, debut, fin)) && (
+              <div className="muted" style={{ fontSize: 11, padding: '4px 0' }}>Aucune période sur ce trimestre</div>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
