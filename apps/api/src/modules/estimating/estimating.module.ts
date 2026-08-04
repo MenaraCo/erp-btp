@@ -15,7 +15,7 @@ import { DevisController } from './devis.controller';
 import { VenteService } from './vente.service';
 import { VenteController } from './vente.controller';
 import { WorkflowService } from './workflow.service';
-import { WorkflowController } from './workflow.controller';
+import { WorkflowController, ControlesController } from './workflow.controller';
 import { DebourseTypeService } from './debourse-type.service';
 import { DebourseTypeController } from './debourse-type.controller';
 import { DevisPdfService } from './devis-pdf.service';
@@ -57,6 +57,7 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     DevisController,
     VenteController,
     WorkflowController,
+    ControlesController,
     DevisPdfController,
     ImportController,
   ],

@@ -18,6 +18,13 @@ import {
 } from './devis-workflow';
 import { deriveAffaireStatus } from './affaire-derived-status';
 import { VenteService } from './vente.service';
+import {
+  compterControles,
+  Controle,
+  ControleLine,
+  controlerDevis,
+} from './devis-controles';
+import { computeLineNumbers, NumberingLine } from './devis-numbering';
 
 export interface TransferCheck {
   status: DevisStatus;
@@ -32,6 +39,83 @@ export class WorkflowService {
     private readonly context: TenantContext,
     private readonly vente: VenteService,
   ) {}
+
+  /**
+   * Contrôles de cohérence d'une version : ce qui manque ou cloche, ligne par ligne. Lus en
+   * continu par le panneau de l'écran, pas seulement au moment de transférer — un oubli se corrige
+   * mieux pendant l'étude qu'une fois le devis parti.
+   */
+  controles(versionId: string): Promise<{ controles: Controle[]; compte: Record<string, number> }> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const version = await em.query(
+        `SELECT dv.id, d.affaire_id
+           FROM devis_version dv JOIN devis d ON d.id = dv.devis_id
+          WHERE dv.id = $1`,
+        [versionId],
+      );
+      if (version.length === 0) {
+        throw new NotFoundException(`Unknown version "${versionId}"`);
+      }
+
+      const rows = await em.query(
+        `SELECT dl.id, dl.parent_line_id, dl.type, dl.code, dl.designation, dl.unit, dl.quantity,
+                dl.pu, dl.vendable, dl.code_analytique, dl.source_ouvrage_id, dl.sort_order,
+                dl.pu_vente_force,
+                dl.created_at, dl.num_custom
+           FROM devis_line dl
+          WHERE dl.devis_version_id = $1
+          ORDER BY dl.sort_order ASC, dl.created_at ASC`,
+        [versionId],
+      );
+      // La numérotation hiérarchique est la même que celle des écrans : le contrôle cite « 1.2.1 ».
+      const numeros = computeLineNumbers(rows as NumberingLine[]);
+      const numeroDe = (id: string | null) => (id ? numeros.get(id) ?? null : null);
+      const lines: ControleLine[] = rows.map((r: Record<string, unknown>) => ({
+        id: r.id as string,
+        parentLineId: (r.parent_line_id as string | null) ?? null,
+        type: r.type as string,
+        numero: numeros.get(r.id as string) ?? (r.num_custom as string | null),
+        parentNumero: numeroDe((r.parent_line_id as string | null) ?? null),
+        code: (r.code as string | null) ?? null,
+        designation: (r.designation as string) ?? '',
+        unit: (r.unit as string | null) ?? null,
+        quantity: (r.quantity as string | null) ?? null,
+        pu: (r.pu as string | null) ?? null,
+        vendable: (r.vendable as boolean | null) !== false,
+        codeAnalytique: (r.code_analytique as string | null) ?? null,
+        sourceOuvrageId: (r.source_ouvrage_id as string | null) ?? null,
+        puVenteForce: (r.pu_vente_force as boolean | null) === true,
+      }));
+
+      const sheet = await em.query(
+        `SELECT 1 FROM sale_sheet WHERE devis_version_id = $1`,
+        [versionId],
+      );
+      const client = await em.query(
+        `SELECT a.client_id FROM affaire a WHERE a.id = $1`,
+        [version[0].affaire_id],
+      );
+
+      // Marge et total viennent du moteur : un contrôle ne recalcule jamais un prix.
+      let margeNette: number | null = null;
+      let totalPvHt: number | null = null;
+      if (sheet.length > 0) {
+        const fv = await this.vente.computeForVersion(versionId);
+        margeNette = Number(fv.margeNette ?? 0);
+        totalPvHt = Number(fv.totalPvHt ?? 0);
+      }
+
+      const controles = controlerDevis({
+        lines,
+        coefficientsConfigures: sheet.length > 0,
+        margeNette,
+        totalPvHt,
+        clientRenseigne: Boolean(client[0]?.client_id),
+      });
+      return { controles, compte: compterControles(controles) };
+    });
+  }
 
   /** Moves a devis to a new status, enforcing the state machine; recomputes the affaire status. */
   transition(devisId: string, to: string) {

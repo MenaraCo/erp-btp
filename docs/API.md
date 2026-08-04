@@ -66,6 +66,7 @@
 | GET | `/versions/:versionId/sale-sheet/config` | `estimating.devis.read` | Paramétrage mémorisé : natures, `types` (types de déboursé utilisables ici, avec leurs taux sur CE devis), arrondi, PV imposé, remise, TVA, frais annexes. Un devis chiffré avant les types paramétrables retombe sur les taux de la nature de rattachement — ouvrir puis enregistrer ne perd rien |
 | GET | `/versions/:versionId/devis.pdf` | `estimating.devis.read` | PDF du devis (`application/pdf`) |
 | POST | `/affaires/:affaireId/transition` | `estimating.devis.write` | Workflow (`{ to }`) ; transition interdite → 409 |
+| GET | `/versions/:versionId/controles` | `estimating.devis.read` | Contrôles de cohérence du devis : unité, quantité, prix vide/nul/négatif, code analytique manquant, ouvrage sans sous-détail (sauf prix forcé ou origine bibliothèque), coefficients absents, marge négative, client absent. Renvoie `{ controles: [{ code, niveau, message, lineId, ligne }], compte }` — `niveau` = `bloquant` / `avertissement` / `info` |
 | GET | `/affaires/:affaireId/transfer-check` | `estimating.devis.read` | Transférable ? + alertes |
 
 ## Gestion financière — tableau de bord analytique (capacité `financial.dashboard`)

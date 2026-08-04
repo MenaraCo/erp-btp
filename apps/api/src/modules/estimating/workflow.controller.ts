@@ -24,3 +24,19 @@ export class WorkflowController {
     return this.workflow.transferCheck(devisId);
   }
 }
+
+/**
+ * Contrôles de cohérence : montés sur la VERSION, c'est elle qui porte les lignes et la feuille
+ * de vente. Un contrôleur à part pour ne pas les ranger sous le préfixe `devis/:devisId`.
+ */
+@Controller('versions/:versionId')
+export class ControlesController {
+  constructor(private readonly workflow: WorkflowService) {}
+
+  @Get('controles')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.read')
+  controles(@Param('versionId') versionId: string) {
+    return this.workflow.controles(versionId);
+  }
+}

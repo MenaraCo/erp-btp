@@ -13,6 +13,7 @@ import { useWorkspace } from '@/lib/workspace';
 import { Montage, MontageLine } from './Montage';
 import { LibraryDrawer } from './LibraryDrawer';
 import { StatusControl } from './StatusControl';
+import { ControlesPanel } from './ControlesPanel';
 
 const round = (v: number, n: number) => Number((Number(v) || 0).toFixed(n));
 
@@ -930,6 +931,9 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
               </button>
             ))}
             <div style={{ flex: 1 }} />
+            {/* Contrôles : visibles sur TOUS les onglets — un oubli se corrige à n'importe quel
+                moment de la vie du devis, pas seulement pendant le montage. */}
+            {!isPanel2 && <ControlesPanel versionId={versionId} />}
             {(tab === 'etude' || tab === 'client') && (
               <>
                 {!isSplitOpen && !libraryOpen && (
