@@ -68,6 +68,36 @@ export interface DevisLinePatch {
   conditionnement?: string | null;
 }
 
+/** Une chaîne vide venue d'un champ date de formulaire vaut « pas de date », pas « date invalide ». */
+const vide = (v: string | null | undefined) => (v == null || v.trim() === '' ? null : v);
+
+/** Colonnes `date` de l'affaire, à rendre en 'YYYY-MM-DD'. */
+const DATES_AFFAIRE = [
+  'date_limite_remise', 'date_retour_effectif', 'date_debut_etudes', 'date_fin_etudes',
+  'date_debut_travaux', 'date_fin_travaux',
+] as const;
+
+/**
+ * Une colonne `date` revient du pilote en objet Date à minuit LOCAL : la sérialiser en ISO la
+ * décale d'un jour dès qu'on n'est pas sur UTC (01/07 devient 30/06T22:00Z). On la rend donc
+ * telle qu'elle a été saisie, sans heure ni fuseau.
+ */
+function jourLocal(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.slice(0, 10);
+  const d = v as Date;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Affaire prête à sortir de l'API : ses dates en 'YYYY-MM-DD'. */
+function affaireDto(row: Record<string, unknown> | undefined) {
+  if (!row) return row;
+  const out = { ...row };
+  for (const k of DATES_AFFAIRE) out[k] = jourLocal(row[k]);
+  return out;
+}
+
 export interface AffairePatch {
   name?: string;
   clientId?: string | null;
@@ -76,6 +106,15 @@ export interface AffairePatch {
   budgetObjectif?: number | string | null;
   responsable?: string | null;
   notes?: string | null;
+  /** Jalons de l'étude (format 'YYYY-MM-DD' ; null efface la date). */
+  dateLimiteRemise?: string | null;
+  dateRetourEffectif?: string | null;
+  dateDebutEtudes?: string | null;
+  dateFinEtudes?: string | null;
+  /** Réalisation, renseignée quand l'affaire est gagnée. */
+  conducteur?: string | null;
+  dateDebutTravaux?: string | null;
+  dateFinTravaux?: string | null;
 }
 
 export interface DevisPatch {
@@ -298,7 +337,18 @@ export class DevisService {
           WHERE d.affaire_id = $1 ORDER BY v.version_no ASC`,
         [affaireId],
       );
-      return { affaire, devis, versions };
+      // Chantier d'exécution issu de cette affaire (via les marchés acceptés) : la fiche affaire
+      // doit y mener, et c'est lui qui porte le coût réel — jamais une saisie manuelle, qui
+      // divergerait aussitôt du terrain.
+      const chantier = await em.query(
+        `SELECT DISTINCT c.id, c.code, c.name
+           FROM marche m JOIN chantier c ON c.id = m.chantier_id
+          WHERE m.affaire_id = $1
+          ORDER BY c.code
+          LIMIT 1`,
+        [affaireId],
+      );
+      return { affaire: affaireDto(affaire), devis, versions, chantier: chantier[0] ?? null };
     });
 
     const devis = [];
@@ -327,7 +377,38 @@ export class DevisService {
       }
       devis.push({ ...d, versions: dv.sort((a, b) => a.version_no - b.version_no), kpis });
     }
-    return { affaire: base.affaire, devis, totals };
+
+    // Coût réel : ce que le chantier a réellement dépensé (factures fournisseur + pointages).
+    // Absent tant qu'aucun chantier n'existe — on n'invente pas un zéro qui se lirait « gratuit ».
+    let reel: { coutReel: string; margeReelle: string } | null = null;
+    const chantier = (base as { chantier: { id: string } | null }).chantier;
+    if (chantier) {
+      // Même définition que le suivi de chantier (factures fournisseur + pointages). Requête
+      // directe plutôt qu'un appel à AnalyticsService : le suivi de chantier dépend déjà de
+      // l'étude de prix, l'importer ici créerait un cycle de modules.
+      const tenantId = this.context.requireTenantId();
+      const realise = await runInTenant(this.dataSource, tenantId, async (em) => {
+        const achats = (
+          await em.query(
+            `SELECT COALESCE(SUM(amount_ht), 0)::numeric(16,2) AS t
+               FROM supplier_invoice WHERE chantier_id = $1`,
+            [chantier.id],
+          )
+        )[0].t;
+        const mo = (
+          await em.query(
+            `SELECT COALESCE(SUM(cost), 0)::numeric(16,2) AS t FROM timesheet WHERE chantier_id = $1`,
+            [chantier.id],
+          )
+        )[0].t;
+        return Number(achats) + Number(mo);
+      });
+      reel = {
+        coutReel: realise.toFixed(2),
+        margeReelle: (totals.pvHt - realise).toFixed(2),
+      };
+    }
+    return { affaire: base.affaire, devis, totals, chantier, reel };
   }
 
   /** Aggregated études stats for the dashboard (synthèse de toutes les études). */
@@ -543,7 +624,7 @@ export class DevisService {
     });
   }
 
-  /** Updates affaire metadata (lieu d'exécution structuré, budget, responsable, notes…). */
+  /** Updates affaire metadata (lieu d'exécution structuré, budget, responsable, dates, notes…). */
   updateAffaire(affaireId: string, patch: AffairePatch) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
@@ -560,6 +641,13 @@ export class DevisService {
            budget_objectif = $6,
            responsable = $7,
            notes = $8,
+           date_limite_remise   = $9,
+           date_retour_effectif = $10,
+           date_debut_etudes    = $11,
+           date_fin_etudes      = $12,
+           conducteur           = $13,
+           date_debut_travaux   = $14,
+           date_fin_travaux     = $15,
            updated_at = now()
          WHERE id = $1`,
         [
@@ -571,9 +659,16 @@ export class DevisService {
           patch.budgetObjectif != null ? String(patch.budgetObjectif) : null,
           patch.responsable ?? null,
           patch.notes ?? null,
+          vide(patch.dateLimiteRemise),
+          vide(patch.dateRetourEffectif),
+          vide(patch.dateDebutEtudes),
+          vide(patch.dateFinEtudes),
+          patch.conducteur ?? null,
+          vide(patch.dateDebutTravaux),
+          vide(patch.dateFinTravaux),
         ],
       );
-      return (await em.query(`SELECT * FROM affaire WHERE id = $1`, [affaireId]))[0];
+      return affaireDto((await em.query(`SELECT * FROM affaire WHERE id = $1`, [affaireId]))[0]);
     });
   }
 

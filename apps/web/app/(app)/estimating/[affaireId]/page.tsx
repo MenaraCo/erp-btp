@@ -25,9 +25,16 @@ interface AffaireDetail {
   affaire: {
     id: string; code: string; name: string; status: string; moa: string | null;
     lieu_execution: Lieu | null; budget_objectif: string | null; responsable: string | null; notes: string | null;
+    date_limite_remise: string | null; date_retour_effectif: string | null;
+    date_debut_etudes: string | null; date_fin_etudes: string | null;
+    conducteur: string | null; date_debut_travaux: string | null; date_fin_travaux: string | null;
   };
   devis: DevisRow[];
   totals: Kpis;
+  /** Chantier né de cette affaire, s'il existe : la fiche doit y mener. */
+  chantier: { id: string; code: string; name: string } | null;
+  /** Réel constaté sur ce chantier. Absent tant qu'il n'y a pas de chantier. */
+  reel: { coutReel: string; margeReelle: string } | null;
 }
 
 /** Libellés du statut DÉRIVÉ de l'affaire (calculé depuis ses devis). */
@@ -56,7 +63,13 @@ export default function AffaireDetailPage() {
   });
 
   // --- métadonnées affaire ---
-  const [meta, setMeta] = useState({ responsable: '', budget: '', adresse: '', cp: '', ville: '', notes: '' });
+  const [meta, setMeta] = useState({
+    responsable: '', budget: '', adresse: '', cp: '', ville: '', notes: '',
+    // Jalons de l'étude puis de la réalisation — portés par l'AFFAIRE : elle a plusieurs devis
+    // (un par lot) mais une seule date de remise et un seul démarrage de travaux.
+    dateLimiteRemise: '', dateRetourEffectif: '', dateDebutEtudes: '', dateFinEtudes: '',
+    conducteur: '', dateDebutTravaux: '', dateFinTravaux: '',
+  });
   const metaInit = useRef<string | null>(null);
   useEffect(() => {
     const a = detail.data?.affaire;
@@ -66,6 +79,10 @@ export default function AffaireDetailPage() {
     setMeta({
       responsable: a.responsable ?? '', budget: a.budget_objectif ?? '',
       adresse: l.adresse ?? '', cp: l.code_postal ?? '', ville: l.ville ?? '', notes: a.notes ?? '',
+      dateLimiteRemise: a.date_limite_remise ?? '', dateRetourEffectif: a.date_retour_effectif ?? '',
+      dateDebutEtudes: a.date_debut_etudes ?? '', dateFinEtudes: a.date_fin_etudes ?? '',
+      conducteur: a.conducteur ?? '', dateDebutTravaux: a.date_debut_travaux ?? '',
+      dateFinTravaux: a.date_fin_travaux ?? '',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data]);
@@ -78,6 +95,13 @@ export default function AffaireDetailPage() {
         budgetObjectif: meta.budget || null,
         lieuExecution: { adresse: meta.adresse, code_postal: meta.cp, ville: meta.ville, pays: 'FR' },
         notes: meta.notes || null,
+        dateLimiteRemise: meta.dateLimiteRemise,
+        dateRetourEffectif: meta.dateRetourEffectif,
+        dateDebutEtudes: meta.dateDebutEtudes,
+        dateFinEtudes: meta.dateFinEtudes,
+        conducteur: meta.conducteur || null,
+        dateDebutTravaux: meta.dateDebutTravaux,
+        dateFinTravaux: meta.dateFinTravaux,
       },
       token,
     }),
@@ -128,6 +152,37 @@ export default function AffaireDetailPage() {
               {marge != null && <p className="muted" style={{ margin: 0 }}>{marge.toFixed(1)} %</p>}
             </div>
             <div className="card"><h2>Budget objectif</h2><div className="stat">{a.budget_objectif ? euro(a.budget_objectif) : '—'}</div></div>
+          </div>
+
+          {/* Le prévu face au réel : ce qu'on a budgété, ce qu'on vend, ce que ça coûte vraiment.
+              Le réel ne s'affiche que si un chantier existe — un coût à 0 se lirait « gratuit ». */}
+          <Comparatif
+            budget={a.budget_objectif}
+            pvHt={totals?.pvHt}
+            reel={detail.data?.reel ?? null}
+            chantier={detail.data?.chantier ?? null}
+          />
+
+          {/* Deux blocs à parts égales : la grille de KPI les écraserait sur une colonne étroite. */}
+          <div style={{ display: 'flex', gap: 12, marginTop: 16, flexWrap: 'wrap', alignItems: 'stretch' }}>
+            <Jalons
+              titre="Planning de l’étude"
+              sousTitre={meta.responsable ? `Responsable : ${meta.responsable}` : 'Aucun responsable désigné'}
+              dates={[
+                { l: 'Date limite (client)', v: a.date_limite_remise, ton: 'limite' },
+                { l: 'Retour effectif', v: a.date_retour_effectif, ton: 'ok' },
+                { l: 'Début des études', v: a.date_debut_etudes, ton: 'neutre' },
+                { l: 'Fin des études', v: a.date_fin_etudes, ton: 'neutre' },
+              ]}
+            />
+            <Jalons
+              titre="Réalisation de l’opération"
+              sousTitre={meta.conducteur ? `Conducteur : ${meta.conducteur}` : 'Si l’affaire est gagnée'}
+              dates={[
+                { l: 'Début des travaux', v: a.date_debut_travaux, ton: 'ok' },
+                { l: 'Fin des travaux', v: a.date_fin_travaux, ton: 'ok' },
+              ]}
+            />
           </div>
 
           <div className="card" style={{ marginTop: 16 }}>
@@ -206,10 +261,151 @@ export default function AffaireDetailPage() {
               <Field label="Code postal"><input style={{ width: 80 }} value={meta.cp} onChange={(e) => setMeta({ ...meta, cp: e.target.value })} /></Field>
               <Field label="Ville"><input value={meta.ville} onChange={(e) => setMeta({ ...meta, ville: e.target.value })} /></Field>
               <Field label="Notes"><input style={{ width: 220 }} value={meta.notes} onChange={(e) => setMeta({ ...meta, notes: e.target.value })} /></Field>
+
+              <div style={{ flexBasis: '100%', height: 0 }} />
+              <span className="form-section-title" style={{ width: '100%', margin: '6px 0 0' }}>Jalons de l’étude</span>
+              <Field label="Date limite (client)">
+                <input type="date" value={meta.dateLimiteRemise} onChange={(e) => setMeta({ ...meta, dateLimiteRemise: e.target.value })} />
+              </Field>
+              <Field label="Retour effectif">
+                <input type="date" value={meta.dateRetourEffectif} onChange={(e) => setMeta({ ...meta, dateRetourEffectif: e.target.value })} />
+              </Field>
+              <Field label="Début des études">
+                <input type="date" value={meta.dateDebutEtudes} onChange={(e) => setMeta({ ...meta, dateDebutEtudes: e.target.value })} />
+              </Field>
+              <Field label="Fin des études">
+                <input type="date" value={meta.dateFinEtudes} onChange={(e) => setMeta({ ...meta, dateFinEtudes: e.target.value })} />
+              </Field>
+
+              <div style={{ flexBasis: '100%', height: 0 }} />
+              <span className="form-section-title" style={{ width: '100%', margin: '6px 0 0' }}>Réalisation</span>
+              <Field label="Conducteur de travaux">
+                <input value={meta.conducteur} onChange={(e) => setMeta({ ...meta, conducteur: e.target.value })} />
+              </Field>
+              <Field label="Début des travaux">
+                <input type="date" value={meta.dateDebutTravaux} onChange={(e) => setMeta({ ...meta, dateDebutTravaux: e.target.value })} />
+              </Field>
+              <Field label="Fin des travaux">
+                <input type="date" value={meta.dateFinTravaux} onChange={(e) => setMeta({ ...meta, dateFinTravaux: e.target.value })} />
+              </Field>
+
               <button className="btn" type="submit" disabled={saveMeta.isPending}>Enregistrer</button>
             </form>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+/** Une date de jalon, ou un tiret quand elle n'est pas posée. */
+function jour(v: string | null | undefined): string {
+  if (!v) return '—';
+  const [y, m, d] = v.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+const TONS: Record<string, { bg: string; border: string; color: string }> = {
+  limite: { bg: '#fff7ed', border: '#fed7aa', color: '#c2410c' },
+  ok: { bg: '#f0fdf4', border: '#bbf7d0', color: '#15803d' },
+  neutre: { bg: '#f8fafc', border: '#e2e8f0', color: '#475569' },
+};
+
+/** Bloc de jalons : les dates d'une phase, lisibles d'un coup d'œil. */
+function Jalons({ titre, sousTitre, dates }: {
+  titre: string; sousTitre: string;
+  dates: { l: string; v: string | null; ton: keyof typeof TONS }[];
+}) {
+  return (
+    <div className="card" style={{ flex: '1 1 340px', margin: 0 }}>
+      <h2 style={{ margin: 0 }}>{titre}</h2>
+      <p className="muted" style={{ margin: '2px 0 10px', fontSize: 11 }}>{sousTitre}</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {dates.map((d) => {
+          const t = TONS[d.v ? d.ton : 'neutre'];
+          return (
+            <div key={d.l} style={{
+              flex: '1 1 150px', padding: '8px 10px', borderRadius: 8,
+              background: t.bg, border: `1px solid ${t.border}`,
+            }}>
+              <div style={{ fontSize: 10.5, color: t.color, fontWeight: 600 }}>{d.l}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: d.v ? '#1e293b' : '#94a3b8' }}>{jour(d.v)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Prévisionnel face au réel. Le budget objectif est ce qu'on s'est fixé, le CA devis ce qu'on
+ * vend, le coût réel ce que le chantier a consommé. La barre montre où en est la vente par
+ * rapport au budget.
+ */
+function Comparatif({ budget, pvHt, reel, chantier }: {
+  budget: string | null;
+  pvHt: string | number | undefined;
+  reel: { coutReel: string; margeReelle: string } | null;
+  chantier: { id: string; code: string; name: string } | null;
+}) {
+  const b = Number(budget) || 0;
+  const ca = Number(pvHt) || 0;
+  const pct = b > 0 ? (ca / b) * 100 : null;
+  const ecart = b > 0 ? ca - b : null;
+  const cases = [
+    { l: 'Budget prévu', v: b > 0 ? euro(b) : '—', sub: null as string | null, ton: 'neutre' },
+    {
+      l: 'CA devis (HT)', v: euro(ca),
+      sub: pct != null ? `${pct.toFixed(1)} % du budget` : null, ton: 'info',
+    },
+    {
+      l: 'Coût réel', v: reel ? euro(reel.coutReel) : 'Non renseigné',
+      sub: reel ? null : 'Aucun chantier lancé', ton: 'attention',
+    },
+    {
+      l: 'Marge réelle', v: reel ? euro(reel.margeReelle) : '—',
+      sub: reel && ca > 0 ? `${((Number(reel.margeReelle) / ca) * 100).toFixed(1)} %` : null, ton: 'ok',
+    },
+  ];
+  const teintes: Record<string, string> = {
+    neutre: '#f5f3ff', info: '#eff6ff', attention: '#fffbeb', ok: '#f0fdf4',
+  };
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <h2 style={{ margin: 0 }}>Comparatif prévisionnel / réel</h2>
+        {chantier && (
+          <Link href={`/chantiers/${chantier.id}`} className="btn-secondary" style={{ fontSize: 11, padding: '3px 10px' }}>
+            Chantier {chantier.code}
+          </Link>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {cases.map((c) => (
+          <div key={c.l} style={{
+            flex: '1 1 180px', padding: '10px 12px', borderRadius: 10,
+            background: teintes[c.ton], border: '1px solid var(--border)',
+          }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.03em', textTransform: 'uppercase', color: 'var(--muted)' }}>{c.l}</div>
+            <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{c.v}</div>
+            {c.sub && <div className="muted" style={{ fontSize: 11 }}>{c.sub}</div>}
+          </div>
+        ))}
+      </div>
+      {b > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ height: 8, borderRadius: 4, background: '#e2e8f0', overflow: 'hidden' }}>
+            <div style={{
+              width: `${Math.min(100, (ca / b) * 100)}%`, height: '100%',
+              background: ca > b ? '#f97316' : 'var(--primary)',
+            }} />
+          </div>
+          <div className="muted" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 3 }}>
+            <span>{ecart != null && `Écart : ${ecart >= 0 ? '+' : ''}${euro(ecart)}`}</span>
+            <span>Budget : {euro(b)}</span>
+          </div>
+        </div>
       )}
     </div>
   );
