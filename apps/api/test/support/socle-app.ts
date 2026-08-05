@@ -13,6 +13,7 @@ import { TenantMiddleware } from '../../src/core/tenancy/tenant.middleware';
 import { CatalogModule } from '../../src/core/catalog/catalog.module';
 import { EntitlementsModule } from '../../src/core/entitlements/entitlements.module';
 import { EntitlementsService } from '../../src/core/entitlements/entitlements.service';
+import { ActivityModule } from '../../src/core/activity/activity.module';
 import { RbacModule } from '../../src/core/rbac/rbac.module';
 import { RbacService } from '../../src/core/rbac/rbac.service';
 import { SubscriptionsModule } from '../../src/core/subscriptions/subscriptions.module';
@@ -33,6 +34,7 @@ import { createUser, activateModule } from './entitlements.helpers';
     TenancyModule,
     CatalogModule,
     EntitlementsModule,
+    ActivityModule,
     RbacModule,
     SubscriptionsModule,
     DirectoryModule,

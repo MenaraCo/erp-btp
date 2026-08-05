@@ -7,6 +7,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { ActivityService } from '../../core/activity/activity.service';
 import {
   DataGridQuery,
   PaginatedResult,
@@ -20,7 +21,7 @@ import {
 import { deriveAffaireStatus } from './affaire-derived-status';
 import { compterPlanning, evaluerDelai } from './planning-delai';
 import { computeLineNumbers, NumberingLine } from './devis-numbering';
-import { DevisStatus } from './devis-workflow';
+import { DEVIS_STATUS_LABELS, DevisStatus } from './devis-workflow';
 import { VenteService } from './vente.service';
 import { flattenOuvrageToResources, RawOuvrage } from './ouvrage-flatten';
 import { computeApproLine } from './appro-calc';
@@ -185,6 +186,7 @@ export class DevisService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
     private readonly vente: VenteService,
+    private readonly activity: ActivityService,
   ) {}
 
   /** Creates an affaire with its first (principal) devis and that devis's first version. */
@@ -213,6 +215,14 @@ export class DevisService {
           [tenantId, devis.id],
         )
       )[0];
+      // Dans la MÊME transaction que les insertions : une affaire qui n'a pas abouti ne laisse
+      // aucune ligne dans le fil.
+      await this.activity.log(em, {
+        entityType: 'affaire',
+        entityId: affaire.id,
+        action: 'creation',
+        label: `Affaire ${affaire.code} créée (${affaire.name})`,
+      });
       return { affaire, devis, version };
     });
   }
@@ -289,6 +299,12 @@ export class DevisService {
         )
       )[0];
       await this.recomputeAffaireStatus(em, affaireId);
+      await this.activity.log(em, {
+        entityType: 'devis',
+        entityId: devis.id,
+        action: 'creation',
+        label: `Devis ${devis.numero ?? devis.designation} créé (${affaire[0].code})`,
+      });
       return { devis, version };
     });
   }
@@ -519,10 +535,30 @@ export class DevisService {
   setDevisStatus(devisId: string, status: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const row = (await em.query(`SELECT id, affaire_id FROM devis WHERE id = $1`, [devisId]))[0];
+      const row = (
+        await em.query(
+          `SELECT d.id, d.affaire_id, d.status, d.numero, d.designation, a.name AS affaire_name
+             FROM devis d JOIN affaire a ON a.id = d.affaire_id
+            WHERE d.id = $1`,
+          [devisId],
+        )
+      )[0];
       if (!row) throw new NotFoundException(`Unknown devis "${devisId}"`);
       await em.query(`UPDATE devis SET status = $1, updated_at = now() WHERE id = $2`, [status, devisId]);
       await this.recomputeAffaireStatus(em, row.affaire_id);
+      // Les boutons d'action rapide de la liste passent par ici, pas par la machine à états : le
+      // fil doit les entendre AUSSI, sans quoi il manquerait la voie la plus empruntée de l'app.
+      if (status !== row.status) {
+        await this.activity.log(em, {
+          entityType: 'devis',
+          entityId: devisId,
+          action: 'statut',
+          label:
+            `${row.numero ?? row.designation} → ${DEVIS_STATUS_LABELS[status as DevisStatus] ?? status}` +
+            ` (${row.affaire_name})`,
+          detail: { de: row.status, vers: status },
+        });
+      }
       return { id: devisId, status };
     });
   }
@@ -531,7 +567,14 @@ export class DevisService {
   async duplicateDevis(devisId: string) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const src = (await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]))[0];
+      const src = (
+        await em.query(
+          `SELECT d.*, a.code AS affaire_code
+             FROM devis d JOIN affaire a ON a.id = d.affaire_id
+            WHERE d.id = $1`,
+          [devisId],
+        )
+      )[0];
       if (!src) throw new NotFoundException(`Unknown devis "${devisId}"`);
 
       const newDevis = (await em.query(
@@ -541,6 +584,14 @@ export class DevisService {
          RETURNING id`,
         [tenantId, src.affaire_id, `${src.designation} (copie)`, src.type],
       ))[0];
+      // Dupliquer, c'est créer un devis : le fil ne doit pas dépendre du bouton emprunté. Journalisé
+      // ici, avant les deux sorties possibles de la méthode.
+      await this.activity.log(em, {
+        entityType: 'devis',
+        entityId: newDevis.id,
+        action: 'creation',
+        label: `Devis ${src.designation} (copie) créé (${src.affaire_code})`,
+      });
 
       const latestV = (await em.query(
         `SELECT * FROM devis_version WHERE devis_id = $1 ORDER BY version_no DESC LIMIT 1`,
@@ -629,7 +680,7 @@ export class DevisService {
   updateAffaire(affaireId: string, patch: AffairePatch) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const exists = await em.query(`SELECT id FROM affaire WHERE id = $1`, [affaireId]);
+      const exists = await em.query(`SELECT id, code, name FROM affaire WHERE id = $1`, [affaireId]);
       if (exists.length === 0) {
         throw new NotFoundException(`Unknown affaire "${affaireId}"`);
       }
@@ -669,6 +720,12 @@ export class DevisService {
           vide(patch.dateFinTravaux),
         ],
       );
+      await this.activity.log(em, {
+        entityType: 'affaire',
+        entityId: affaireId,
+        action: 'modification',
+        label: `Affaire ${exists[0].code} modifiée (${patch.name ?? exists[0].name})`,
+      });
       return affaireDto((await em.query(`SELECT * FROM affaire WHERE id = $1`, [affaireId]))[0]);
     });
   }
@@ -677,7 +734,10 @@ export class DevisService {
   updateDevis(devisId: string, patch: DevisPatch) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const exists = await em.query(`SELECT id, affaire_id FROM devis WHERE id = $1`, [devisId]);
+      const exists = await em.query(
+        `SELECT id, affaire_id, numero, designation FROM devis WHERE id = $1`,
+        [devisId],
+      );
       if (exists.length === 0) {
         throw new NotFoundException(`Unknown devis "${devisId}"`);
       }
@@ -700,6 +760,12 @@ export class DevisService {
         await this.recomputeAffaireStatus(em, old_affaire_id);
         await this.recomputeAffaireStatus(em, patch.affaire_id);
       }
+      await this.activity.log(em, {
+        entityType: 'devis',
+        entityId: devisId,
+        action: 'modification',
+        label: `Devis ${patch.numero ?? exists[0].numero ?? exists[0].designation} modifié`,
+      });
       return (await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]))[0];
     });
   }

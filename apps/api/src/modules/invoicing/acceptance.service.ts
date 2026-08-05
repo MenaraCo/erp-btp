@@ -8,6 +8,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { ActivityService } from '../../core/activity/activity.service';
 import { isTransferable } from '../estimating/devis-workflow';
 import { VenteService } from '../estimating/vente.service';
 import { ChantierService, FraisChantierInput } from '../site-tracking/chantier.service';
@@ -41,6 +42,7 @@ export class AcceptanceService {
     private readonly context: TenantContext,
     private readonly vente: VenteService,
     private readonly chantiers: ChantierService,
+    private readonly activity: ActivityService,
   ) {}
 
   /**
@@ -439,6 +441,15 @@ export class AcceptanceService {
         m.id,
         await this.fraisChantierPostes(em, versionId, fv.fraisChantier),
       );
+      // Même transaction que le marché et ses budgets : l'acceptation entre au fil seulement si
+      // la commande est réellement passée.
+      await this.activity.log(em, {
+        entityType: 'marche',
+        entityId: m.id,
+        action: 'acceptation',
+        label: `Commande acceptée : ${marcheCode} — ${marcheName} (${affaire[0].code})`,
+        detail: { devisId, versionId, chantierId: m.chantier_id, montantHt: venteTotal },
+      });
       return { m, executionLineCount };
     });
 

@@ -8,7 +8,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { ActivityService } from '../../core/activity/activity.service';
 import {
+  DEVIS_STATUS_LABELS,
   DevisStatus,
   assertTransition,
   InvalidTransitionError,
@@ -38,6 +40,7 @@ export class WorkflowService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
     private readonly vente: VenteService,
+    private readonly activity: ActivityService,
   ) {}
 
   /**
@@ -124,7 +127,12 @@ export class WorkflowService {
     }
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const rows = await em.query(`SELECT status, affaire_id FROM devis WHERE id = $1`, [devisId]);
+      const rows = await em.query(
+        `SELECT d.status, d.affaire_id, d.numero, d.designation, a.name AS affaire_name
+           FROM devis d JOIN affaire a ON a.id = d.affaire_id
+          WHERE d.id = $1`,
+        [devisId],
+      );
       if (rows.length === 0) {
         throw new NotFoundException(`Unknown devis "${devisId}"`);
       }
@@ -151,6 +159,17 @@ export class WorkflowService {
         affaireStatus,
         affaireId,
       ]);
+      // Journalisé dans la transaction du changement de statut : si la mise à jour du devis ou
+      // celle de l'affaire échoue, le fil ne montre pas un passage qui n'a pas eu lieu.
+      await this.activity.log(em, {
+        entityType: 'devis',
+        entityId: devisId,
+        action: 'statut',
+        label:
+          `${rows[0].numero ?? rows[0].designation} → ${DEVIS_STATUS_LABELS[to]}` +
+          ` (${rows[0].affaire_name})`,
+        detail: { de: from, vers: to },
+      });
       const updated = await em.query(`SELECT * FROM devis WHERE id = $1`, [devisId]);
       return { devis: updated[0], affaireStatus, allowedNext: nextStates(to) };
     });

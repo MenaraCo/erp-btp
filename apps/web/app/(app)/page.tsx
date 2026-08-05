@@ -29,6 +29,30 @@ interface Echeance {
   delai: { etat: 'sans_echeance' | 'a_lheure' | 'avance' | 'depasse'; jours: number | null; rendu: boolean };
 }
 
+interface ActivityEvent {
+  id: string;
+  entityType: 'affaire' | 'devis' | 'marche' | 'chantier';
+  entityId: string | null;
+  action: 'creation' | 'modification' | 'statut' | 'acceptation';
+  label: string;
+  actorEmail: string | null;
+  createdAt: string;
+}
+
+/** Une pastille par nature de fait : le fil se parcourt à l'œil avant de se lire. */
+const ACTION_COLOR: Record<ActivityEvent['action'], string> = {
+  creation: '#16a34a',
+  modification: '#64748b',
+  statut: '#2563eb',
+  acceptation: 'var(--accent)',
+};
+const ACTION_LABEL: Record<ActivityEvent['action'], string> = {
+  creation: 'Création',
+  modification: 'Modification',
+  statut: 'Statut',
+  acceptation: 'Acceptation',
+};
+
 export default function DashboardPage() {
   const { token } = useAuth();
   // Échéances : mêmes données et MÊME règle de délai que le planning — un retard annoncé ici doit
@@ -47,6 +71,12 @@ export default function DashboardPage() {
     queryKey: ['count', '/clients'],
     enabled: Boolean(token),
     queryFn: () => apiFetch<{ total: number }>('/clients?pageSize=1', { token }),
+  });
+  // Historique : ce qui s'est passé, dans l'ordre où c'est arrivé.
+  const activityQ = useQuery({
+    queryKey: ['activity'],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<ActivityEvent[]>('/activity?limit=12', { token }),
   });
 
   const devis = devisQ.data ?? [];
@@ -108,8 +138,11 @@ export default function DashboardPage() {
         <StatusTile n={lost.length} label="Refusés" color="#dc2626" />
       </div>
 
-      {/* Prochaines échéances : ce qui doit sortir, et ce qui aurait dû sortir. */}
-      <Echeances affaires={planningQ.data?.affaires ?? []} />
+      {/* Ce qui vient (échéances) à gauche, ce qui s'est passé (historique) à droite. */}
+      <div style={colonnesGrid}>
+        <Echeances affaires={planningQ.data?.affaires ?? []} />
+        <Historique events={activityQ.data ?? []} loading={activityQ.isLoading} />
+      </div>
 
       {/* Derniers devis */}
       <div className="card" style={{ marginTop: 24, padding: 0, overflow: 'hidden' }}>
@@ -178,6 +211,11 @@ const statusGrid: React.CSSProperties = {
   display: 'grid', gap: 12, marginTop: 8,
   gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
 };
+// Deux colonnes côte à côte sur écran large, l'une sous l'autre dès que la place manque (tablette).
+const colonnesGrid: React.CSSProperties = {
+  display: 'grid', gap: 12, marginTop: 24, alignItems: 'start',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+};
 
 /**
  * Prochaines échéances de remise. Les retards passent EN TÊTE : un tableau de bord sert à voir ce
@@ -191,7 +229,7 @@ function Echeances({ affaires }: { affaires: Echeance[] }) {
   const enRetard = attendues.filter((a) => a.delai.etat === 'depasse').length;
 
   return (
-    <div className="card" style={{ marginTop: 24 }}>
+    <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <div className="form-section-title" style={{ margin: 0 }}>Prochaines échéances</div>
         {enRetard > 0 && <span className="badge danger">{enRetard} en retard</span>}
@@ -230,6 +268,65 @@ function Echeances({ affaires }: { affaires: Echeance[] }) {
               Voir les {attendues.length} échéances →
             </Link>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Intitulé de l'objet concerné, pour la ligne de signature du fil. */
+const ENTITY_LABEL: Record<ActivityEvent['entityType'], string> = {
+  affaire: 'Affaire', devis: 'Devis', marche: 'Marché', chantier: 'Chantier',
+};
+
+/** L'auteur se lit mieux par son nom d'utilisateur que par son adresse complète. */
+const auteur = (email: string | null) => (email ? email.split('@')[0] : 'système');
+
+/** « le 05/08/2026 à 14:54 » — daté à la minute : deux faits du même jour restent distinguables. */
+function quand(iso: string) {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString('fr-FR')} à ${d.toLocaleTimeString('fr-FR', {
+    hour: '2-digit', minute: '2-digit',
+  })}`;
+}
+
+/**
+ * Historique des modifications — le fil de ce qui s'est passé, du plus récent au plus ancien.
+ *
+ * Les phrases viennent telles quelles du serveur : elles ont été écrites au moment du fait et ne
+ * sont pas recomposées ici. Un devis renuméroté depuis ne réécrit donc pas son propre passé.
+ */
+function Historique({ events, loading }: { events: ActivityEvent[]; loading: boolean }) {
+  return (
+    <div className="card">
+      <div className="form-section-title" style={{ margin: '0 0 10px' }}>Historique des modifications</div>
+      {loading ? (
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Chargement…</p>
+      ) : events.length === 0 ? (
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+          Aucun événement pour l’instant. Créez une affaire ou changez le statut d’un devis.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {events.map((e) => (
+            <div key={e.id} style={{ display: 'flex', gap: 9, padding: '6px 2px', alignItems: 'baseline' }}>
+              {/* La couleur seule ne dit rien : l'intitulé de l'action la rend lisible au survol
+                  comme au lecteur d'écran. */}
+              <span title={ACTION_LABEL[e.action] ?? e.action} style={{
+                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                background: ACTION_COLOR[e.action] ?? '#64748b',
+                transform: 'translateY(1px)',
+              }}>
+                <span className="sr-only">{ACTION_LABEL[e.action] ?? e.action}</span>
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 500, display: 'block' }}>{e.label}</span>
+                <span className="muted" style={{ display: 'block', fontSize: 11, marginTop: 1 }}>
+                  {ENTITY_LABEL[e.entityType] ?? e.entityType} · {auteur(e.actorEmail)} · {quand(e.createdAt)}
+                </span>
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>

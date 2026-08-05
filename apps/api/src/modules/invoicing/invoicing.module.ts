@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TenancyModule } from '../../core/tenancy/tenancy.module';
+import { ActivityModule } from '../../core/activity/activity.module';
 import { EstimatingModule } from '../estimating/estimating.module';
 import { SiteTrackingModule } from '../site-tracking/site-tracking.module';
 import { AcceptanceService } from './acceptance.service';
@@ -17,7 +18,7 @@ import { InvoiceController } from './invoice.controller';
 
 /** Invoicing — 2.1 acceptation, 2.2 situations, 2.3 avenants, 2.4 DGD, 2.5 sociétés + factures. */
 @Module({
-  imports: [TenancyModule, EstimatingModule, SiteTrackingModule],
+  imports: [TenancyModule, ActivityModule, EstimatingModule, SiteTrackingModule],
   providers: [
     AcceptanceService,
     SituationsService,

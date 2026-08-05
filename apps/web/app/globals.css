@@ -293,6 +293,20 @@ body.sidebar-collapsed .sidebar-toggle .nav-label {
   color: var(--muted);
 }
 
+/* Texte réservé aux lecteurs d'écran : rend lisible ce que seule une couleur indique à l'œil
+   (pastilles du fil d'activité, codes couleur des indicateurs). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Buttons (uppercase, dense) ── */
 button.btn,
 .btn {
