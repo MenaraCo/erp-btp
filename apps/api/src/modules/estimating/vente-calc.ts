@@ -434,9 +434,6 @@ export function computeFeuilleDeVente(
     denomOf.set(b, d.isZero() ? { denom: denomAll, effective: 'all' } : { denom: d, effective: b });
   }
 
-  const fraisTotal = BASES.reduce((acc, b) => acc.plus(fraisGroups.get(b)!.total), new Decimal(0));
-  const vendableDebourseTotal = denomAll;
-
   const results: VenteItemResult[] = [];
   let totalDebourse = new Decimal(0);
   let totalRevient = new Decimal(0);
