@@ -268,6 +268,22 @@ body.sidebar-collapsed .sidebar-toggle .nav-label {
   padding: 16px;
 }
 
+/* ── Modales ──
+   Ces deux classes n'existaient QUE sous `.theme-lg` : dans le thème par défaut, le panneau
+   n'avait donc aucun fond et la page se voyait au travers (fiche ressource, fiche d'un
+   composant d'ouvrage, boîtes des paramètres). Les voici au niveau de base ; le thème
+   « liquid glass » continue de les surcharger. */
+.modal-overlay {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.modal-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
