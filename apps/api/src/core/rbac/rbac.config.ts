@@ -45,6 +45,28 @@ export const SYSTEM_ROLES: SystemRoleDef[] = [
     label: 'Deviseur',
     permissions: ['directory.read', 'estimating.devis.read', 'estimating.devis.write'],
   },
+  /**
+   * Direction : voir toute la société, ne rien pouvoir casser.
+   *
+   * Sans lui, surveiller l'ensemble imposait d'être Administrateur — donc de pouvoir aussi tout
+   * modifier, distribuer les rôles et engager l'abonnement. Un dirigeant n'a pas à porter ce
+   * pouvoir pour lire un tableau de bord. Ce rôle ouvre la LECTURE de bout en bout (référentiel,
+   * devis, facturation, chantiers, financier) et rien d'autre : pas une écriture, pas une
+   * administration. C'est lui qui donne accès à l'écran Direction (`financial.read`).
+   *
+   * Les jetons restent l'autre verrou : le rôle ne montre que les modules souscrits ET affectés.
+   */
+  {
+    code: 'direction',
+    label: 'Direction (lecture)',
+    permissions: [
+      'directory.read',
+      'estimating.devis.read',
+      'invoicing.read',
+      'site_tracking.read',
+      'financial.read',
+    ],
+  },
   {
     code: 'viewer',
     label: 'Lecture seule',
