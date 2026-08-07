@@ -59,6 +59,3 @@ export function usePermissions() {
     canOrLoading: (perm: string) => isLoading || can(perm),
   };
 }
-
-/** Capacités qui ouvrent l'acceptation de commande : facturer OU suivre des chantiers. */
-export const ACCEPTANCE_CAPABILITIES = ['invoicing.situations', 'site_tracking.budget'];

@@ -189,7 +189,9 @@ function lighten(h: string, ratio: number): string {
 
 function stylesXml(theme?: SheetOptions['theme']): string {
   const primary = hex(theme?.primary, '1A3A5C');
-  const accent = hex(theme?.accent, 'E8550A');
+  // NOTE : `theme.accent` est accepté mais n'habille encore aucun style de la feuille — seule la
+  // couleur principale voyage jusqu'au tableur. À brancher si l'on veut y retrouver l'accent
+  // de la société (les codes, comme à l'écran).
   const soft = lighten(primary, 0.88);
   const line = lighten(primary, 0.7);
 

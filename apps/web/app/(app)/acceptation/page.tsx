@@ -7,7 +7,8 @@ import { ArrowRight, Building2, Lock, Receipt } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
-import { ACCEPTANCE_CAPABILITIES, useCapabilities } from '@/lib/capabilities';
+import { useCapabilities } from '@/lib/capabilities';
+import { ACCEPTANCE_CAPABILITIES } from '@/lib/modules';
 
 interface PendingRow {
   devisId: string;

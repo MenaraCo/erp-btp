@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Lock, Plus, Trash2 } from 'lucide-react';
+import { Lock, Plus, Trash2, Sparkles } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
+import { MODULES } from '@/lib/modules';
 
 /* ─────────── types ─────────── */
 interface Subscription {
@@ -97,6 +99,33 @@ function useApi() {
   );
 }
 
+/**
+ * Invitation affichée quand on arrive d'une tuile non souscrite. Elle nomme le module et dit ce
+ * qu'il apporte : une tuile grisée sans explication ne donne envie de rien.
+ */
+function InvitationModule({ label, tagline }: { label: string; tagline: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex', gap: 12, alignItems: 'flex-start',
+        border: '1px solid var(--accent)', borderRadius: 10,
+        background: '#fff7ed', padding: '14px 16px', marginBottom: 22,
+      }}
+    >
+      <Sparkles size={18} color="var(--accent)" style={{ flexShrink: 0, marginTop: 1 }} />
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--primary)' }}>
+          Le module «&nbsp;{label}&nbsp;» n’est pas encore dans votre abonnement
+        </div>
+        <p className="muted" style={{ margin: '4px 0 0', fontSize: 12.5, lineHeight: 1.45 }}>
+          {tagline}. Nous pensons que le moment est venu&nbsp;: ajoutez-le ci-dessous et il
+          s’ouvrira immédiatement pour les utilisateurs à qui vous affecterez un jeton.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════ */
 const TABS = ['État', 'Formule & Options'] as const;
 type Tab = (typeof TABS)[number];
@@ -104,6 +133,10 @@ type Tab = (typeof TABS)[number];
 export default function AbonnementPage() {
   const [tab, setTab] = useState<Tab>('État');
   const { token } = useAuth();
+  // Arrivée depuis une tuile grisée du menu de démarrage : on nomme le module convoité et on
+  // ouvre directement l'onglet où il se souscrit, plutôt que de laisser l'utilisateur le chercher.
+  const decouvrir = useSearchParams().get('decouvrir');
+  const moduleVise = MODULES.find((m) => m.key === decouvrir);
 
   return (
     <div style={{ padding: '20px 24px', maxWidth: 960 }}>
@@ -111,6 +144,8 @@ export default function AbonnementPage() {
       <p className="muted" style={{ margin: '0 0 20px' }}>
         État de votre souscription, modules et affectation des jetons
       </p>
+
+      {moduleVise && <InvitationModule label={moduleVise.label} tagline={moduleVise.tagline} />}
 
       <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 24 }}>
         {TABS.map((t) => (

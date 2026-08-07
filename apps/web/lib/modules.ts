@@ -1,0 +1,143 @@
+/**
+ * Catalogue des modules de l'application — source UNIQUE du menu de démarrage (les tuiles) et de
+ * la barre latérale (les fonctions du module où l'on se trouve).
+ *
+ * Les deux se déduisent d'ici : une fonction ajoutée à un module apparaît du même coup dans sa
+ * barre latérale, sans qu'on ait à la déclarer deux fois et sans risquer qu'elles divergent.
+ *
+ * `capabilities` liste les capacités qui OUVRENT le module : il suffit d'en tenir une. Une tuile
+ * dont aucune n'est ouverte s'affiche grisée et mène à l'écran Abonnement — jamais à un 403.
+ * `always: true` marque ce qui n'appartient à aucune souscription (référentiel, configuration).
+ */
+export interface ModuleFeature {
+  href: string;
+  label: string;
+  /** Sous-entrée : indentée sous la précédente. */
+  level?: number;
+}
+
+export interface AppModule {
+  /** Segment d'URL identifiant le module ; sert aussi de clé de rattachement d'une page. */
+  key: string;
+  label: string;
+  /** Phrase courte sur la tuile — ce que le module sert à faire. */
+  tagline: string;
+  /** Où mène la tuile. */
+  home: string;
+  /** Préfixes d'URL appartenant au module (pour retrouver le module depuis la page courante). */
+  match: string[];
+  capabilities?: string[];
+  /** Vrai pour les modules hors souscription : jamais grisés. */
+  always?: boolean;
+  features: ModuleFeature[];
+}
+
+/** Capacités qui ouvrent l'acceptation de commande : facturer OU suivre des chantiers. */
+export const ACCEPTANCE_CAPABILITIES = ['invoicing.situations', 'site_tracking.budget'];
+
+export const MODULES: AppModule[] = [
+  {
+    key: 'estimating',
+    label: 'Étude de prix',
+    tagline: 'Affaires, devis, bibliothèque et feuille de vente',
+    home: '/estimating/tableau-de-bord',
+    match: ['/estimating'],
+    capabilities: ['estimating.bid'],
+    features: [
+      { href: '/estimating/tableau-de-bord', label: 'Tableau de bord' },
+      { href: '/estimating/planning', label: 'Planning des études' },
+      { href: '/estimating', label: 'Affaires' },
+      { href: '/estimating/devis', label: 'Devis' },
+      { href: '/estimating/bibliotheque', label: 'Bibliothèque' },
+      { href: '/estimating/bibliotheque/ouvrages', label: 'Ouvrages', level: 1 },
+      { href: '/estimating/bibliotheque/ressources', label: 'Ressources', level: 1 },
+      { href: '/estimating/imports', label: 'Imports' },
+    ],
+  },
+  {
+    key: 'acceptation',
+    label: 'Acceptation de commande',
+    tagline: 'Le passage du devis gagné au chantier et à sa facturation',
+    home: '/acceptation',
+    match: ['/acceptation'],
+    capabilities: ACCEPTANCE_CAPABILITIES,
+    features: [{ href: '/acceptation', label: 'Acceptation de commande' }],
+  },
+  {
+    key: 'chantiers',
+    label: 'Chantier',
+    tagline: 'Budgets, pointages, achats et avancement',
+    home: '/chantiers',
+    match: ['/chantiers'],
+    capabilities: ['site_tracking.budget', 'site_tracking.timesheet'],
+    features: [{ href: '/chantiers', label: 'Chantiers' }],
+  },
+  {
+    key: 'invoicing',
+    label: 'Facturation',
+    tagline: 'Situations de travaux, avenants, DGD et factures',
+    home: '/invoicing',
+    match: ['/invoicing'],
+    capabilities: ['invoicing.situations', 'invoicing.dgd'],
+    features: [{ href: '/invoicing', label: 'Facturation' }],
+  },
+  {
+    key: 'direction',
+    label: 'Direction',
+    tagline: 'Portefeuille de chantiers, marges et alertes',
+    home: '/direction',
+    match: ['/direction'],
+    capabilities: ['financial.portfolio', 'financial.dashboard'],
+    features: [{ href: '/direction', label: 'Portefeuille' }],
+  },
+  {
+    key: 'referentiel',
+    label: 'Référentiel',
+    tagline: 'Clients et fournisseurs, communs à tous les modules',
+    home: '/clients',
+    match: ['/clients', '/suppliers'],
+    always: true,
+    features: [
+      { href: '/clients', label: 'Clients' },
+      { href: '/suppliers', label: 'Fournisseurs' },
+    ],
+  },
+  {
+    key: 'configuration',
+    label: 'Configuration',
+    tagline: 'Paramètres société, utilisateurs et abonnement',
+    home: '/params',
+    match: ['/params', '/users', '/abonnement'],
+    always: true,
+    features: [
+      { href: '/params', label: 'Paramètres' },
+      { href: '/users', label: 'Utilisateurs' },
+      { href: '/abonnement', label: 'Abonnement' },
+    ],
+  },
+];
+
+/**
+ * Module auquel appartient une URL. Le préfixe le PLUS LONG gagne : sans cela `/clients` et
+ * `/chantiers` se disputeraient les pages, et une sous-page se rattacherait au mauvais module.
+ */
+export function moduleForPath(pathname: string): AppModule | null {
+  let best: AppModule | null = null;
+  let bestLen = -1;
+  for (const m of MODULES) {
+    for (const prefix of m.match) {
+      const hit = pathname === prefix || pathname.startsWith(`${prefix}/`);
+      if (hit && prefix.length > bestLen) {
+        best = m;
+        bestLen = prefix.length;
+      }
+    }
+  }
+  return best;
+}
+
+/** Un module est ouvert si l'utilisateur tient l'une de ses capacités (ou s'il est hors offre). */
+export function moduleIsOpen(m: AppModule, has: (cap: string) => boolean): boolean {
+  if (m.always) return true;
+  return (m.capabilities ?? []).some(has);
+}

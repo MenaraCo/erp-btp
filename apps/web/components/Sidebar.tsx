@@ -7,47 +7,14 @@ import {
   LayoutDashboard, CalendarDays, FolderOpen, FileText, BookOpen,
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
   CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
+  LayoutGrid, ArrowLeft,
 } from 'lucide-react';
-import { ACCEPTANCE_CAPABILITIES, useCapabilities } from '@/lib/capabilities';
+import { moduleForPath } from '@/lib/modules';
 
 const STORAGE_KEY = 'erp-sidebar-collapsed';
 
-interface NavItem {
-  href: string;
-  label: string;
-  section: string;
-  level?: number;
-  /** Entrée réservée : masquée tant qu'aucune de ces capacités n'est ouverte. */
-  anyCapability?: string[];
-}
-
-const NAV: NavItem[] = [
-  { href: '/', label: 'Tableau de bord', section: 'Études de prix' },
-  { href: '/estimating/planning', label: 'Planning des études', section: 'Études de prix' },
-  { href: '/estimating', label: 'Affaires', section: 'Études de prix' },
-  { href: '/estimating/devis', label: 'Devis', section: 'Études de prix' },
-  { href: '/estimating/bibliotheque', label: 'Bibliothèque', section: 'Études de prix' },
-  { href: '/estimating/bibliotheque/ouvrages', label: 'Ouvrages', section: 'Études de prix', level: 1 },
-  { href: '/estimating/bibliotheque/ressources', label: 'Ressources', section: 'Études de prix', level: 1 },
-  { href: '/estimating/imports', label: 'Imports', section: 'Études de prix' },
-  { href: '/clients', label: 'Clients', section: 'Référentiel' },
-  { href: '/suppliers', label: 'Fournisseurs', section: 'Référentiel' },
-  {
-    href: '/acceptation',
-    label: 'Acceptation de commande',
-    section: 'Exécution',
-    anyCapability: ACCEPTANCE_CAPABILITIES,
-  },
-  { href: '/direction', label: 'Direction', section: 'Exécution' },
-  { href: '/chantiers', label: 'Chantiers', section: 'Exécution' },
-  { href: '/invoicing', label: 'Facturation', section: 'Exécution' },
-  { href: '/params', label: 'Paramètres', section: 'Administration' },
-  { href: '/users', label: 'Utilisateurs', section: 'Administration' },
-  { href: '/abonnement', label: 'Abonnement', section: 'Administration' },
-];
-
 const NAV_ICONS: Record<string, React.ElementType> = {
-  '/': LayoutDashboard,
+  '/estimating/tableau-de-bord': LayoutDashboard,
   '/estimating/planning': CalendarDays,
   '/estimating': FolderOpen,
   '/estimating/devis': FileText,
@@ -66,29 +33,42 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/abonnement': CreditCard,
 };
 
+/**
+ * Une entrée est active quand la page courante lui appartient. Les cas particuliers viennent des
+ * routes qui s'imbriquent : « Affaires » (/estimating) est le parent d'URL de presque tout le
+ * module, il ne doit pas s'allumer quand on est sur le planning ou la bibliothèque.
+ */
 function isActive(href: string, pathname: string): boolean {
-  const base = href.split('#')[0];
-  if (base === '/') return pathname === '/';
   const isDevisEditor = /^\/estimating\/[^/]+\/devis\/[^/]+/.test(pathname);
-  if (base === '/estimating') {
+  if (href === '/estimating') {
     return (
       pathname === '/estimating' ||
       (pathname.startsWith('/estimating/') &&
         !isDevisEditor &&
+        !pathname.startsWith('/estimating/tableau-de-bord') &&
         !pathname.startsWith('/estimating/planning') &&
         !pathname.startsWith('/estimating/devis') &&
-        !pathname.startsWith('/estimating/bibliotheque'))
+        !pathname.startsWith('/estimating/bibliotheque') &&
+        !pathname.startsWith('/estimating/imports'))
     );
   }
-  if (base === '/estimating/devis') {
+  if (href === '/estimating/devis') {
     return pathname.startsWith('/estimating/devis') || isDevisEditor;
   }
-  return pathname.startsWith(base);
+  if (href === '/estimating/bibliotheque') {
+    return pathname === '/estimating/bibliotheque';
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/**
+ * Barre latérale PROPRE AU MODULE où l'on se trouve : on n'y voit que ses fonctions, plus un
+ * retour au menu de démarrage. Un écran de chiffrage n'a pas à afficher les entrées de la
+ * facturation ; le menu de démarrage, lui, montre la vue d'ensemble.
+ */
 export function Sidebar() {
   const pathname = usePathname();
-  const caps = useCapabilities();
+  const courant = moduleForPath(pathname);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -101,47 +81,52 @@ export function Sidebar() {
     localStorage.setItem(STORAGE_KEY, String(collapsed));
   }, [collapsed]);
 
-  let lastSection = '';
-
   return (
     <nav className="sidebar">
-      {/* Brand */}
+      {/* Brand — le sous-titre nomme le module courant, pour savoir où l'on est. */}
       <div className="brand">
         <div className="brand-logo">
           <HardHat size={17} color="#fff" />
         </div>
         <div className="brand-text">
           <span className="brand-name">ERP BTP</span>
-          <span className="brand-sub">Études de prix</span>
+          <span className="brand-sub">{courant?.label ?? 'Menu'}</span>
         </div>
       </div>
 
-      {/* Nav items — sub-items hidden in collapsed mode */}
-      {NAV.filter(
-        // Une entrée réservée reste cachée tant que sa capacité n'est pas ouverte : mieux vaut
-        // ne rien montrer qu'un lien qui finit en « accès refusé ».
-        (item) => !item.anyCapability || caps.isLoading || caps.hasAny(...item.anyCapability),
-      ).map((item) => {
-        const showSection = item.section !== lastSection;
-        lastSection = item.section;
-        const active = isActive(item.href, pathname);
-        const Icon = NAV_ICONS[item.href];
-        const iconSize = item.level ? 11 : 13;
-        return (
-          <div key={item.href} className={item.level ? 'nav-sub' : ''}>
-            {showSection && <div className="nav-section">{item.section}</div>}
-            <Link
-              href={item.href}
-              className={active ? 'active' : ''}
-              title={item.label}
-              style={item.level ? { paddingLeft: 22, fontSize: 10.5, color: active ? 'var(--primary)' : '#64748b' } : undefined}
-            >
-              {Icon && <Icon size={iconSize} />}
-              <span className="nav-label">{item.label}</span>
-            </Link>
-          </div>
-        );
-      })}
+      {/* Retour au menu — toujours en tête, c'est la sortie du module. */}
+      <Link
+        href="/"
+        className={pathname === '/' ? 'active' : ''}
+        title="Revenir au menu de démarrage"
+        style={{ marginBottom: 4 }}
+      >
+        {pathname === '/' ? <LayoutGrid size={13} /> : <ArrowLeft size={13} />}
+        <span className="nav-label">{pathname === '/' ? 'Menu de démarrage' : 'Menu'}</span>
+      </Link>
+
+      {courant && (
+        <>
+          <div className="nav-section">{courant.label}</div>
+          {courant.features.map((f) => {
+            const active = isActive(f.href, pathname);
+            const Icon = NAV_ICONS[f.href];
+            return (
+              <div key={f.href} className={f.level ? 'nav-sub' : ''}>
+                <Link
+                  href={f.href}
+                  className={active ? 'active' : ''}
+                  title={f.label}
+                  style={f.level ? { paddingLeft: 22, fontSize: 10.5, color: active ? 'var(--primary)' : '#64748b' } : undefined}
+                >
+                  {Icon && <Icon size={f.level ? 11 : 13} />}
+                  <span className="nav-label">{f.label}</span>
+                </Link>
+              </div>
+            );
+          })}
+        </>
+      )}
 
       {/* Collapse toggle */}
       <button
