@@ -266,6 +266,42 @@ body.theme-lg {
               inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
 }
 
+/* ── Tuiles du menu de démarrage ──
+   Le bloc plein du thème par défaut jurerait au milieu des surfaces translucides. La tuile
+   reprend donc le verre du reste de l'interface, teinté de la couleur principale de la société
+   pour garder son identité. `color-mix` la suit automatiquement ; la ligne pleine qui précède
+   sert de repli aux moteurs qui ne la connaissent pas. */
+.theme-lg .tuile {
+  background: rgba(26, 58, 92, 0.78);
+  background: color-mix(in srgb, var(--primary) 74%, transparent);
+  backdrop-filter: blur(20px) saturate(1.9);
+  -webkit-backdrop-filter: blur(20px) saturate(1.9);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 4px 20px rgba(26, 58, 92, 0.10),
+              inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.theme-lg .tuile:hover {
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 10px 30px rgba(26, 58, 92, 0.16),
+              inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* Non souscrite : même verre, mais incolore et en pointillés — elle se distingue au premier
+   coup d'œil sans disparaître. */
+.theme-lg .tuile-off {
+  background: rgba(255, 255, 255, 0.38);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px dashed rgba(26, 58, 92, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.theme-lg .tuile-off:hover {
+  border-color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
 /* ── Modals / popups ── */
 .theme-lg .modal-overlay {
   background: rgba(8, 18, 60, 0.20) !important;
