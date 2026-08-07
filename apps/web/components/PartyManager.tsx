@@ -17,6 +17,8 @@ interface Party {
   vat_number?: string | null;
   email?: string | null;
   phone?: string | null;
+  /** Fournisseurs seulement : `a_valider` pour une fiche proposée depuis un chantier. */
+  statut?: 'valide' | 'a_valider' | null;
 }
 interface Page {
   rows: Party[];
@@ -44,6 +46,9 @@ export function PartyManager({
   // Écrire dans le référentiel exige `directory.write` : sans lui, la liste reste consultable
   // mais aucune action de création, modification ou suppression n'est proposée.
   const peutEcrire = usePermissions().canOrLoading('directory.write');
+  // Régulariser une fiche proposée depuis le terrain. La société décide qui porte ce droit :
+  // ce peut être le deviseur, la secrétaire, le directeur… d'où une permission dédiée.
+  const peutValider = usePermissions().can('directory.validate');
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState>(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -86,6 +91,12 @@ export function PartyManager({
   const remove = useMutation({
     mutationFn: (id: string) => apiFetch(`/${resource}/${id}`, { method: 'DELETE', token }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [resource] }),
+  });
+
+  const valider = useMutation({
+    mutationFn: (id: string) => apiFetch(`/${resource}/${id}/valider`, { method: 'POST', token }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [resource] }),
+    onError: (e) => setError(e instanceof ApiError ? e.message : 'Validation impossible.'),
   });
 
   function startCreate() {
@@ -198,10 +209,30 @@ export function PartyManager({
               {rows.map((p) => (
                 <tr key={p.id}>
                   <td className="code-cell">{p.code}</td>
-                  <td style={{ fontWeight: 500 }}>{p.name}</td>
+                  <td style={{ fontWeight: 500 }}>
+                    {p.name}
+                    {/* Une fiche proposée depuis un chantier reste utilisable, mais elle se
+                        signale partout où elle apparaît jusqu'à sa régularisation. */}
+                    {p.statut === 'a_valider' && (
+                      <span className="badge warning" style={{ marginLeft: 8 }} title="Fiche proposée depuis un chantier, en attente de validation">
+                        À valider
+                      </span>
+                    )}
+                  </td>
                   <td className="muted">{p.email ?? '—'}</td>
                   <td className="muted">{p.phone ?? '—'}</td>
                   <td style={{ textAlign: 'right', paddingRight: 8 }}>
+                    {p.statut === 'a_valider' && peutValider && (
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ padding: '2px 10px', fontSize: 10.5, marginRight: 6 }}
+                        disabled={valider.isPending}
+                        onClick={() => { setError(null); valider.mutate(p.id); }}
+                      >
+                        Valider
+                      </button>
+                    )}
                     {peutEcrire && (
                       <>
                         <IconBtn title={`Modifier ${p.name}`} color="#64748b" onClick={() => startEdit(p)}>

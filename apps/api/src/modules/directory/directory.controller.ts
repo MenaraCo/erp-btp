@@ -60,6 +60,34 @@ export class DirectoryController {
     return this.directory.createSupplier(body);
   }
 
+  /**
+   * Voie du TERRAIN : le conducteur enregistre un fournisseur découvert en cours de chantier.
+   * La fiche entre « à valider » — utilisable tout de suite, régularisée ensuite. Une route à part
+   * plutôt qu'un aiguillage dans `POST /suppliers` : deux droits distincts, deux portes distinctes.
+   */
+  @Post('suppliers/proposer')
+  @RequiresCapability('directory')
+  @RequiresPermission('directory.propose')
+  proposeSupplier(@Body() body: PartyInput) {
+    this.assertParty(body);
+    return this.directory.createSupplier(body, true);
+  }
+
+  /** File d'attente des fiches proposées. Déclarée avant toute route à paramètre. */
+  @Get('suppliers/a-valider')
+  @RequiresCapability('directory')
+  @RequiresPermission('directory.read')
+  listSuppliersAValider() {
+    return this.directory.listSuppliersAValider();
+  }
+
+  @Post('suppliers/:id/valider')
+  @RequiresCapability('directory')
+  @RequiresPermission('directory.validate')
+  validateSupplier(@Param('id') id: string) {
+    return this.directory.validateSupplier(id);
+  }
+
   @Get('suppliers')
   @RequiresCapability('directory')
   @RequiresPermission('directory.read')

@@ -71,7 +71,9 @@ describe('Console utilisateurs & rôles (cahier §3.2)', () => {
     const { tenantId, adminId } = await seedAdmin('RolesList');
     const res = await get('/roles', as(tenantId, adminId)).expect(200);
     const codes = (res.body as Array<{ code: string }>).map((r) => r.code).sort();
-    expect(codes).toEqual(['admin', 'direction', 'estimator', 'viewer']);
+    expect(codes).toEqual([
+      'admin', 'conducteur', 'direction', 'estimator', 'referentiel_valideur', 'viewer',
+    ]);
     const admin = res.body.find((r: { code: string }) => r.code === 'admin');
     expect(admin.permissions).toContain('rbac.user_role.assign');
   });

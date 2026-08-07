@@ -26,6 +26,10 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'subscription.manage', label: 'Gérer la souscription' },
   { key: 'directory.read', label: 'Consulter le référentiel' },
   { key: 'directory.write', label: 'Modifier le référentiel' },
+  // Deux droits SÉPARÉS de `directory.write`, pour que chaque société décide de son organisation :
+  // proposer une fiche n'est pas la valider, et valider n'oblige pas à pouvoir tout modifier.
+  { key: 'directory.propose', label: 'Proposer une fiche au référentiel (à valider)' },
+  { key: 'directory.validate', label: 'Valider une fiche proposée au référentiel' },
   { key: 'estimating.devis.read', label: 'Consulter les devis' },
   { key: 'estimating.devis.write', label: 'Modifier les devis' },
   { key: 'invoicing.read', label: 'Consulter la facturation' },
@@ -43,7 +47,40 @@ export const SYSTEM_ROLES: SystemRoleDef[] = [
   {
     code: 'estimator',
     label: 'Deviseur',
-    permissions: ['directory.read', 'estimating.devis.read', 'estimating.devis.write'],
+    // Le deviseur TIENT le référentiel : c'est lui qui ouvre les fiches clients et fournisseurs
+    // pendant l'étude. Sans `directory.write`, il devait réclamer chaque client à un administrateur.
+    permissions: [
+      'directory.read',
+      'directory.write',
+      'estimating.devis.read',
+      'estimating.devis.write',
+    ],
+  },
+  {
+    code: 'conducteur',
+    label: 'Conducteur de travaux',
+    // Il vit sur le chantier : il consulte l'étude, mène l'exécution, et PROPOSE les fournisseurs
+    // qu'il découvre en cours de route — sans pouvoir retoucher le référentiel de l'entreprise.
+    permissions: [
+      'directory.read',
+      'directory.propose',
+      'estimating.devis.read',
+      'invoicing.read',
+      'site_tracking.read',
+      'site_tracking.write',
+    ],
+  },
+  {
+    /**
+     * Rôle SATELLITE : il ne se suffit pas à lui-même, il se cumule.
+     *
+     * Qui valide les fiches proposées ne se décrète pas depuis le logiciel — selon la société ce
+     * sera le directeur, la secrétaire, le président, le deviseur ou le conducteur. L'administrateur
+     * pose donc ce rôle sur la personne de son choix, par-dessus son rôle principal.
+     */
+    code: 'referentiel_valideur',
+    label: 'Validation du référentiel',
+    permissions: ['directory.read', 'directory.validate'],
   },
   /**
    * Direction : voir toute la société, ne rien pouvoir casser.

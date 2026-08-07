@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, DeepPartial, EntityTarget, ObjectLiteral } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { PartyExistante, trouverDoublon } from './party-doublon';
 import {
   DataGridQuery,
   PaginatedResult,
@@ -41,8 +42,50 @@ export class DirectoryService {
     return this.list(ClientEntity, query);
   }
 
-  createSupplier(input: PartyInput): Promise<SupplierEntity> {
-    return this.create(SupplierEntity, input);
+  /**
+   * Crée un fournisseur. `aValider` vient du contrôleur : une fiche PROPOSÉE (par qui n'a pas la
+   * main sur le référentiel) entre « à valider ». Elle est utilisable tout de suite — le chantier
+   * n'attend pas — mais signalée jusqu'à sa régularisation.
+   */
+  createSupplier(input: PartyInput, aValider = false): Promise<SupplierEntity> {
+    return this.create(SupplierEntity, input, aValider);
+  }
+
+  /** File d'attente : les fiches proposées, de la plus ancienne à la plus récente. */
+  listSuppliersAValider(): Promise<SupplierEntity[]> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, (em) =>
+      em.getRepository(SupplierEntity).find({
+        where: { statut: 'a_valider' } as never,
+        order: { proposedAt: 'ASC' } as never,
+      }),
+    );
+  }
+
+  /**
+   * Valide une fiche proposée. Qui en a le droit ne se décide pas ici mais par la permission
+   * `directory.validate`, que chaque société pose sur le rôle de son choix.
+   */
+  validateSupplier(id: string): Promise<SupplierEntity> {
+    const tenantId = this.context.requireTenantId();
+    const userId = this.context.getUserId() ?? null;
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const repo = em.getRepository(SupplierEntity);
+      const existing = await repo.findOne({ where: { id } as never });
+      if (!existing) {
+        throw new NotFoundException(`Fournisseur introuvable (${id}).`);
+      }
+      if (existing.statut === 'valide') {
+        throw new ConflictException('Cette fiche est déjà validée.');
+      }
+      await em.query(
+        `UPDATE supplier SET statut = 'valide', validated_by = $2, validated_at = now(),
+                             updated_at = now()
+          WHERE id = $1`,
+        [id, userId],
+      );
+      return repo.findOneOrFail({ where: { id } as never });
+    });
   }
 
   listSuppliers(query: DataGridQuery): Promise<PaginatedResult<SupplierEntity>> {
@@ -106,11 +149,32 @@ export class DirectoryService {
   private create<T extends ObjectLiteral>(
     entity: EntityTarget<T>,
     input: PartyInput,
+    aValider = false,
   ): Promise<T> {
     const tenantId = this.context.requireTenantId();
+    const userId = this.context.getUserId() ?? null;
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const repo = em.getRepository(entity);
-      return repo.save({ ...input, tenantId } as unknown as DeepPartial<T>) as Promise<T>;
+
+      // Barrage aux doublons, DANS la transaction : on compare au référentiel vivant plutôt qu'à
+      // une photo prise avant. Les fiches supprimées ne comptent pas — un code libéré se réutilise.
+      const existantes = (await repo.find({
+        where: { deletedAt: null } as never,
+        select: ['id', 'code', 'name', 'vatNumber'] as never,
+      })) as unknown as PartyExistante[];
+      const doublon = trouverDoublon(input, existantes);
+      if (doublon) {
+        throw new ConflictException(doublon.message);
+      }
+
+      const extra = aValider
+        ? { statut: 'a_valider', proposedBy: userId, proposedAt: new Date() }
+        : {};
+      return repo.save({
+        ...input,
+        ...extra,
+        tenantId,
+      } as unknown as DeepPartial<T>) as Promise<T>;
     });
   }
 
