@@ -7,6 +7,7 @@ import { ArrowRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
+import { usePermissions } from '@/lib/capabilities';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 import { IconBtn } from '@/components/IconBtn';
 
@@ -46,6 +47,7 @@ const TABS: { key: FilterTab; label: string; match: (s: string) => boolean }[] =
 
 export default function EstimatingPage() {
   const { token } = useAuth();
+  const peutEcrire = usePermissions().canOrLoading('estimating.devis.write');
   const qc = useQueryClient();
   const router = useRouter();
   const [showForm, setShowForm] = useState(false);
@@ -115,7 +117,7 @@ export default function EstimatingPage() {
           <h1 style={{ marginBottom: 0 }}>Affaires</h1>
           <p className="muted" style={{ marginTop: 2, marginBottom: 0 }}>Opérations et leurs devis.</p>
         </div>
-        {!showForm && <button className="btn" onClick={() => setShowForm(true)}>+ Nouvelle affaire</button>}
+        {!showForm && peutEcrire && <button className="btn" onClick={() => setShowForm(true)}>+ Nouvelle affaire</button>}
       </div>
 
       {showForm && (

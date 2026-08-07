@@ -104,6 +104,34 @@ export class RbacService {
     });
   }
 
+  /**
+   * Toutes les permissions de l'utilisateur, tous rôles cumulés (dédoublonnées).
+   *
+   * Sert au miroir `/me/capabilities` : sans elle, l'écran ne connaît que les jetons et propose
+   * des boutons d'écriture à un rôle en lecture, qui se heurte alors à un 403. La garde serveur
+   * reste seule juge — ceci ne fait qu'éviter d'offrir une action vouée à l'échec.
+   */
+  listPermissionsForUser(
+    tenantId: string,
+    userId: string | undefined,
+  ): Promise<string[]> {
+    if (!userId) {
+      return Promise.resolve([]);
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT DISTINCT p.key
+           FROM user_role ur
+           JOIN role_permission rp ON rp.role_id = ur.role_id
+           JOIN permission p ON p.id = rp.permission_id
+          WHERE ur.user_id = $1
+          ORDER BY p.key`,
+        [userId],
+      );
+      return rows.map((r: { key: string }) => r.key);
+    });
+  }
+
   /** True if the user holds any role granting the given permission key. */
   hasPermission(
     tenantId: string,

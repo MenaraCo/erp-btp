@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from './api';
 
 interface AuthState {
@@ -31,6 +32,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  * flow / httpOnly cookie would replace it later.
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [state, setState] = useState<AuthState>({
     token: null,
     email: null,
@@ -58,7 +60,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     setState({ token: null, email: null, tenantSlug: null });
-  }, []);
+    // Le cache des requêtes appartient à la personne connectée : ses droits, ses devis, ses
+    // chantiers. Sans ce vidage, l'utilisateur suivant hérite des réponses du précédent — et
+    // notamment de SES permissions, donc de boutons d'écriture qu'il n'a pas.
+    queryClient.clear();
+  }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ ...state, isAuthenticated: Boolean(state.token), login, setSession, logout }),

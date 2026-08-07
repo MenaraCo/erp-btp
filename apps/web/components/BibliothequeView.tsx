@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { usePreferences, fmtEuro } from '@/lib/preferences';
+import { usePermissions } from '@/lib/capabilities';
 import { ResourceModal, FullResource } from './ResourceModal';
 import { SortHeader, SortState, nextSort, applySort } from './SortHeader';
 
@@ -50,6 +51,10 @@ const PAGE_SIZE = 50;
 export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'ressources' | 'ouvrages' }) {
   const { token } = useAuth();
   const { nb_decimales: nbDec } = usePreferences();
+  // Un rôle de lecture (Direction) ne se voit pas proposer de créer ni de modifier : le serveur
+  // refuserait de toute façon.
+  const { canOrLoading } = usePermissions();
+  const peutEcrire = canOrLoading('estimating.devis.write');
   const qc = useQueryClient();
   const router = useRouter();
   const [libId, setLibId] = useState<string | null>(null);
@@ -153,12 +158,14 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
           ))}
           {libs.data && libs.data.rows.length === 0 && <span className="muted">Aucune bibliothèque.</span>}
         </div>
-        <form style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'flex-end' }}
-          onSubmit={(e) => { e.preventDefault(); setErr(null); if (libForm.code && libForm.name) createLib.mutate(); }}>
-          <Field label="Code"><input value={libForm.code} onChange={(e) => setLibForm({ ...libForm, code: e.target.value })} /></Field>
-          <Field label="Nom"><input value={libForm.name} onChange={(e) => setLibForm({ ...libForm, name: e.target.value })} /></Field>
-          <button className="btn" type="submit">+ Bibliothèque</button>
-        </form>
+        {peutEcrire && (
+          <form style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'flex-end' }}
+            onSubmit={(e) => { e.preventDefault(); setErr(null); if (libForm.code && libForm.name) createLib.mutate(); }}>
+            <Field label="Code"><input value={libForm.code} onChange={(e) => setLibForm({ ...libForm, code: e.target.value })} /></Field>
+            <Field label="Nom"><input value={libForm.name} onChange={(e) => setLibForm({ ...libForm, name: e.target.value })} /></Field>
+            <button className="btn" type="submit">+ Bibliothèque</button>
+          </form>
+        )}
       </div>
 
       {libId && section !== 'ouvrages' && (
@@ -174,7 +181,9 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
                   <button key={n.v} className={natFilter === n.v ? 'btn' : 'btn-ghost'} style={{ padding: '3px 8px' }} onClick={() => applyFilter(n.v)}>{n.l}</button>
                 ))}
               </div>
-              <button className="btn" onClick={() => setResModal('new')}>+ Nouvelle ressource</button>
+              {peutEcrire && (
+                <button className="btn" onClick={() => setResModal('new')}>+ Nouvelle ressource</button>
+              )}
             </div>
           </div>
           {resRows.length > 0 ? (
@@ -234,7 +243,9 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0 }}>Ouvrages composés {ouvrages.data ? `(${ouvrages.data.total})` : ''}</h2>
-            <Link className="btn" href={`/estimating/bibliotheque/ouvrages/new?lib=${libId}`}>+ Nouvel ouvrage</Link>
+            {peutEcrire && (
+              <Link className="btn" href={`/estimating/bibliotheque/ouvrages/new?lib=${libId}`}>+ Nouvel ouvrage</Link>
+            )}
           </div>
           <p className="muted" style={{ marginTop: 4 }}>Cliquez sur un ouvrage pour le composer (ajout de ressources, ratios, pertes…).</p>
           {ouvrages.data && ouvrages.data.rows.length > 0 ? (

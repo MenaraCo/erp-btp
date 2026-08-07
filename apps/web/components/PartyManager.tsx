@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
+import { usePermissions } from '@/lib/capabilities';
 import { SortHeader, SortState, nextSort, applySort } from './SortHeader';
 import { IconBtn } from './IconBtn';
 import { CompanySearch } from './CompanySearch';
@@ -40,6 +41,9 @@ export function PartyManager({
   singular: string;
 }) {
   const { token } = useAuth();
+  // Écrire dans le référentiel exige `directory.write` : sans lui, la liste reste consultable
+  // mais aucune action de création, modification ou suppression n'est proposée.
+  const peutEcrire = usePermissions().canOrLoading('directory.write');
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState>(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -112,7 +116,7 @@ export function PartyManager({
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>{title}</h1>
-        {!showForm && (
+        {!showForm && peutEcrire && (
           <button className="btn" onClick={startCreate}>
             + Nouveau {singular}
           </button>
@@ -198,16 +202,20 @@ export function PartyManager({
                   <td className="muted">{p.email ?? '—'}</td>
                   <td className="muted">{p.phone ?? '—'}</td>
                   <td style={{ textAlign: 'right', paddingRight: 8 }}>
-                    <IconBtn title={`Modifier ${p.name}`} color="#64748b" onClick={() => startEdit(p)}>
-                      <Pencil size={13} />
-                    </IconBtn>
-                    <IconBtn
-                      title={`Supprimer ${p.name}`}
-                      color="#dc2626"
-                      onClick={() => { if (confirm(`Supprimer ${p.name} ?`)) remove.mutate(p.id); }}
-                    >
-                      <Trash2 size={12} />
-                    </IconBtn>
+                    {peutEcrire && (
+                      <>
+                        <IconBtn title={`Modifier ${p.name}`} color="#64748b" onClick={() => startEdit(p)}>
+                          <Pencil size={13} />
+                        </IconBtn>
+                        <IconBtn
+                          title={`Supprimer ${p.name}`}
+                          color="#dc2626"
+                          onClick={() => { if (confirm(`Supprimer ${p.name} ?`)) remove.mutate(p.id); }}
+                        >
+                          <Trash2 size={12} />
+                        </IconBtn>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

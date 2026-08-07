@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { usePreferences, fmtNum, cleanNum } from '@/lib/preferences';
+import { usePermissions } from '@/lib/capabilities';
 
 /* ─────────── types ─────────── */
 export interface FullResource {
@@ -50,6 +51,9 @@ export function ResourceModal({ libId, resource, onClose }: {
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
   const isEdit = Boolean(resource);
+  // En lecture seule, la fiche reste CONSULTABLE — c'est son intérêt pour la direction — mais
+  // elle ne propose ni enregistrement ni suppression.
+  const peutEcrire = usePermissions().canOrLoading('estimating.devis.write');
 
   /* Référentiels (listes déroulantes dynamiques) */
   const units = useQuery({ queryKey: ['params-units'], enabled: Boolean(token),
@@ -182,7 +186,9 @@ export function ResourceModal({ libId, resource, onClose }: {
       <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <strong style={{ fontSize: 16 }}>{isEdit ? 'Modifier la ressource' : 'Nouvelle ressource'}</strong>
+          <strong style={{ fontSize: 16 }}>
+            {!peutEcrire ? 'Fiche ressource' : isEdit ? 'Modifier la ressource' : 'Nouvelle ressource'}
+          </strong>
           <button className="btn-ghost btn" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
         </div>
 
@@ -292,7 +298,7 @@ export function ResourceModal({ libId, resource, onClose }: {
         {/* Footer */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 20 }}>
           <div>
-            {isEdit && (
+            {isEdit && peutEcrire && (
               <button className="btn-danger btn" disabled={del.isPending}
                 onClick={() => {
                   setErr(null);
@@ -303,11 +309,13 @@ export function ResourceModal({ libId, resource, onClose }: {
             )}
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn-secondary btn" onClick={onClose}>Annuler</button>
-            <button className="btn" disabled={!f.code || !f.label || save.isPending}
-              onClick={() => { setErr(null); save.mutate(); }}>
-              {save.isPending ? '…' : isEdit ? 'Modifier' : 'Créer'}
-            </button>
+            <button className="btn-secondary btn" onClick={onClose}>{peutEcrire ? 'Annuler' : 'Fermer'}</button>
+            {peutEcrire && (
+              <button className="btn" disabled={!f.code || !f.label || save.isPending}
+                onClick={() => { setErr(null); save.mutate(); }}>
+                {save.isPending ? '…' : isEdit ? 'Modifier' : 'Créer'}
+              </button>
+            )}
           </div>
         </div>
       </div>

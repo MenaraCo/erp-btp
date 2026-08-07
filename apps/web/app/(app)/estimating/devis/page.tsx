@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
+import { usePermissions } from '@/lib/capabilities';
 
 function fmtM(val: string | null | undefined): string {
   if (!val) return '—';
@@ -150,6 +151,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function DevisListPage() {
   const { token } = useAuth();
+  const peutEcrire = usePermissions().canOrLoading('estimating.devis.write');
   const router = useRouter();
   const qc = useQueryClient();
 
@@ -258,6 +260,8 @@ export default function DevisListPage() {
     });
 
   function quickActions(d: DevisRow) {
+    // Les actions rapides changent toutes le statut : rien à proposer à un rôle de lecture.
+    if (!peutEcrire) return null;
     if (OPEN_STATUSES.includes(d.status)) {
       return (
         <IconBtn title="Envoyer le devis" color="#3b82f6"
@@ -316,9 +320,11 @@ export default function DevisListPage() {
           <h1 style={{ marginBottom: 0 }}>Devis</h1>
           <p className="muted" style={{ marginTop: 2, marginBottom: 0 }}>Tous les devis, toutes affaires confondues.</p>
         </div>
-        <button className="btn" onClick={() => { setShowNewDevis(true); setNewError(null); }}>
-          + Nouveau devis
-        </button>
+        {peutEcrire && (
+          <button className="btn" onClick={() => { setShowNewDevis(true); setNewError(null); }}>
+            + Nouveau devis
+          </button>
+        )}
       </div>
 
       {/* Barre de recherche */}
@@ -478,15 +484,19 @@ export default function DevisListPage() {
                       <td style={{ ...tdStyle, textAlign: 'right' }}>
                         <span style={{ display: 'inline-flex', gap: 0, alignItems: 'center' }}>
                           {quickActions(d)}
-                          <IconBtn title="Dupliquer" color="#64748b"
-                            onClick={(e) => { e.stopPropagation(); duplicateMut.mutate(d.id); }}
-                            disabled={duplicateMut.isPending}>
-                            <Copy size={13} />
-                          </IconBtn>
-                          <IconBtn title="Supprimer le devis" color="#dc2626"
-                            onClick={(e) => { e.stopPropagation(); setConfirmDelete(d); }}>
-                            <Trash2 size={12} />
-                          </IconBtn>
+                          {peutEcrire && (
+                            <>
+                              <IconBtn title="Dupliquer" color="#64748b"
+                                onClick={(e) => { e.stopPropagation(); duplicateMut.mutate(d.id); }}
+                                disabled={duplicateMut.isPending}>
+                                <Copy size={13} />
+                              </IconBtn>
+                              <IconBtn title="Supprimer le devis" color="#dc2626"
+                                onClick={(e) => { e.stopPropagation(); setConfirmDelete(d); }}>
+                                <Trash2 size={12} />
+                              </IconBtn>
+                            </>
+                          )}
                         </span>
                       </td>
                     </tr>
