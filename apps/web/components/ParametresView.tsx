@@ -310,7 +310,23 @@ function TabEntreprise({ token }: { token: string }) {
 
 /* ─────────── Lots ─────────── */
 
+/**
+ * Erreur d'écriture d'un onglet de référentiel.
+ *
+ * Le plan analytique refuse les doublons côté serveur (409). Sans ce relais, l'utilisateur
+ * cliquerait « Ajouter » sans rien voir se passer : le garde-fou serait invisible, donc inutile.
+ */
+function useErreurReferentiel() {
+  const [err, setErr] = useState<string | null>(null);
+  return {
+    err,
+    onError: (e: unknown) => setErr(e instanceof Error ? e.message : 'Opération impossible.'),
+    onOk: () => setErr(null),
+  };
+}
+
 function TabLots({ token }: { token: string }) {
+  const erreur = useErreurReferentiel();
   const qc = useQueryClient();
   const api = useApi();
   const { data: lots = [] } = useQuery<Lot[]>({
@@ -327,11 +343,13 @@ function TabLots({ token }: { token: string }) {
 
   const create = useMutation({
     mutationFn: () => api('/params/lots', { method: 'POST', body: { code: newCode, label: newLabel } }),
-    onSuccess: () => { inv(); setNewCode(''); setNewLabel(''); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); setNewCode(''); setNewLabel(''); },
   });
   const update = useMutation({
     mutationFn: (e: typeof editing) => api(`/params/lots/${e!.id}`, { method: 'PATCH', body: { code: e!.code, label: e!.label } }),
-    onSuccess: () => { inv(); setEditing(null); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); setEditing(null); },
   });
   const del = useMutation({
     mutationFn: (id: string) => api<{ orphanedFamilles?: number }>(`/params/lots/${id}`, { method: 'DELETE' }),
@@ -345,11 +363,13 @@ function TabLots({ token }: { token: string }) {
   });
   const bulkDelete = useMutation({
     mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/lots/${id}`, { method: 'DELETE' }))),
-    onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ['params-familles'] }); clear(); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); qc.invalidateQueries({ queryKey: ['params-familles'] }); clear(); },
   });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {erreur.err && <div className="error">{erreur.err}</div>}
       <Card title="Ajouter un lot">
         <Row>
           <Field label="Code"><input className="input" style={{ width: 100 }} placeholder="EX: GO" value={newCode} onChange={(e) => setNewCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create.mutate()} /></Field>
@@ -390,6 +410,7 @@ function TabLots({ token }: { token: string }) {
 /* ─────────── Familles ─────────── */
 
 function TabFamilles({ token }: { token: string }) {
+  const erreur = useErreurReferentiel();
   const qc = useQueryClient();
   const api = useApi();
   const { data: familles = [] } = useQuery<Famille[]>({
@@ -410,11 +431,13 @@ function TabFamilles({ token }: { token: string }) {
 
   const create = useMutation({
     mutationFn: () => api('/params/familles', { method: 'POST', body: { lotId: nf.lotId, code: nf.code, label: nf.label, nature: nf.nature } }),
-    onSuccess: () => { inv(); setNf({ lotId: '', code: '', label: '', nature: 'material' }); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); setNf({ lotId: '', code: '', label: '', nature: 'material' }); },
   });
   const update = useMutation({
     mutationFn: (e: NonNullable<typeof editing>) => api(`/params/familles/${e.id}`, { method: 'PATCH', body: { lotId: e.lotId || null, code: e.code, label: e.label, nature: e.nature } }),
-    onSuccess: () => { inv(); setEditing(null); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); setEditing(null); },
   });
   const del = useMutation({
     mutationFn: (id: string) => api<{ orphanedCodes?: number }>(`/params/familles/${id}`, { method: 'DELETE' }),
@@ -428,7 +451,8 @@ function TabFamilles({ token }: { token: string }) {
   });
   const bulkDelete = useMutation({
     mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/familles/${id}`, { method: 'DELETE' }))),
-    onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ['params-codes'] }); clear(); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); qc.invalidateQueries({ queryKey: ['params-codes'] }); clear(); },
   });
 
   // Réaffectation en masse : lot et/ou nature
@@ -441,13 +465,15 @@ function TabFamilles({ token }: { token: string }) {
       if (bulkNature) body.nature = bulkNature;
       return Promise.all([...selectedIds].map((id) => api(`/params/familles/${id}`, { method: 'PATCH', body })));
     },
-    onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ['params-codes'] }); clear(); setBulkLot(''); setBulkNature(''); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); qc.invalidateQueries({ queryKey: ['params-codes'] }); clear(); setBulkLot(''); setBulkNature(''); },
   });
 
   const orphanFam = familles.filter((f) => !f.lot_id).length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {erreur.err && <div className="error">{erreur.err}</div>}
       <Card title="Ajouter une famille">
         <Row>
           <Field label="Lot parent">
@@ -526,6 +552,7 @@ function TabFamilles({ token }: { token: string }) {
 /* ─────────── Codes analytiques ─────────── */
 
 function TabCodes({ token }: { token: string }) {
+  const erreur = useErreurReferentiel();
   const qc = useQueryClient();
   const api = useApi();
   const { data: codes = [] } = useQuery<Code[]>({
@@ -552,19 +579,23 @@ function TabCodes({ token }: { token: string }) {
 
   const create = useMutation({
     mutationFn: () => api('/params/codes', { method: 'POST', body: { familleId: nf.familleId, code: nf.code, label: nf.label, nature: nf.nature } }),
-    onSuccess: () => { inv(); setNf({ familleId: '', code: '', label: '', nature: 'material' }); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); setNf({ familleId: '', code: '', label: '', nature: 'material' }); },
   });
   const update = useMutation({
     mutationFn: (e: NonNullable<typeof editing>) => api(`/params/codes/${e.id}`, { method: 'PATCH', body: { familleId: e.familleId || null, code: e.code, label: e.label, nature: e.nature } }),
-    onSuccess: () => { inv(); setEditing(null); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); setEditing(null); },
   });
   const del = useMutation({
     mutationFn: (id: string) => api(`/params/codes/${id}`, { method: 'DELETE' }),
-    onSuccess: inv,
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); },
   });
   const bulkDelete = useMutation({
     mutationFn: () => Promise.all([...selectedIds].map((id) => api(`/params/codes/${id}`, { method: 'DELETE' }))),
-    onSuccess: () => { inv(); clear(); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); clear(); },
   });
 
   // Réaffectation en masse : famille (la nature suit la famille)
@@ -575,13 +606,15 @@ function TabCodes({ token }: { token: string }) {
       const body = { familleId: bulkFamille, nature: fa ? fa.nature : undefined };
       return Promise.all([...selectedIds].map((id) => api(`/params/codes/${id}`, { method: 'PATCH', body })));
     },
-    onSuccess: () => { inv(); clear(); setBulkFamille(''); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); inv(); clear(); setBulkFamille(''); },
   });
 
   const orphanCodes = codes.filter((c) => !c.famille_id).length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {erreur.err && <div className="error">{erreur.err}</div>}
       <Card title="Ajouter un code analytique">
         <Row>
           <Field label="Famille">
@@ -811,6 +844,7 @@ function TabDebourseTypes({ token }: { token: string }) {
 /* ─────────── Unités ─────────── */
 
 function TabUnites({ token }: { token: string }) {
+  const erreur = useErreurReferentiel();
   const qc = useQueryClient();
   const api = useApi();
   const { data: units = [] } = useQuery<Unit[]>({
@@ -823,11 +857,13 @@ function TabUnites({ token }: { token: string }) {
 
   const create = useMutation({
     mutationFn: () => api('/params/units', { method: 'POST', body: form }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['params-units'] }); setForm({ abrev: '', label: '' }); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); qc.invalidateQueries({ queryKey: ['params-units'] }); setForm({ abrev: '', label: '' }); },
   });
   const update = useMutation({
     mutationFn: (u: Unit) => api(`/params/units/${u.id}`, { method: 'PATCH', body: { abrev: u.abrev, label: u.label } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['params-units'] }); setEditing(null); },
+    onError: erreur.onError,
+    onSuccess: () => { erreur.onOk(); qc.invalidateQueries({ queryKey: ['params-units'] }); setEditing(null); },
   });
   const del = useMutation({
     mutationFn: (id: string) => api(`/params/units/${id}`, { method: 'DELETE' }),
@@ -844,6 +880,7 @@ function TabUnites({ token }: { token: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {erreur.err && <div className="error">{erreur.err}</div>}
       <Card title={`Unités de mesure${units.length > 0 ? ` (${units.length})` : ''}`}>
         <p className="muted" style={{ margin: '0 0 12px', fontSize: 11 }}>
           Ces unités sont proposées dans tous les sélecteurs (lignes de devis, ressources, ouvrages…)
