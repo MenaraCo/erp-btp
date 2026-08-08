@@ -1,8 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { normaliserLibelle } from '../../core/common/normalisation';
 
 /* ------------------------------------------------------------------ types */
 
@@ -65,6 +71,7 @@ export class ParamsService {
   async createUnit(input: UnitInput) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertPasDeDoublon(em, 'unit_mesure', 'abrev', input.abrev, input.label);
       const maxRow = await em.query(
         `SELECT COALESCE(MAX(sort_order),0) AS max FROM unit_mesure`,
       );
@@ -82,6 +89,7 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertExists(em, 'unit_mesure', id);
+      await this.assertPasDeDoublon(em, 'unit_mesure', 'abrev', input.abrev, input.label, id);
       await em.query(
         `UPDATE unit_mesure SET
            abrev      = COALESCE($2, abrev),
@@ -125,6 +133,7 @@ export class ParamsService {
   async createLot(input: LotInput) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertPasDeDoublon(em, 'analytical_lot', 'code', input.code, input.label);
       // nature='material' par défaut : le lot est un lot de travaux, la nature réelle
       // est portée par la famille / le code analytique (migration 046).
       const rows = await em.query(
@@ -140,6 +149,7 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertExists(em, 'analytical_lot', id);
+      await this.assertPasDeDoublon(em, 'analytical_lot', 'code', input.code, input.label, id);
       await em.query(
         `UPDATE analytical_lot SET
            code  = COALESCE($2, code),
@@ -183,6 +193,7 @@ export class ParamsService {
   async createFamille(input: FamilleInput) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertPasDeDoublon(em, 'analytical_famille', 'code', input.code, input.label);
       const rows = await em.query(
         `INSERT INTO analytical_famille (tenant_id, lot_id, code, label, nature)
          VALUES ($1,$2,$3,$4,COALESCE($5,'material'))
@@ -197,6 +208,7 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertExists(em, 'analytical_famille', id);
+      await this.assertPasDeDoublon(em, 'analytical_famille', 'code', input.code, input.label, id);
       await em.query(
         `UPDATE analytical_famille SET
            lot_id = COALESCE($2, lot_id),
@@ -243,6 +255,7 @@ export class ParamsService {
   async createCode(input: CodeInput) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertPasDeDoublon(em, 'analytical_code', 'code', input.code, input.label);
       // Nature par défaut = celle de la famille parente si non fournie
       const rows = await em.query(
         `INSERT INTO analytical_code (tenant_id, famille_id, code, label, nature)
@@ -259,6 +272,7 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertExists(em, 'analytical_code', id);
+      await this.assertPasDeDoublon(em, 'analytical_code', 'code', input.code, input.label, id);
       await em.query(
         `UPDATE analytical_code SET
            famille_id = COALESCE($2, famille_id),
@@ -475,6 +489,52 @@ export class ParamsService {
   }
 
   /* ======================== PRIVATE ======================== */
+
+  /**
+   * Barrage aux doublons du plan analytique.
+   *
+   * Le plan est UNE référence partagée, éditable depuis l'étude de prix comme depuis le chantier.
+   * Deux personnes qui ne se voient pas y créent tôt ou tard la même chose sous deux codes —
+   * « COLLE » chez le deviseur, « Colle carrelage » chez le conducteur — et l'agrégation
+   * analytique se met à compter la même dépense sur deux lignes.
+   *
+   * On refuse donc le code déjà pris (message clair plutôt qu'une erreur SQL brute) ET le libellé
+   * déjà employé une fois normalisé. `idExclu` laisse une fiche se renommer elle-même.
+   */
+  private async assertPasDeDoublon(
+    em: EntityManager,
+    table: string,
+    colonneCode: 'code' | 'abrev',
+    valeurCode: string | null | undefined,
+    libelle: string | null | undefined,
+    idExclu?: string,
+  ): Promise<void> {
+    const existantes: Array<{ id: string; code: string; label: string }> = await em.query(
+      `SELECT id, ${colonneCode} AS code, label FROM ${table}`,
+    );
+    const autres = existantes.filter((e) => e.id !== idExclu);
+
+    const code = (valeurCode ?? '').trim().toLowerCase();
+    if (code) {
+      const collision = autres.find((e) => (e.code ?? '').trim().toLowerCase() === code);
+      if (collision) {
+        throw new ConflictException(
+          `Le code « ${collision.code} » est déjà utilisé par « ${collision.label} ».`,
+        );
+      }
+    }
+
+    const libelleNorm = normaliserLibelle(libelle);
+    if (libelleNorm) {
+      const collision = autres.find((e) => normaliserLibelle(e.label) === libelleNorm);
+      if (collision) {
+        throw new ConflictException(
+          `« ${collision.label} » (${collision.code}) désigne déjà cela. `
+          + `Reprenez cette entrée plutôt que d'en créer une seconde.`,
+        );
+      }
+    }
+  }
 
   private async assertExists(em: any, table: string, id: string): Promise<void> {
     const rows = await em.query(`SELECT id FROM ${table} WHERE id = $1`, [id]);

@@ -14,6 +14,13 @@ describe('Référentiel — détection de doublons', () => {
       expect(normaliserNom('Béton Prêt SARL')).toBe('beton pret');
     });
 
+    it('traite les ligatures, que la décomposition Unicode ignore', () => {
+      // « Gros œuvre » est l'un des mots les plus courants du métier : sans ce traitement il
+      // deviendrait « gros uvre » et ne rejoindrait jamais « GROS OEUVRE ».
+      expect(normaliserNom('Gros œuvre')).toBe('gros oeuvre');
+      expect(normaliserNom('GROS OEUVRE')).toBe('gros oeuvre');
+    });
+
     it("ne réduit pas à rien un intitulé qui n'est QUE sa forme juridique", () => {
       // « SARL » seul reste « sarl » : autrement deux sociétés sans nom se confondraient.
       expect(normaliserNom('SARL')).toBe('sarl');

@@ -2,42 +2,20 @@
  * Détection de doublons au référentiel (clients et fournisseurs).
  *
  * Un référentiel se pollue toujours de la même façon : la même entreprise saisie trois fois sous
- * « POINT P », « Point P SAS » et « POINT-P ». Comparer les intitulés bruts ne rattrape rien ;
- * on compare donc une forme NORMALISÉE — sans casse, sans accents, sans ponctuation, sans forme
- * juridique — et le numéro de TVA, qui tranche à lui seul quand il est renseigné.
+ * « POINT P », « Point P SAS » et « POINT-P ». On compare donc des formes NORMALISÉES (voir
+ * `core/common/normalisation`) plutôt que les saisies brutes, et le numéro de TVA, qui tranche à
+ * lui seul quand il est renseigné.
  *
  * Module pur : aucune dépendance à la base, testable seul.
  */
+import {
+  normaliserRaisonSociale,
+  normaliserTva,
+} from '../../core/common/normalisation';
 
-/** Formes juridiques françaises courantes, retirées avant comparaison. */
-const FORMES_JURIDIQUES = [
-  'sarl', 'sas', 'sasu', 'sa', 'eurl', 'sci', 'snc', 'scop', 'gie', 'ei', 'eirl', 'sem',
-];
-
-/**
- * Forme comparable d'un intitulé : minuscules, sans accents, sans ponctuation, formes juridiques
- * ôtées. « Point-P S.A.S. » et « POINT P » donnent tous deux « point p ».
- */
-export function normaliserNom(nom: string): string {
-  const base = (nom ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '') // accents
-    .toLowerCase()
-    // Les points partent AVANT le découpage : sans cela « S.A.S. » deviendrait « s a s », trois
-    // lettres isolées où le filtre des formes juridiques ne reconnaît plus rien.
-    .replace(/\./g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-  const mots = base.split(' ').filter((m) => m && !FORMES_JURIDIQUES.includes(m));
-  // Un intitulé qui n'est QUE sa forme juridique ne doit pas se réduire à rien : on garde la base.
-  return (mots.length > 0 ? mots.join(' ') : base).trim();
-}
-
-/** Numéro de TVA comparable : sans espaces ni ponctuation, en majuscules. */
-export function normaliserTva(tva: string | null | undefined): string | null {
-  const v = (tva ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-  return v.length > 0 ? v : null;
-}
+export { normaliserTva };
+/** Conservé sous son nom d'origine : c'est bien une raison sociale que l'on normalise ici. */
+export const normaliserNom = normaliserRaisonSociale;
 
 export interface PartyExistante {
   id: string;
