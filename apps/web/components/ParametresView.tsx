@@ -81,7 +81,7 @@ interface Preferences { id: string; taux_fg_default: string; taux_ben_default: s
 
 /* ─────────── tabs ─────────── */
 
-const TABS = ['Entreprise', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Préférences'] as const;
+const TABS = ['Entreprise', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Doublons', 'Préférences'] as const;
 type Tab = typeof TABS[number];
 
 /** Onglets propres à la société : ce qui ne dépend d'aucun module métier. */
@@ -98,7 +98,7 @@ export const ONGLETS_ETUDE: Tab[] = ['Types de déboursé'];
  * Ce que chaque module gagne, c'est l'ACCÈS : on paramètre son référentiel depuis là où l'on
  * travaille, sans passer par la Configuration. Les écrans sont les mêmes, les données aussi.
  */
-export const ONGLETS_PLAN_ANALYTIQUE: Tab[] = ['Familles', 'Codes analytiques', 'Lots', 'Unités'];
+export const ONGLETS_PLAN_ANALYTIQUE: Tab[] = ['Familles', 'Codes analytiques', 'Lots', 'Unités', 'Doublons'];
 
 /* ═══════════════════════════════════════════════════════════
    PAGE
@@ -151,6 +151,7 @@ export function ParametresView({
       {token && tab === 'Codes analytiques' && <TabCodes token={token} />}
       {token && tab === 'Lots' && <TabLots token={token} />}
       {token && tab === 'Unités' && <TabUnites token={token} />}
+      {token && tab === 'Doublons' && <TabDoublons token={token} />}
       {token && tab === 'Préférences' && <TabPreferences token={token} />}
       {!token && <p className="muted">Chargement…</p>}
     </div>
@@ -309,6 +310,109 @@ function TabEntreprise({ token }: { token: string }) {
 }
 
 /* ─────────── Lots ─────────── */
+
+
+interface GroupeDoublon {
+  type: 'lot' | 'famille' | 'code';
+  libelle: string;
+  entrees: Array<{ id: string; code: string; label: string; usages: number }>;
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  lot: 'Lot', famille: 'Famille', code: 'Code analytique',
+};
+
+/**
+ * Doublons DÉJÀ en place — ceux que la garde à l'écriture n'a pas pu empêcher.
+ *
+ * Un code analytique en double fausse l'agrégation : la même dépense se répartit sur deux lignes.
+ * Fusionner réaffecte tout ce qui pointait sur le doublon (ressources, commandes, factures,
+ * pointages) avant de le supprimer — d'où le nombre d'usages affiché, qui dit lequel garder.
+ */
+function TabDoublons({ token }: { token: string }) {
+  const erreur = useErreurReferentiel();
+  const qc = useQueryClient();
+  const api = useApi();
+  const { data: groupes = [], isLoading } = useQuery<GroupeDoublon[]>({
+    queryKey: ['params-doublons'],
+    queryFn: () => api('/params/doublons'),
+  });
+
+  const fusion = useMutation({
+    mutationFn: (v: { type: string; gardeId: string; supprimeId: string }) =>
+      api('/params/doublons/fusionner', { method: 'POST', body: v }),
+    onError: erreur.onError,
+    onSuccess: () => {
+      erreur.onOk();
+      // Tout le plan a pu bouger : on réinterroge large plutôt que de deviner.
+      for (const k of ['params-doublons', 'params-codes', 'params-familles', 'params-lots']) {
+        qc.invalidateQueries({ queryKey: [k] });
+      }
+    },
+  });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {erreur.err && <div className="error">{erreur.err}</div>}
+      <p className="muted" style={{ margin: 0, fontSize: 12, maxWidth: 700 }}>
+        Entrées qui désignent visiblement la même chose (même libellé, casse et accents ignorés).
+        Gardez celle qui porte le plus d’usages : la fusion lui réaffecte les ressources, commandes,
+        factures et pointages de l’autre, puis supprime le doublon.
+      </p>
+
+      {isLoading ? (
+        <p className="muted" style={{ fontSize: 12 }}>Analyse du plan…</p>
+      ) : groupes.length === 0 ? (
+        <Card title="Aucun doublon">
+          <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+            Le plan analytique ne contient pas deux entrées de même libellé.
+          </p>
+        </Card>
+      ) : (
+        groupes.map((g) => (
+          <Card key={`${g.type}-${g.libelle}`} title={`${TYPE_LABEL[g.type] ?? g.type} — « ${g.libelle} »`}>
+            <table className="grid">
+              <thead>
+                <tr><th>Code</th><th>Désignation</th><th style={{ textAlign: 'right' }}>Usages</th><th /></tr>
+              </thead>
+              <tbody>
+                {g.entrees.map((e) => (
+                  <tr key={e.id}>
+                    <td className="code-cell">{e.code}</td>
+                    <td>{e.label}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{e.usages}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        className="btn-secondary btn"
+                        style={{ padding: '2px 10px', fontSize: 10.5 }}
+                        disabled={fusion.isPending}
+                        title={`Garder « ${e.label} » et y fusionner les autres`}
+                        onClick={() => {
+                          const autres = g.entrees.filter((x) => x.id !== e.id);
+                          const noms = autres.map((x) => `${x.code} (${x.usages} usage(s))`).join(', ');
+                          if (!confirm(
+                            `Garder « ${e.label} » (${e.code}) et y fusionner : ${noms} ?\n\n`
+                            + `Les rattachements seront réaffectés, puis les doublons supprimés. Action définitive.`,
+                          )) return;
+                          erreur.onOk();
+                          for (const a of autres) {
+                            fusion.mutate({ type: g.type, gardeId: e.id, supprimeId: a.id });
+                          }
+                        }}
+                      >
+                        Garder celle-ci
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
 
 /**
  * Erreur d'écriture d'un onglet de référentiel.

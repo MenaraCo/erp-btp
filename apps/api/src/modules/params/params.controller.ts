@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -199,4 +200,26 @@ export class ParamsController {
   deleteCode(@Param('id') id: string) {
     return this.params.deleteCode(id);
   }
+  /* ── Doublons déjà en place ─────────────────────────────────────────────────────────────── */
+
+  /** Relevé des entrées qui désignent visiblement la même chose (même libellé normalisé). */
+  @Get('doublons')
+  @RequiresPermission('estimating.devis.read')
+  listerDoublons() {
+    return this.params.listerDoublons();
+  }
+
+  /**
+   * Fusionne un doublon dans l'entrée à conserver. Écriture lourde (elle réaffecte ressources,
+   * commandes, factures et pointages), donc gardée comme les autres modifications du plan.
+   */
+  @Post('doublons/fusionner')
+  @RequiresPermission('estimating.devis.write')
+  fusionnerDoublon(@Body() body: { type?: string; gardeId?: string; supprimeId?: string }) {
+    if (!body?.type || !body?.gardeId || !body?.supprimeId) {
+      throw new BadRequestException('type, gardeId et supprimeId sont requis.');
+    }
+    return this.params.fusionnerDoublon(body.type, body.gardeId, body.supprimeId);
+  }
+
 }

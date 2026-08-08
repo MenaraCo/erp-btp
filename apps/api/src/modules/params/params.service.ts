@@ -490,6 +490,112 @@ export class ParamsService {
 
   /* ======================== PRIVATE ======================== */
 
+
+  /* ================== DOUBLONS DÉJÀ EN PLACE ================== */
+
+  /**
+   * Tables qui référencent chaque niveau du plan. La fusion doit toutes les réaffecter avant de
+   * supprimer le doublon — en oublier une casserait une clé étrangère, ou pire, ferait disparaître
+   * silencieusement des coûts de l'agrégation analytique.
+   */
+  private static readonly REFERENCES: Record<string, { table: string; refs: Array<[string, string]> }> = {
+    lot: {
+      table: 'analytical_lot',
+      refs: [['analytical_famille', 'lot_id'], ['ouvrage', 'lot_id']],
+    },
+    famille: {
+      table: 'analytical_famille',
+      refs: [['analytical_code', 'famille_id']],
+    },
+    code: {
+      table: 'analytical_code',
+      refs: [
+        ['resource', 'code_analytique_id'],
+        ['nomenclature_resource', 'code_analytique_id'],
+        ['purchase_order_line', 'code_analytique_id'],
+        ['supplier_invoice', 'code_analytique_id'],
+        ['timesheet', 'code_analytique_id'],
+      ],
+    },
+  };
+
+  /**
+   * Entrées du plan qui désignent visiblement la même chose — même libellé une fois normalisé.
+   *
+   * La garde à l'écriture empêche d'en créer de nouveaux ; elle ne dit rien de ceux déjà en base,
+   * hérités d'imports ou d'une époque sans contrôle. Ce relevé les met sous les yeux.
+   */
+  async listerDoublons() {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const groupes: Array<{
+        type: string;
+        libelle: string;
+        entrees: Array<{ id: string; code: string; label: string; usages: number }>;
+      }> = [];
+
+      for (const [type, { table, refs }] of Object.entries(ParamsService.REFERENCES)) {
+        const lignes: Array<{ id: string; code: string; label: string }> = await em.query(
+          `SELECT id, code, label FROM ${table} ORDER BY code`,
+        );
+        const parLibelle = new Map<string, typeof lignes>();
+        for (const l of lignes) {
+          const cle = normaliserLibelle(l.label);
+          if (!cle) continue;
+          const liste = parLibelle.get(cle);
+          if (liste) liste.push(l);
+          else parLibelle.set(cle, [l]);
+        }
+        for (const [cle, liste] of parLibelle) {
+          if (liste.length < 2) continue;
+          // Le nombre d'usages guide le choix du survivant : on garde celui qui porte le plus.
+          const entrees = [];
+          for (const e of liste) {
+            let usages = 0;
+            for (const [t, col] of refs) {
+              const [r] = await em.query(`SELECT count(*)::int AS n FROM ${t} WHERE ${col} = $1`, [e.id]);
+              usages += r.n;
+            }
+            entrees.push({ ...e, usages });
+          }
+          groupes.push({ type, libelle: cle, entrees });
+        }
+      }
+      return groupes;
+    });
+  }
+
+  /**
+   * Fusionne un doublon dans l'entrée à conserver : tout ce qui pointait sur le doublon pointe
+   * désormais sur le survivant, puis le doublon disparaît.
+   *
+   * Une seule transaction : une réaffectation à moitié faite laisserait des coûts orphelins, et
+   * l'agrégation analytique s'en trouverait fausse sans que rien ne le signale.
+   */
+  async fusionnerDoublon(type: string, gardeId: string, supprimeId: string) {
+    const conf = ParamsService.REFERENCES[type];
+    if (!conf) throw new BadRequestException(`Type de référentiel inconnu : « ${type} ».`);
+    if (gardeId === supprimeId) {
+      throw new BadRequestException('Choisissez deux entrées différentes.');
+    }
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertExists(em, conf.table, gardeId);
+      await this.assertExists(em, conf.table, supprimeId);
+
+      let reaffectes = 0;
+      for (const [t, col] of conf.refs) {
+        const r = await em.query(
+          `UPDATE ${t} SET ${col} = $1 WHERE ${col} = $2`,
+          [gardeId, supprimeId],
+        );
+        reaffectes += r[1] ?? 0;
+      }
+      await em.query(`DELETE FROM ${conf.table} WHERE id = $1`, [supprimeId]);
+      return { reaffectes };
+    });
+  }
+
   /**
    * Barrage aux doublons du plan analytique.
    *

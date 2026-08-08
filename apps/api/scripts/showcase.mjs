@@ -20,7 +20,10 @@ const API = process.env.API_URL ?? 'http://localhost:3001';
 const SLUG = process.env.TENANT_SLUG ?? 'demo';
 const EMAIL = process.env.SEED_EMAIL ?? 'admin@demo.test';
 const PASSWORD = process.env.SEED_PASSWORD ?? 'demo1234';
-const AFFAIRE_CODE = 'SHOWCASE';
+// Code de l'affaire ET de la bibliothèque produites. Paramétrable pour pouvoir générer un second
+// scénario — ou en éprouver un — sans écraser celui qui est déjà en place.
+const AFFAIRE_CODE = process.env.SHOWCASE_CODE ?? 'SHOWCASE';
+const LIB_CODE = `BIB-${AFFAIRE_CODE}`;
 
 let TOKEN = '';
 async function api(method, path, body, { raw = false } = {}) {
@@ -58,8 +61,8 @@ async function main() {
 
   // 2) Bibliothèque multi-natures (codes préfixés SHW- pour ne pas heurter le seed démo — codes uniques par tenant)
   const libs = await api('GET', '/libraries').then((d) => (Array.isArray(d) ? d : d.rows ?? []));
-  const existingLib = libs.find((l) => l.code === 'BIB-SHOWCASE');
-  const lib = existingLib ?? (await api('POST', '/libraries', { code: 'BIB-SHOWCASE', name: 'Bibliothèque démonstration' }));
+  const existingLib = libs.find((l) => l.code === LIB_CODE);
+  const lib = existingLib ?? (await api('POST', '/libraries', { code: LIB_CODE, name: 'Bibliothèque démonstration' }));
   const listOf = (d) => (Array.isArray(d) ? d : d.rows ?? []);
   const existingRes = new Map(listOf(await api('GET', `/libraries/${lib.id}/resources`)).map((r) => [r.code, r.id]));
   const existingOuv = new Map(listOf(await api('GET', `/libraries/${lib.id}/ouvrages`)).map((o) => [o.code, o.id]));
@@ -174,7 +177,9 @@ async function main() {
   log(`feuille de vente : total HT ${fv.totalPvHt ?? '?'} €`);
 
   // 6) Workflow → gagné
-  for (const to of ['study', 'coeffs_proposed', 'coeffs_validated', 'sent', 'won']) {
+  // Cycle commercial actuel (migration 072) : les étapes « étude » et « coefficients » ont été
+  // retirées du workflow — elles décrivaient l'avancement du chiffrage, pas l'état commercial.
+  for (const to of ['sent', 'won']) {
     await api('POST', `/devis/${devisId}/transition`, { to });
   }
   log('devis marqué GAGNÉ');
