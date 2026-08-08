@@ -39,8 +39,9 @@ export class LibrariesController {
   @Get()
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.read')
-  listLibraries(@Query() query: DataGridQuery) {
-    return this.libraries.listLibraries(query);
+  listLibraries(@Query() query: DataGridQuery, @Query('scope') scope?: string) {
+    // Défaut « etude » : les écrans de chiffrage ne doivent pas voir les catalogues du chantier.
+    return this.libraries.listLibraries(query, scope === 'chantier' ? 'chantier' : 'etude');
   }
 
   @Post(':libraryId/resources')

@@ -48,7 +48,14 @@ const NATURES = [
 
 const PAGE_SIZE = 50;
 
-export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'ressources' | 'ouvrages' }) {
+export function BibliothequeView({
+  section = 'both',
+  scope = 'etude',
+}: {
+  section?: 'both' | 'ressources' | 'ouvrages';
+  /** Catalogue visé : celui du chiffrage, ou celui du module chantier. */
+  scope?: 'etude' | 'chantier';
+}) {
   const { token } = useAuth();
   const { nb_decimales: nbDec } = usePreferences();
   // Un rôle de lecture (Direction) ne se voit pas proposer de créer ni de modifier : le serveur
@@ -99,9 +106,9 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
   const doSort = (key: string) => { setSort((s) => nextSort(s, key)); setPage(1); };
 
   const libs = useQuery({
-    queryKey: ['libraries'],
+    queryKey: ['libraries', scope],
     enabled: Boolean(token),
-    queryFn: () => apiFetch<Page<Library>>('/libraries?pageSize=100', { token }),
+    queryFn: () => apiFetch<Page<Library>>(`/libraries?pageSize=100&scope=${scope}`, { token }),
   });
   // Liste paginée (recherche + filtre nature + tri côté serveur → scale à des milliers d'articles)
   const resources = useQuery({
@@ -126,13 +133,16 @@ export function BibliothequeView({ section = 'both' }: { section?: 'both' | 'res
   const [resModal, setResModal] = useState<'new' | Resource | null>(null);
 
   const createLib = useMutation({
-    mutationFn: () => apiFetch<Library>('/libraries', { method: 'POST', body: libForm, token }),
+    // La bibliothèque créée appartient au module d'où on la crée : sans quoi le chantier
+    // fabriquerait des catalogues qui n'apparaîtraient que côté chiffrage.
+    mutationFn: () => apiFetch<Library>('/libraries', { method: 'POST', body: { ...libForm, scope }, token }),
     onSuccess: (lib) => { qc.invalidateQueries({ queryKey: ['libraries'] }); setLibForm({ code: '', name: '' }); setLibId(lib.id); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
 
   const title = section === 'ressources' ? 'Bibliothèque — Ressources'
-    : section === 'ouvrages' ? 'Bibliothèque — Ouvrages' : 'Bibliothèque d’étude de prix';
+    : section === 'ouvrages' ? 'Bibliothèque — Ouvrages'
+    : scope === 'chantier' ? 'Bibliothèque du module chantier' : 'Bibliothèque d’étude de prix';
   const resRows = resources.data?.rows ?? [];
   const resTotal = resources.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(resTotal / PAGE_SIZE));

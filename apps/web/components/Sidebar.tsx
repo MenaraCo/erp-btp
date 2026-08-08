@@ -7,7 +7,7 @@ import {
   LayoutDashboard, CalendarDays, FolderOpen, FileText, BookOpen,
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
   CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
-  LayoutGrid, ArrowLeft,
+  LayoutGrid, ArrowLeft, ArrowLeftRight,
 } from 'lucide-react';
 import { moduleForPath } from '@/lib/modules';
 
@@ -21,12 +21,14 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/estimating/bibliotheque': BookOpen,
   '/estimating/bibliotheque/ouvrages': Layers,
   '/estimating/bibliotheque/ressources': Package,
+  '/estimating/bibliotheque/transfert': ArrowLeftRight,
   '/estimating/imports': Upload,
   '/clients': Users,
   '/suppliers': Truck,
   '/acceptation': ClipboardCheck,
   '/direction': Gauge,
   '/chantiers': Building2,
+  '/chantiers/bibliotheque': BookOpen,
   '/invoicing': Receipt,
   '/params': Settings,
   '/users': UserCog,
@@ -57,6 +59,12 @@ function isActive(href: string, pathname: string): boolean {
   }
   if (href === '/estimating/bibliotheque') {
     return pathname === '/estimating/bibliotheque';
+  }
+  // « Chantiers » est le parent d'URL de la bibliothèque du module : il ne doit pas s'allumer
+  // quand on la consulte.
+  if (href === '/chantiers') {
+    return pathname === '/chantiers'
+      || (pathname.startsWith('/chantiers/') && !pathname.startsWith('/chantiers/bibliotheque'));
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }

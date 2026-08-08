@@ -51,6 +51,7 @@ export const MODULES: AppModule[] = [
       { href: '/estimating/bibliotheque', label: 'Bibliothèque' },
       { href: '/estimating/bibliotheque/ouvrages', label: 'Ouvrages', level: 1 },
       { href: '/estimating/bibliotheque/ressources', label: 'Ressources', level: 1 },
+      { href: '/estimating/bibliotheque/transfert', label: 'Transfert chantier', level: 1 },
       { href: '/estimating/imports', label: 'Imports' },
     ],
   },
@@ -70,7 +71,10 @@ export const MODULES: AppModule[] = [
     home: '/chantiers',
     match: ['/chantiers'],
     capabilities: ['site_tracking.budget', 'site_tracking.timesheet'],
-    features: [{ href: '/chantiers', label: 'Chantiers' }],
+    features: [
+      { href: '/chantiers', label: 'Chantiers' },
+      { href: '/chantiers/bibliotheque', label: 'Bibliothèque chantier' },
+    ],
   },
   {
     key: 'invoicing',

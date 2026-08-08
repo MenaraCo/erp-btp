@@ -21,6 +21,8 @@ export interface LibraryInput {
   code: string;
   name: string;
   description?: string | null;
+  /** Module propriétaire du catalogue ; « etude » par défaut. */
+  scope?: 'etude' | 'chantier';
 }
 
 /** Coercition numérique sûre : accepte virgule ou point, renvoie une chaîne numérique ou un défaut. */
@@ -111,10 +113,19 @@ export class LibrariesService {
     );
   }
 
-  listLibraries(query: DataGridQuery): Promise<PaginatedResult<LibraryEntity>> {
+  /**
+   * `scope` filtre par module propriétaire. Sans lui on retombe sur « etude » : les écrans de
+   * chiffrage existants ne doivent jamais voir apparaître les catalogues du chantier.
+   */
+  listLibraries(
+    query: DataGridQuery,
+    scope: 'etude' | 'chantier' = 'etude',
+  ): Promise<PaginatedResult<LibraryEntity>> {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
-      paginate(em.getRepository(LibraryEntity).createQueryBuilder('p'), query, {
+      paginate(
+        em.getRepository(LibraryEntity).createQueryBuilder('p').where('p.scope = :scope', { scope }),
+        query, {
         alias: 'p',
         sortable: ['code', 'name', 'createdAt'],
         searchable: ['code', 'name'],

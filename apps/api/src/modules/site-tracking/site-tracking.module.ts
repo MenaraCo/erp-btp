@@ -8,6 +8,8 @@ import { TimesheetController } from './timesheet.controller';
 import { PurchasingService } from './purchasing.service';
 import { PurchasingController } from './purchasing.controller';
 import { AnalyticsService } from './analytics.service';
+import { LibraryTransferService } from './library-transfer.service';
+import { LibraryTransferController } from './library-transfer.controller';
 import { AnalyticsController } from './analytics.controller';
 
 /**
@@ -16,12 +18,13 @@ import { AnalyticsController } from './analytics.controller';
  */
 @Module({
   imports: [TenancyModule, EstimatingModule],
-  providers: [ChantierService, TimesheetService, PurchasingService, AnalyticsService],
+  providers: [ChantierService, TimesheetService, PurchasingService, AnalyticsService, LibraryTransferService],
   controllers: [
     ChantierController,
     TimesheetController,
     PurchasingController,
     AnalyticsController,
+    LibraryTransferController,
   ],
   exports: [ChantierService, TimesheetService, PurchasingService, AnalyticsService],
 })

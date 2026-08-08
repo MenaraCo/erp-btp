@@ -13,4 +13,11 @@ export class LibraryEntity extends BaseTenantEntity {
 
   @Column({ type: 'text', nullable: true })
   description?: string | null;
+
+  /**
+   * À quel module appartient ce catalogue de référence : `etude` pour le chiffrage, `chantier`
+   * pour l'exécution. Deux catalogues d'entreprise distincts, reliés par l'outil de transfert.
+   */
+  @Column({ type: 'varchar', length: 16, default: 'etude' })
+  scope!: 'etude' | 'chantier';
 }
