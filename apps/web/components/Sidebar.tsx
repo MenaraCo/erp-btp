@@ -30,6 +30,8 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/chantiers': Building2,
   '/chantiers/bibliotheque': BookOpen,
   '/invoicing': Receipt,
+  '/estimating/parametres': Settings,
+  '/chantiers/parametres': Settings,
   '/params': Settings,
   '/users': UserCog,
   '/abonnement': CreditCard,
@@ -51,7 +53,8 @@ function isActive(href: string, pathname: string): boolean {
         !pathname.startsWith('/estimating/planning') &&
         !pathname.startsWith('/estimating/devis') &&
         !pathname.startsWith('/estimating/bibliotheque') &&
-        !pathname.startsWith('/estimating/imports'))
+        !pathname.startsWith('/estimating/imports') &&
+        !pathname.startsWith('/estimating/parametres'))
     );
   }
   if (href === '/estimating/devis') {
@@ -64,7 +67,9 @@ function isActive(href: string, pathname: string): boolean {
   // quand on la consulte.
   if (href === '/chantiers') {
     return pathname === '/chantiers'
-      || (pathname.startsWith('/chantiers/') && !pathname.startsWith('/chantiers/bibliotheque'));
+      || (pathname.startsWith('/chantiers/')
+          && !pathname.startsWith('/chantiers/bibliotheque')
+          && !pathname.startsWith('/chantiers/parametres'));
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }

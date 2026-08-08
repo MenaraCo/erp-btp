@@ -53,6 +53,7 @@ export const MODULES: AppModule[] = [
       { href: '/estimating/bibliotheque/ressources', label: 'Ressources', level: 1 },
       { href: '/estimating/bibliotheque/transfert', label: 'Transfert chantier', level: 1 },
       { href: '/estimating/imports', label: 'Imports' },
+      { href: '/estimating/parametres', label: 'Paramètres' },
     ],
   },
   {
@@ -74,6 +75,7 @@ export const MODULES: AppModule[] = [
     features: [
       { href: '/chantiers', label: 'Chantiers' },
       { href: '/chantiers/bibliotheque', label: 'Bibliothèque chantier' },
+      { href: '/chantiers/parametres', label: 'Paramètres' },
     ],
   },
   {
@@ -109,7 +111,7 @@ export const MODULES: AppModule[] = [
   {
     key: 'configuration',
     label: 'Configuration',
-    tagline: 'Paramètres société, utilisateurs et abonnement',
+    tagline: 'Identité de la société, utilisateurs et abonnement',
     home: '/params',
     match: ['/params', '/users', '/abonnement'],
     always: true,
