@@ -8,6 +8,7 @@ import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { buildTypeOrmOptions } from '../../src/database/typeorm.config';
+import { applyGlobalPipes } from '../../src/core/common/global-pipes';
 import { TenancyModule } from '../../src/core/tenancy/tenancy.module';
 import { TenantMiddleware } from '../../src/core/tenancy/tenant.middleware';
 import { CatalogModule } from '../../src/core/catalog/catalog.module';
@@ -60,6 +61,8 @@ export async function buildSocleApp(): Promise<INestApplication> {
     imports: [SocleTestModule],
   }).compile();
   const app = moduleRef.createNestApplication();
+  // Même validation qu'en production : une règle vérifiée nulle part n'est pas une règle.
+  applyGlobalPipes(app);
   await app.init();
   return app;
 }

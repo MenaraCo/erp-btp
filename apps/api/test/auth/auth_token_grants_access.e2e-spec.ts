@@ -18,6 +18,7 @@ import { EntitlementsModule } from '../../src/core/entitlements/entitlements.mod
 import { EntitlementsService } from '../../src/core/entitlements/entitlements.service';
 import { RequiresCapability } from '../../src/core/entitlements/requires-capability.decorator';
 import { AuthModule } from '../../src/core/auth/auth.module';
+import { applyGlobalPipes } from '../../src/core/common/global-pipes';
 import { AuthService } from '../../src/core/auth/auth.service';
 import { createTestDataSource, createTenant } from '../support/datasource';
 import { createUser, activateModule } from '../support/entitlements.helpers';
@@ -59,6 +60,7 @@ describe('Auth — le token vérifié porte le contexte tenant + user', () => {
       imports: [TokenAccessModule],
     }).compile();
     app = moduleRef.createNestApplication();
+    applyGlobalPipes(app);
     await app.init();
     auth = app.get(AuthService);
     entitlements = app.get(EntitlementsService);
