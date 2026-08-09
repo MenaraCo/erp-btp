@@ -8,6 +8,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { ActivityService } from '../../core/activity/activity.service';
+import { NumberingService } from '../../core/numbering/numbering.service';
 import {
   DataGridQuery,
   PaginatedResult,
@@ -117,6 +118,10 @@ export interface AffairePatch {
   conducteur?: string | null;
   dateDebutTravaux?: string | null;
   dateFinTravaux?: string | null;
+  /** Fiche descriptive (migration 081). */
+  natureTravaux?: string | null;
+  lotsTraites?: string | null;
+  conditionsPaiement?: string | null;
 }
 
 export interface DevisPatch {
@@ -137,10 +142,20 @@ export type DevisLineType = 'titre' | 'sous_titre' | 'ouvrage' | 'ressource' | '
 export type DevisType = 'principal' | 'lot' | 'avenant';
 
 export interface AffaireInput {
-  code: string;
+  /** Facultatif : généré automatiquement par la numérotation société si absent. */
+  code?: string;
   name: string;
   clientId?: string | null;
   moa?: string | null;
+  /** Champs descriptifs, tous facultatifs à la création (fiche affaire enrichie). */
+  responsable?: string | null;
+  conducteur?: string | null;
+  natureTravaux?: string | null;
+  lotsTraites?: string | null;
+  conditionsPaiement?: string | null;
+  notes?: string | null;
+  budgetObjectif?: number | string | null;
+  lieuExecution?: Record<string, unknown> | null;
 }
 
 export interface DevisInput {
@@ -187,20 +202,33 @@ export class DevisService {
     private readonly context: TenantContext,
     private readonly vente: VenteService,
     private readonly activity: ActivityService,
+    private readonly numbering: NumberingService,
   ) {}
 
   /** Creates an affaire with its first (principal) devis and that devis's first version. */
   createAffaire(input: AffaireInput) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
+      // Code affaire réservé automatiquement (numérotation société), sauf code explicite (import).
+      const code = input.code?.trim() || (await this.numbering.next(em, 'affaire'));
       const affaire = (
         await em.query(
-          `INSERT INTO affaire (tenant_id, code, name, client_id, moa, status)
-           VALUES ($1, $2, $3, $4, $5, 'en_cours') RETURNING *`,
-          [tenantId, input.code, input.name, input.clientId ?? null, input.moa ?? null],
+          `INSERT INTO affaire
+             (tenant_id, code, name, client_id, moa, status,
+              responsable, conducteur, nature_travaux, lots_traites, conditions_paiement, notes,
+              budget_objectif, lieu_execution)
+           VALUES ($1, $2, $3, $4, $5, 'en_cours', $6, $7, $8, $9, $10, $11, $12, $13::jsonb) RETURNING *`,
+          [
+            tenantId, code, input.name, input.clientId ?? null, input.moa ?? null,
+            input.responsable ?? null, input.conducteur ?? null,
+            input.natureTravaux ?? null, input.lotsTraites ?? null,
+            input.conditionsPaiement ?? null, input.notes ?? null,
+            input.budgetObjectif != null ? String(input.budgetObjectif) : null,
+            input.lieuExecution != null ? JSON.stringify(input.lieuExecution) : null,
+          ],
         )
       )[0];
-      const numero = (await this.nextDevisNumero(em)) ?? input.code;
+      const numero = (await this.nextDevisNumero(em)) ?? code;
       const devis = (
         await em.query(
           `INSERT INTO devis (tenant_id, affaire_id, numero, designation, type, status, sort_order)
@@ -700,6 +728,9 @@ export class DevisService {
            conducteur           = $13,
            date_debut_travaux   = $14,
            date_fin_travaux     = $15,
+           nature_travaux       = $16,
+           lots_traites         = $17,
+           conditions_paiement  = $18,
            updated_at = now()
          WHERE id = $1`,
         [
@@ -718,6 +749,9 @@ export class DevisService {
           patch.conducteur ?? null,
           vide(patch.dateDebutTravaux),
           vide(patch.dateFinTravaux),
+          patch.natureTravaux ?? null,
+          patch.lotsTraites ?? null,
+          patch.conditionsPaiement ?? null,
         ],
       );
       await this.activity.log(em, {
@@ -748,7 +782,7 @@ export class DevisService {
       await em.query(
         `UPDATE devis SET
            designation  = COALESCE($2, designation),
-           numero       = $3,
+           numero       = COALESCE($3, numero),
            type         = COALESCE($4, type),
            affaire_id   = COALESCE($5, affaire_id),
            updated_at   = now()

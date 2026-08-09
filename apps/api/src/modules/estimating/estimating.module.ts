@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenancyModule } from '../../core/tenancy/tenancy.module';
 import { ActivityModule } from '../../core/activity/activity.module';
+import { NumberingModule } from '../../core/numbering/numbering.module';
 import { LibraryEntity } from './entities/library.entity';
 import { ResourceEntity } from './entities/resource.entity';
 import { OuvrageEntity } from './entities/ouvrage.entity';
@@ -40,6 +41,7 @@ import { EstimatingSearchProvider } from './estimating-search.provider';
     ]),
     TenancyModule,
     ActivityModule,
+    NumberingModule,
   ],
   providers: [
     DebourseTypeService,

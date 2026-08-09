@@ -206,6 +206,22 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
     },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
+  // Créer une affaire à la volée depuis le devis puis y rattacher ce devis (façon ChiffragePro).
+  const [newAff, setNewAff] = useState<{ code: string; name: string } | null>(null);
+  const createAffaireMove = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch<{ affaire: { id: string } }>('/affaires', {
+        token, method: 'POST', body: { code: newAff?.code?.trim(), name: newAff?.name?.trim() },
+      });
+      await apiFetch(`/devis/${devisId}`, { token, method: 'PATCH', body: { affaire_id: res.affaire.id } });
+      return res.affaire.id;
+    },
+    onSuccess: (newId) => {
+      setChangingAffaire(false); setNewAff(null);
+      if (!isPanel2) router.push(`/estimating/${newId}/devis/${devisId}`);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
 
   const ordered = useMemo(() => orderTree(lines.data ?? []), [lines.data]);
 
@@ -876,26 +892,50 @@ export function DevisEditorContent({ affaireId, devisId, isPanel2 = false }: Dev
                 {affaireDetail.data?.affaire?.name && (
                   <span style={{ fontSize: 11, color: 'var(--muted)' }}>— {affaireDetail.data.affaire.name}</span>
                 )}
-                <button type="button" title="Changer d'affaire" onClick={() => setChangingAffaire(true)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '1px 4px', borderRadius: 4, fontSize: 11 }}>✎</button>
+                <button type="button" className="btn-secondary" title="Rattacher ce devis à une autre affaire (existante ou nouvelle)" onClick={() => setChangingAffaire(true)}
+                  style={{ fontSize: 10, padding: '2px 8px', marginLeft: 4 }}>✎ Changer d’affaire</button>
                 <button type="button" className="btn-secondary" onClick={() => setDevisSettings(true)}
-                  style={{ fontSize: 10, padding: '2px 8px', marginLeft: 4 }}>Paramètres du devis</button>
+                  style={{ fontSize: 10, padding: '2px 8px' }}>Paramètres du devis</button>
               </span>
             ) : !isPanel2 && changingAffaire ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <select autoFocus defaultValue={affaireId} disabled={moveAffaireMut.isPending}
-                  onChange={(ev) => { if (ev.target.value && ev.target.value !== affaireId) moveAffaireMut.mutate(ev.target.value); }}
-                  style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border-strong)' }}>
-                  <option value={affaireId}>
-                    {affaireDetail.data?.affaire ? `${affaireDetail.data.affaire.code} — ${affaireDetail.data.affaire.name}` : affaireId}
-                  </option>
-                  {(allAffaires.data?.rows ?? []).filter((a) => a.id !== affaireId).map((a) =>
-                    <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                  )}
-                </select>
-                <button type="button" onClick={() => setChangingAffaire(false)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 12 }}>✕</button>
-              </span>
+              newAff === null ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <select autoFocus defaultValue={affaireId} disabled={moveAffaireMut.isPending}
+                    onChange={(ev) => { if (ev.target.value && ev.target.value !== affaireId) moveAffaireMut.mutate(ev.target.value); }}
+                    style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border-strong)' }}>
+                    <option value={affaireId}>
+                      {affaireDetail.data?.affaire ? `${affaireDetail.data.affaire.code} — ${affaireDetail.data.affaire.name}` : affaireId}
+                    </option>
+                    {(allAffaires.data?.rows ?? []).filter((a) => a.id !== affaireId).map((a) =>
+                      <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                    )}
+                  </select>
+                  <button type="button" title="Créer une nouvelle affaire et y rattacher ce devis"
+                    onClick={() => setNewAff({ code: '', name: '' })}
+                    style={{ fontSize: 10, padding: '2px 8px', border: '1px solid var(--accent)', color: 'var(--accent)', background: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                    ＋ Nouvelle affaire
+                  </button>
+                  <button type="button" onClick={() => setChangingAffaire(false)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 12 }}>✕</button>
+                </span>
+              ) : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <input autoFocus placeholder="Code" value={newAff.code}
+                    onChange={(e) => setNewAff({ ...newAff, code: e.target.value })}
+                    style={{ fontSize: 11, padding: '2px 6px', width: 90, borderRadius: 4, border: '1px solid var(--border-strong)' }} />
+                  <input placeholder="Désignation" value={newAff.name}
+                    onChange={(e) => setNewAff({ ...newAff, name: e.target.value })}
+                    style={{ fontSize: 11, padding: '2px 6px', width: 170, borderRadius: 4, border: '1px solid var(--border-strong)' }} />
+                  <button type="button" className="btn"
+                    disabled={!newAff.code.trim() || !newAff.name.trim() || createAffaireMove.isPending}
+                    onClick={() => createAffaireMove.mutate()}
+                    style={{ fontSize: 10, padding: '3px 8px' }}>
+                    {createAffaireMove.isPending ? '…' : 'Créer & rattacher'}
+                  </button>
+                  <button type="button" onClick={() => setNewAff(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 12 }}>✕</button>
+                </span>
+              )
             ) : (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                 <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>

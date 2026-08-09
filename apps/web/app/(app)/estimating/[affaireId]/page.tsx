@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { AFFAIRE_STATUS_LABELS, euro } from '@/lib/format';
 import { IconBtn } from '@/components/IconBtn';
+import { AffaireModal } from '@/components/AffaireModal';
 
 interface Kpis {
   debourse: string; revient: string; pvHt: string; margeBrute: string; margeNette: string;
@@ -24,7 +25,9 @@ interface Lieu {
 interface AffaireDetail {
   affaire: {
     id: string; code: string; name: string; status: string; moa: string | null;
+    client_id: string | null;
     lieu_execution: Lieu | null; budget_objectif: string | null; responsable: string | null; notes: string | null;
+    nature_travaux: string | null; lots_traites: string | null; conditions_paiement: string | null;
     date_limite_remise: string | null; date_retour_effectif: string | null;
     date_debut_etudes: string | null; date_fin_etudes: string | null;
     conducteur: string | null; date_debut_travaux: string | null; date_fin_travaux: string | null;
@@ -62,52 +65,8 @@ export default function AffaireDetailPage() {
     queryFn: () => apiFetch<AffaireDetail>(`/affaires/${affaireId}`, { token }),
   });
 
-  // --- métadonnées affaire ---
-  const [meta, setMeta] = useState({
-    responsable: '', budget: '', adresse: '', cp: '', ville: '', notes: '',
-    // Jalons de l'étude puis de la réalisation — portés par l'AFFAIRE : elle a plusieurs devis
-    // (un par lot) mais une seule date de remise et un seul démarrage de travaux.
-    dateLimiteRemise: '', dateRetourEffectif: '', dateDebutEtudes: '', dateFinEtudes: '',
-    conducteur: '', dateDebutTravaux: '', dateFinTravaux: '',
-  });
-  const metaInit = useRef<string | null>(null);
-  useEffect(() => {
-    const a = detail.data?.affaire;
-    if (!a || metaInit.current === affaireId) return;
-    metaInit.current = affaireId;
-    const l = a.lieu_execution ?? {};
-    setMeta({
-      responsable: a.responsable ?? '', budget: a.budget_objectif ?? '',
-      adresse: l.adresse ?? '', cp: l.code_postal ?? '', ville: l.ville ?? '', notes: a.notes ?? '',
-      dateLimiteRemise: a.date_limite_remise ?? '', dateRetourEffectif: a.date_retour_effectif ?? '',
-      dateDebutEtudes: a.date_debut_etudes ?? '', dateFinEtudes: a.date_fin_etudes ?? '',
-      conducteur: a.conducteur ?? '', dateDebutTravaux: a.date_debut_travaux ?? '',
-      dateFinTravaux: a.date_fin_travaux ?? '',
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.data]);
-
-  const saveMeta = useMutation({
-    mutationFn: () => apiFetch(`/affaires/${affaireId}`, {
-      method: 'PATCH',
-      body: {
-        responsable: meta.responsable || null,
-        budgetObjectif: meta.budget || null,
-        lieuExecution: { adresse: meta.adresse, code_postal: meta.cp, ville: meta.ville, pays: 'FR' },
-        notes: meta.notes || null,
-        dateLimiteRemise: meta.dateLimiteRemise,
-        dateRetourEffectif: meta.dateRetourEffectif,
-        dateDebutEtudes: meta.dateDebutEtudes,
-        dateFinEtudes: meta.dateFinEtudes,
-        conducteur: meta.conducteur || null,
-        dateDebutTravaux: meta.dateDebutTravaux,
-        dateFinTravaux: meta.dateFinTravaux,
-      },
-      token,
-    }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['affaire', affaireId] }),
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
+  // Édition des informations de l'affaire : dans une modale (bouton « Modifier »).
+  const [editing, setEditing] = useState(false);
 
   // --- nouveau devis ---
   const [nd, setNd] = useState({ designation: '', type: 'lot', numero: '' });
@@ -135,13 +94,29 @@ export default function AffaireDetailPage() {
 
       {a && (
         <>
-          <h1 style={{ marginBottom: 4 }}>{a.code} — {a.name}</h1>
-          <p className="muted" style={{ marginTop: 0 }}>
-            <span className={affaireBadge(a.status)}>{AFFAIRE_DERIVED_LABELS[a.status] ?? a.status}</span>
-            {a.responsable ? ` · Resp. ${a.responsable}` : ''}
-            {a.lieu_execution?.ville ? ` · ${a.lieu_execution.ville}` : ''}
-            {a.moa ? ` · MOA : ${a.moa}` : ''}
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div>
+              <h1 style={{ marginBottom: 4 }}>{a.code} — {a.name}</h1>
+              <p className="muted" style={{ marginTop: 0 }}>
+                <span className={affaireBadge(a.status)}>{AFFAIRE_DERIVED_LABELS[a.status] ?? a.status}</span>
+                {a.responsable ? ` · Resp. ${a.responsable}` : ''}
+                {a.conducteur ? ` · Cond. ${a.conducteur}` : ''}
+                {a.lieu_execution?.ville ? ` · ${a.lieu_execution.ville}` : ''}
+                {a.moa ? ` · MOA : ${a.moa}` : ''}
+              </p>
+            </div>
+            <button className="btn-secondary btn" onClick={() => setEditing(true)} style={{ flexShrink: 0 }}>
+              ✎ Modifier l’affaire
+            </button>
+          </div>
+
+          {editing && (
+            <AffaireModal
+              affaire={a}
+              onClose={() => setEditing(false)}
+              onSaved={() => { setEditing(false); qc.invalidateQueries({ queryKey: ['affaire', affaireId] }); }}
+            />
+          )}
 
           <div className="card-grid" style={{ marginTop: 12 }}>
             <div className="card"><h2>Déboursé</h2><div className="stat">{euro(totals?.debourse)}</div></div>
@@ -167,7 +142,7 @@ export default function AffaireDetailPage() {
           <div style={{ display: 'flex', gap: 12, marginTop: 16, flexWrap: 'wrap', alignItems: 'stretch' }}>
             <Jalons
               titre="Planning de l’étude"
-              sousTitre={meta.responsable ? `Responsable : ${meta.responsable}` : 'Aucun responsable désigné'}
+              sousTitre={a.responsable ? `Responsable : ${a.responsable}` : 'Aucun responsable désigné'}
               dates={[
                 { l: 'Date limite (client)', v: a.date_limite_remise, ton: 'limite' },
                 { l: 'Retour effectif', v: a.date_retour_effectif, ton: 'ok' },
@@ -177,7 +152,7 @@ export default function AffaireDetailPage() {
             />
             <Jalons
               titre="Réalisation de l’opération"
-              sousTitre={meta.conducteur ? `Conducteur : ${meta.conducteur}` : 'Si l’affaire est gagnée'}
+              sousTitre={a.conducteur ? `Conducteur : ${a.conducteur}` : 'Si l’affaire est gagnée'}
               dates={[
                 { l: 'Début des travaux', v: a.date_debut_travaux, ton: 'ok' },
                 { l: 'Fin des travaux', v: a.date_fin_travaux, ton: 'ok' },
@@ -249,48 +224,22 @@ export default function AffaireDetailPage() {
           </div>
 
           <div className="card" style={{ marginTop: 16 }}>
-            <h2>Informations de l’affaire</h2>
-            <p className="muted" style={{ marginTop: 0 }}>Client et lieu d’exécution sont partagés par tous les devis de l’affaire.</p>
-            <form
-              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}
-              onSubmit={(e) => { e.preventDefault(); setErr(null); saveMeta.mutate(); }}
-            >
-              <Field label="Responsable"><input value={meta.responsable} onChange={(e) => setMeta({ ...meta, responsable: e.target.value })} /></Field>
-              <Field label="Budget objectif (€)"><input style={{ width: 110 }} value={meta.budget} onChange={(e) => setMeta({ ...meta, budget: e.target.value })} /></Field>
-              <Field label="Adresse"><input value={meta.adresse} onChange={(e) => setMeta({ ...meta, adresse: e.target.value })} /></Field>
-              <Field label="Code postal"><input style={{ width: 80 }} value={meta.cp} onChange={(e) => setMeta({ ...meta, cp: e.target.value })} /></Field>
-              <Field label="Ville"><input value={meta.ville} onChange={(e) => setMeta({ ...meta, ville: e.target.value })} /></Field>
-              <Field label="Notes"><input style={{ width: 220 }} value={meta.notes} onChange={(e) => setMeta({ ...meta, notes: e.target.value })} /></Field>
-
-              <div style={{ flexBasis: '100%', height: 0 }} />
-              <span className="form-section-title" style={{ width: '100%', margin: '6px 0 0' }}>Jalons de l’étude</span>
-              <Field label="Date limite (client)">
-                <input type="date" value={meta.dateLimiteRemise} onChange={(e) => setMeta({ ...meta, dateLimiteRemise: e.target.value })} />
-              </Field>
-              <Field label="Retour effectif">
-                <input type="date" value={meta.dateRetourEffectif} onChange={(e) => setMeta({ ...meta, dateRetourEffectif: e.target.value })} />
-              </Field>
-              <Field label="Début des études">
-                <input type="date" value={meta.dateDebutEtudes} onChange={(e) => setMeta({ ...meta, dateDebutEtudes: e.target.value })} />
-              </Field>
-              <Field label="Fin des études">
-                <input type="date" value={meta.dateFinEtudes} onChange={(e) => setMeta({ ...meta, dateFinEtudes: e.target.value })} />
-              </Field>
-
-              <div style={{ flexBasis: '100%', height: 0 }} />
-              <span className="form-section-title" style={{ width: '100%', margin: '6px 0 0' }}>Réalisation</span>
-              <Field label="Conducteur de travaux">
-                <input value={meta.conducteur} onChange={(e) => setMeta({ ...meta, conducteur: e.target.value })} />
-              </Field>
-              <Field label="Début des travaux">
-                <input type="date" value={meta.dateDebutTravaux} onChange={(e) => setMeta({ ...meta, dateDebutTravaux: e.target.value })} />
-              </Field>
-              <Field label="Fin des travaux">
-                <input type="date" value={meta.dateFinTravaux} onChange={(e) => setMeta({ ...meta, dateFinTravaux: e.target.value })} />
-              </Field>
-
-              <button className="btn" type="submit" disabled={saveMeta.isPending}>Enregistrer</button>
-            </form>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0 }}>Informations de l’affaire</h2>
+              <button className="btn-secondary btn" onClick={() => setEditing(true)} style={{ fontSize: 11, padding: '3px 10px' }}>✎ Modifier</button>
+            </div>
+            <p className="muted" style={{ marginTop: 4 }}>Client, lieu et conditions sont partagés par tous les devis de l’affaire.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginTop: 8 }}>
+              <Info label="Client (MOA)" value={a.moa} />
+              <Info label="Responsable" value={a.responsable} />
+              <Info label="Conducteur de travaux" value={a.conducteur} />
+              <Info label="Nature des travaux" value={a.nature_travaux} />
+              <Info label="Lots traités" value={a.lots_traites} />
+              <Info label="Conditions de paiement" value={a.conditions_paiement} />
+              <Info label="Budget objectif" value={a.budget_objectif ? euro(a.budget_objectif) : null} />
+              <Info label="Lieu d’exécution" value={[a.lieu_execution?.adresse, [a.lieu_execution?.code_postal, a.lieu_execution?.ville].filter(Boolean).join(' ')].filter(Boolean).join(', ') || null} />
+              <Info label="Notes" value={a.notes} />
+            </div>
           </div>
         </>
       )}
@@ -413,4 +362,14 @@ function Comparatif({ budget, pvHt, reel, chantier }: {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="field" style={{ marginBottom: 0 }}><label>{label}</label>{children}</div>;
+}
+
+/** Une information de la fiche affaire, en lecture seule (— si vide). */
+function Info({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.03em', textTransform: 'uppercase', color: 'var(--muted)' }}>{label}</div>
+      <div style={{ fontSize: 13, marginTop: 2, color: value ? 'var(--ink-strong)' : '#94a3b8' }}>{value || '—'}</div>
+    </div>
+  );
 }
