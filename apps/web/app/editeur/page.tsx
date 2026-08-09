@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { LayoutDashboard, LogOut, ShieldAlert, Settings2, X } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldAlert, Settings2, X, Building2, Trash2 } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
@@ -140,6 +140,7 @@ function EditorLogin() {
 function EditorConsole({ token, onLogout }: { token: string; onLogout: () => void }) {
   const qc = useQueryClient();
   const [managing, setManaging] = useState<TenantRow | null>(null);
+  const [fiche, setFiche] = useState<TenantRow | null>(null);
   const overview = useQuery({
     queryKey: ['editor-overview'],
     queryFn: () => apiFetch<Overview>('/editor/overview', { token }),
@@ -241,6 +242,9 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
                         </Td>
                         <Td right><span style={{ color: t.mrr > 0 ? '#4ade80' : '#64748b', fontVariantNumeric: 'tabular-nums' }}>{euro(t.mrr)}</span></Td>
                         <Td right>
+                          <ActionBtn title="Fiche complète : administratif, contacts, volumes" onClick={() => setFiche(t)}>
+                            <Building2 size={13} /> Fiche
+                          </ActionBtn>
                           <ActionBtn title="Gérer l’abonnement" accent onClick={() => setManaging(t)}>
                             <Settings2 size={13} /> Gérer
                           </ActionBtn>
@@ -260,6 +264,14 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
         )}
       </div>
 
+      {fiche && (
+        <FicheAbonne
+          token={token}
+          tenant={fiche}
+          onClose={() => setFiche(null)}
+          onSupprime={() => { setFiche(null); refresh(); }}
+        />
+      )}
       {managing && (
         <TenantManager
           token={token}
@@ -913,4 +925,183 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
 }
 function Td({ children, right }: { children: React.ReactNode; right?: boolean }) {
   return <td style={{ padding: '10px 16px', textAlign: right ? 'right' : 'left' }}>{children}</td>;
+}
+
+
+interface FicheDetail {
+  tenant: { id: string; slug: string; name: string; status: string; createdAt: string };
+  societes: Array<Record<string, string | null>>;
+  contacts: Array<{ email: string; full_name: string | null; status: string; mfa_enabled: boolean; roles: string[] }>;
+  abonnement: Record<string, unknown> | null;
+  volumes: Record<string, number>;
+}
+
+/**
+ * Fiche complète d'un abonné : qui il est, qui le contacte, ce qu'il a produit.
+ *
+ * Le VOLUME est affiché avant la suppression, et ce n'est pas décoratif : supprimer un compte
+ * d'essai vide et supprimer un client qui a deux ans de chantiers ne se décident pas de la même
+ * façon. La suppression est définitive — 58 tables partent en cascade, il n'y a pas de corbeille.
+ */
+function FicheAbonne({
+  token, tenant, onClose, onSupprime,
+}: {
+  token: string;
+  tenant: TenantRow;
+  onClose: () => void;
+  onSupprime: () => void;
+}) {
+  const [confirmation, setConfirmation] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const [suppression, setSuppression] = useState(false);
+
+  const { data, isLoading } = useQuery<FicheDetail>({
+    queryKey: ['editor-fiche', tenant.tenantId],
+    queryFn: () => apiFetch<FicheDetail>(`/editor/tenants/${tenant.tenantId}`, { token }),
+  });
+
+  const supprimer = async () => {
+    setErr(null);
+    setSuppression(true);
+    try {
+      await apiFetch(`/editor/tenants/${tenant.tenantId}`, {
+        method: 'DELETE', token, body: { confirmationSlug: confirmation },
+      });
+      onSupprime();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Suppression impossible.');
+    } finally {
+      setSuppression(false);
+    }
+  };
+
+  const c = data?.societes?.[0];
+  const total = Object.values(data?.volumes ?? {}).reduce((a, b) => a + b, 0);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.72)', display: 'flex',
+        justifyContent: 'center', alignItems: 'flex-start', padding: '40px 16px', zIndex: 50,
+        overflowY: 'auto',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 720, maxWidth: '100%', background: '#1e293b', border: '1px solid #334155',
+          borderRadius: 14, color: '#e2e8f0', padding: '20px 24px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <strong style={{ fontSize: 16, color: '#fff' }}>{tenant.name}</strong>
+            <div style={{ color: '#64748b', fontSize: 11 }}>{tenant.slug}</div>
+          </div>
+          <ActionBtn title="Fermer" onClick={onClose}><X size={14} /></ActionBtn>
+        </div>
+
+        {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
+
+        {isLoading ? (
+          <p style={{ color: '#94a3b8', fontSize: 12 }}>Chargement…</p>
+        ) : (
+          <>
+            <SectionEditeur titre="Identité administrative">
+              {c ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', fontSize: 12 }}>
+                  <Ligne k="Dénomination" v={c.name} />
+                  <Ligne k="Forme juridique" v={c.legal_form} />
+                  <Ligne k="SIREN" v={c.siren} />
+                  <Ligne k="SIRET" v={c.siret} />
+                  <Ligne k="TVA intracom." v={c.vat_intra ?? c.vat_number} />
+                  <Ligne k="RCS" v={c.rcs} />
+                  <Ligne k="Capital" v={c.capital} />
+                  <Ligne k="Adresse" v={[c.address, c.postal_code, c.city].filter(Boolean).join(' ')} />
+                  <Ligne k="Téléphone" v={c.phone} />
+                  <Ligne k="E-mail" v={c.email} />
+                </div>
+              ) : (
+                <p style={{ color: '#64748b', fontSize: 12, margin: 0 }}>
+                  Cette société n’a pas encore renseigné son identité (Configuration → Entreprise).
+                </p>
+              )}
+            </SectionEditeur>
+
+            <SectionEditeur titre={`Contacts (${data?.contacts.length ?? 0})`}>
+              {(data?.contacts ?? []).map((u) => (
+                <div key={u.email} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 12, padding: '3px 0' }}>
+                  <span style={{ color: '#fff', minWidth: 220 }}>{u.email}</span>
+                  <span style={{ color: '#94a3b8', flex: 1 }}>{u.full_name ?? '—'}</span>
+                  <span style={{ color: '#64748b', fontSize: 11 }}>{u.roles.join(', ') || 'aucun rôle'}</span>
+                  {u.mfa_enabled && <span className="badge success">2FA</span>}
+                </div>
+              ))}
+            </SectionEditeur>
+
+            <SectionEditeur titre="Contenu produit">
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
+                {Object.entries(data?.volumes ?? {}).map(([k, v]) => (
+                  <span key={k} style={{ color: v > 0 ? '#fff' : '#64748b' }}>
+                    <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{v}</strong>{' '}
+                    <span style={{ color: '#64748b' }}>{k}</span>
+                  </span>
+                ))}
+              </div>
+            </SectionEditeur>
+
+            <SectionEditeur titre="Supprimer définitivement">
+              <p style={{ color: '#fca5a5', fontSize: 12, margin: '0 0 10px', lineHeight: 1.5 }}>
+                Cette société et <strong>tout son contenu</strong> ({total} enregistrements) seront
+                effacés : affaires, devis, chantiers, factures, pointages. Il n’y a pas de corbeille
+                et pas de retour en arrière. Un abonnement actif doit d’abord être résilié.
+              </p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  className="input"
+                  style={{ width: 240 }}
+                  placeholder={`Retapez « ${tenant.slug} »`}
+                  value={confirmation}
+                  onChange={(e) => setConfirmation(e.target.value)}
+                />
+                <button
+                  className="btn-danger btn"
+                  disabled={confirmation !== tenant.slug || suppression}
+                  onClick={() => {
+                    if (!confirm(`Supprimer définitivement « ${tenant.name} » et tout son contenu ?`)) return;
+                    void supprimer();
+                  }}
+                >
+                  <Trash2 size={13} style={{ marginRight: 4 }} />
+                  {suppression ? '…' : 'Supprimer'}
+                </button>
+              </div>
+            </SectionEditeur>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionEditeur({ titre, children }: { titre: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{
+        fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+        color: '#f97316', marginBottom: 8, paddingBottom: 5, borderBottom: '1px solid #334155',
+      }}>{titre}</div>
+      {children}
+    </div>
+  );
+}
+
+function Ligne({ k, v }: { k: string; v?: string | null }) {
+  return (
+    <div>
+      <span style={{ color: '#64748b' }}>{k} : </span>
+      <span style={{ color: v ? '#e2e8f0' : '#475569' }}>{v || '—'}</span>
+    </div>
+  );
 }

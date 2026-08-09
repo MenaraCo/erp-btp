@@ -72,6 +72,26 @@ export class EditorController {
     return this.editor.getTenants();
   }
 
+  /** Fiche complète d'un abonné : administratif, contacts, abonnement, volumes produits. */
+  @Get('tenants/:id')
+  tenantDetail(@Param('id') id: string) {
+    return this.editor.getTenantDetail(id);
+  }
+
+  /**
+   * Suppression DÉFINITIVE d'une société et de tout son contenu.
+   *
+   * `confirmationSlug` doit reprendre exactement le slug : sans cette friction, un clic malheureux
+   * détruirait deux ans de chantiers, sans corbeille ni retour possible.
+   */
+  @Delete('tenants/:id')
+  supprimerTenant(
+    @Param('id') id: string,
+    @Body() body: { confirmationSlug?: string },
+  ) {
+    return this.editor.deleteTenant(id, body?.confirmationSlug ?? '');
+  }
+
   /** Support action: extend a tenant's trial by `days` (default 30). */
   @Post('tenants/:id/extend-trial')
   extendTrial(@Param('id') id: string, @Body() body: ExtendTrialInput) {

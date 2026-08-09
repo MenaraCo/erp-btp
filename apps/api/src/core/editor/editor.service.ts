@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -91,12 +93,120 @@ const OPEN_STATUSES: SubscriptionStatus[] = ['active', 'trialing'];
  */
 @Injectable()
 export class EditorService {
+  private readonly logger = new Logger(EditorService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly catalog: CatalogService,
     private readonly promos: PromoCodeService,
     private readonly pricing: PricingService,
   ) {}
+
+
+  /* ================== FICHE D'UN ABONNÉ ================== */
+
+  /**
+   * Tout ce que l'éditeur sait d'une société abonnée : son identité administrative, ses contacts,
+   * son abonnement, et le VOLUME de ce qu'elle a produit.
+   *
+   * Le volume n'est pas décoratif : c'est lui qui dit ce qu'une suppression détruirait. Supprimer
+   * un compte d'essai vide et supprimer un client qui a deux ans de chantiers ne se décident pas
+   * de la même façon.
+   */
+  async getTenantDetail(tenantId: string) {
+    const [t] = await this.dataSource.query(
+      `SELECT id, slug, name, status, created_at FROM tenant WHERE id = $1`,
+      [tenantId],
+    );
+    if (!t) throw new NotFoundException(`Société introuvable (${tenantId}).`);
+
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      // Identité(s) administrative(s) — une société peut en porter plusieurs (multi-société).
+      const societes = await em.query(
+        `SELECT code, name, legal_form, siren, siret, vat_intra, rcs, capital,
+                address, postal_code, city, phone, email
+           FROM company ORDER BY created_at ASC`,
+      );
+
+      // Contacts : les comptes actifs, avec leurs rôles — l'administrateur d'abord.
+      const contacts = await em.query(
+        `SELECT u.email, u.full_name, u.status, u.created_at, u.mfa_enabled,
+                COALESCE(ARRAY_AGG(r.label ORDER BY r.label) FILTER (WHERE r.label IS NOT NULL), '{}') AS roles
+           FROM user_account u
+           LEFT JOIN user_role ur ON ur.user_id = u.id
+           LEFT JOIN role r ON r.id = ur.role_id
+          WHERE u.deleted_at IS NULL
+          GROUP BY u.id, u.email, u.full_name, u.status, u.created_at, u.mfa_enabled
+          ORDER BY u.created_at ASC`,
+      );
+
+      const [abo] = await em.query(
+        `SELECT status, trial_ends_at, current_period_end, cancel_at_period_end,
+                billing_term, billing_interval, pack_code, pack_seats,
+                provider_customer_id, provider_subscription_id
+           FROM subscription WHERE tenant_id = $1`,
+        [tenantId],
+      );
+
+      // Ce qu'une suppression emporterait.
+      const volumes: Record<string, number> = {};
+      for (const [cle, table] of [
+        ['affaires', 'affaire'], ['devis', 'devis'], ['chantiers', 'chantier'],
+        ['marches', 'marche'], ['clients', 'client'], ['fournisseurs', 'supplier'],
+        ['ressources', 'resource'], ['utilisateurs', 'user_account'],
+      ] as const) {
+        const [r] = await em.query(`SELECT count(*)::int AS n FROM ${table}`);
+        volumes[cle] = r.n;
+      }
+
+      return {
+        tenant: { id: t.id, slug: t.slug, name: t.name, status: t.status, createdAt: t.created_at },
+        societes,
+        contacts,
+        abonnement: abo ?? null,
+        volumes,
+      };
+    });
+  }
+
+  /**
+   * Supprime définitivement une société et TOUT ce qu'elle contient.
+   *
+   * 58 tables référencent `tenant` en cascade : affaires, devis, chantiers, factures, pointages,
+   * pièces jointes — tout part. Il n'y a pas de corbeille et pas de retour en arrière.
+   *
+   * Deux garde-fous, parce qu'une erreur ici est irréparable :
+   *  - le SLUG exact doit être retapé, ce qui interdit de supprimer par inadvertance en cliquant ;
+   *  - une société dont l'abonnement est encore actif est refusée. Résilier d'abord force à
+   *    regarder ce qu'on fait, et évite de détruire un client qui paie encore.
+   */
+  async deleteTenant(tenantId: string, confirmationSlug: string) {
+    const [t] = await this.dataSource.query(
+      `SELECT id, slug, name FROM tenant WHERE id = $1`,
+      [tenantId],
+    );
+    if (!t) throw new NotFoundException(`Société introuvable (${tenantId}).`);
+
+    if ((confirmationSlug ?? '').trim() !== t.slug) {
+      throw new BadRequestException(
+        `Confirmation incorrecte : retapez exactement « ${t.slug} » pour supprimer cette société.`,
+      );
+    }
+
+    const [abo] = await runInTenant(this.dataSource, tenantId, (em) =>
+      em.query(`SELECT status FROM subscription WHERE tenant_id = $1`, [tenantId]),
+    );
+    if (abo && abo.status === 'active') {
+      throw new ConflictException(
+        'Cette société a un abonnement ACTIF. Résiliez-le d’abord — on ne supprime pas un client qui paie.',
+      );
+    }
+
+    // La cascade fait le reste : chaque table tenant-scopée porte ON DELETE CASCADE.
+    await this.dataSource.query(`DELETE FROM tenant WHERE id = $1`, [tenantId]);
+    this.logger.warn(`Société supprimée définitivement : ${t.slug} (${t.name}).`);
+    return { supprime: true, slug: t.slug };
+  }
 
   async getTenants(): Promise<EditorTenantRow[]> {
     const tenants: Array<{ id: string; slug: string; name: string; created_at: Date }> =
