@@ -267,6 +267,39 @@ export class LibrariesService {
     return { deleted: true };
   }
 
+  /**
+   * Supprime une bibliothèque. Suppression LOGIQUE (deleted_at) : la bibliothèque disparaît des
+   * écrans (le QueryBuilder de listLibraries exclut les lignes soft-deleted) et son contenu
+   * devient inaccessible faute de pouvoir la sélectionner — mais rien n'est détruit en base, la
+   * ligne reste récupérable. On évite ainsi toute cascade destructive et tout risque de clé
+   * étrangère (ressources référencées par des ouvrages, devis en ayant copié le contenu…).
+   * Renvoie le volume masqué pour l'affichage côté écran.
+   */
+  async deleteLibrary(
+    libraryId: string,
+  ): Promise<{ deleted: true; resources: number; ouvrages: number }> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const existing = await em.query(
+        `SELECT id FROM library WHERE id = $1 AND deleted_at IS NULL`,
+        [libraryId],
+      );
+      if (existing.length === 0) {
+        throw new NotFoundException('Bibliothèque introuvable.');
+      }
+      const [rc] = await em.query(
+        `SELECT COUNT(*)::int AS n FROM resource WHERE library_id = $1`,
+        [libraryId],
+      );
+      const [oc] = await em.query(
+        `SELECT COUNT(*)::int AS n FROM ouvrage WHERE library_id = $1`,
+        [libraryId],
+      );
+      await em.query(`UPDATE library SET deleted_at = now() WHERE id = $1`, [libraryId]);
+      return { deleted: true as const, resources: rc.n as number, ouvrages: oc.n as number };
+    });
+  }
+
   /** Classifies a resource onto a code analytique of the analytical plan (cahier §5.8). */
   async classifyResource(
     libraryId: string,

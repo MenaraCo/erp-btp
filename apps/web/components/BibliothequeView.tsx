@@ -140,6 +140,25 @@ export function BibliothequeView({
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
 
+  const deleteLib = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ deleted: true; resources: number; ouvrages: number }>(`/libraries/${id}`, { method: 'DELETE', token }),
+    onSuccess: (_res, id) => {
+      qc.invalidateQueries({ queryKey: ['libraries'] });
+      if (libId === id) setLibId(null); // la biblio sélectionnée vient de disparaître
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Suppression impossible.'),
+  });
+
+  function askDeleteLib(e: React.MouseEvent, l: Library) {
+    e.stopPropagation(); // ne pas sélectionner la biblio qu'on supprime
+    setErr(null);
+    const msg = `Supprimer la bibliothèque « ${l.code} — ${l.name} » ?\n\n`
+      + `Elle disparaîtra des écrans (son contenu deviendra inaccessible). `
+      + `L'opération reste réversible côté base — aucune donnée n'est détruite.`;
+    if (confirm(msg)) deleteLib.mutate(l.id);
+  }
+
   const title = section === 'ressources' ? 'Bibliothèque — Ressources'
     : section === 'ouvrages' ? 'Bibliothèque — Ouvrages'
     : scope === 'chantier' ? 'Bibliothèque du module chantier' : 'Bibliothèque d’étude de prix';
@@ -162,9 +181,18 @@ export function BibliothequeView({
         <h2>Bibliothèques</h2>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {(libs.data?.rows ?? []).map((l) => (
-            <button key={l.id} className={l.id === libId ? 'btn' : 'btn-secondary'} onClick={() => setLibId(l.id)}>
-              {l.code} — {l.name}
-            </button>
+            <span key={l.id} className={`lib-chip${l.id === libId ? ' is-active' : ''}`}>
+              <button className={l.id === libId ? 'btn' : 'btn-secondary'} style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }} onClick={() => setLibId(l.id)}>
+                {l.code} — {l.name}
+              </button>
+              <button
+                className="lib-chip-del"
+                title={`Supprimer « ${l.code} »`}
+                aria-label={`Supprimer la bibliothèque ${l.code}`}
+                disabled={deleteLib.isPending}
+                onClick={(e) => askDeleteLib(e, l)}
+              >✕</button>
+            </span>
           ))}
           {libs.data && libs.data.rows.length === 0 && <span className="muted">Aucune bibliothèque.</span>}
         </div>

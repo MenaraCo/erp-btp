@@ -44,6 +44,13 @@ export class LibrariesController {
     return this.libraries.listLibraries(query, scope === 'chantier' ? 'chantier' : 'etude');
   }
 
+  @Delete(':libraryId')
+  @RequiresCapability('estimating.bid')
+  @RequiresPermission('estimating.devis.write')
+  deleteLibrary(@Param('libraryId') libraryId: string) {
+    return this.libraries.deleteLibrary(libraryId);
+  }
+
   @Post(':libraryId/resources')
   @RequiresCapability('estimating.bid')
   @RequiresPermission('estimating.devis.write')
