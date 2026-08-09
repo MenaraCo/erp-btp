@@ -28,7 +28,8 @@
         "-c",
         "export PATH=\"$HOME/.local/bin:$PATH\"; cd /Users/menco/Desktop/Projets/erp-btp; exec pnpm -C apps/api db:local"
       ],
-      "port": 5432
+      "port": 5432,
+      "autoPort": false
     }
   ]
 }
