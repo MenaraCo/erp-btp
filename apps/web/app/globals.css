@@ -390,30 +390,73 @@ body.sidebar-collapsed .sidebar-toggle .nav-label {
   background: #fff;
 }
 
-/* ── Puce bibliothèque : bouton de sélection + suppression accolée ── */
-.lib-chip { display: inline-flex; align-items: stretch; }
+/* ── Puce bibliothèque : sélection + suppression, en un seul bloc cohérent ── */
+.lib-chip {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+  transition: border-color 0.12s;
+}
+.lib-chip.is-active { border-color: var(--primary); }
+
+/* Le corps sélectionnable de la puce. */
+.lib-chip-main {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lib-chip.is-active .lib-chip-main { background: var(--primary); color: var(--primary-ink); }
+.lib-chip-main:hover { background: var(--library-item-hover); }
+.lib-chip.is-active .lib-chip-main:hover { background: var(--primary-deep); }
+
+/* La croix de suppression, discrète, révélée en rouge au survol. */
 .lib-chip-del {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 26px;
-  border: 1px solid var(--border-strong);
-  border-left: none;
-  border-top-right-radius: var(--radius-sm);
-  border-bottom-right-radius: var(--radius-sm);
-  background: var(--surface);
+  border: none;
+  border-left: 1px solid var(--border-strong);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  transition: background 0.12s, color 0.12s;
 }
-.lib-chip-del:hover {
+.lib-chip-del:hover { background: var(--danger); color: #fff; }
+
+/* Confirmation en ligne : « Supprimer ? » + annuler. */
+.lib-chip-confirm { display: inline-flex; align-items: stretch; border-left: 1px solid var(--border-strong); }
+.lib-chip-yes {
+  border: none;
   background: var(--danger);
   color: #fff;
-  border-color: var(--danger);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
 }
-.lib-chip-del:disabled { opacity: 0.5; cursor: default; }
+.lib-chip-yes:hover { filter: brightness(0.92); }
+.lib-chip-no {
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.4);
+  background: var(--danger);
+  color: #fff;
+  width: 24px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.lib-chip-no:hover { filter: brightness(0.92); }
 
 /* ── Modales ──
    Ces deux classes n'existaient QUE sous `.theme-lg` : dans le thème par défaut, le panneau

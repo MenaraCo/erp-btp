@@ -140,24 +140,18 @@ export function BibliothequeView({
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
   });
 
+  // Confirmation EN LIGNE (pas de window.confirm : bloqué dans certains navigateurs, et mal intégré).
+  const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
   const deleteLib = useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ deleted: true; resources: number; ouvrages: number }>(`/libraries/${id}`, { method: 'DELETE', token }),
     onSuccess: (_res, id) => {
       qc.invalidateQueries({ queryKey: ['libraries'] });
+      setConfirmDelId(null);
       if (libId === id) setLibId(null); // la biblio sélectionnée vient de disparaître
     },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Suppression impossible.'),
+    onError: (e) => { setConfirmDelId(null); setErr(e instanceof ApiError ? e.message : 'Suppression impossible.'); },
   });
-
-  function askDeleteLib(e: React.MouseEvent, l: Library) {
-    e.stopPropagation(); // ne pas sélectionner la biblio qu'on supprime
-    setErr(null);
-    const msg = `Supprimer la bibliothèque « ${l.code} — ${l.name} » ?\n\n`
-      + `Elle disparaîtra des écrans (son contenu deviendra inaccessible). `
-      + `L'opération reste réversible côté base — aucune donnée n'est détruite.`;
-    if (confirm(msg)) deleteLib.mutate(l.id);
-  }
 
   const title = section === 'ressources' ? 'Bibliothèque — Ressources'
     : section === 'ouvrages' ? 'Bibliothèque — Ouvrages'
@@ -182,16 +176,24 @@ export function BibliothequeView({
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {(libs.data?.rows ?? []).map((l) => (
             <span key={l.id} className={`lib-chip${l.id === libId ? ' is-active' : ''}`}>
-              <button className={l.id === libId ? 'btn' : 'btn-secondary'} style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }} onClick={() => setLibId(l.id)}>
+              <button className="lib-chip-main" onClick={() => setLibId(l.id)}>
                 {l.code} — {l.name}
               </button>
-              <button
-                className="lib-chip-del"
-                title={`Supprimer « ${l.code} »`}
-                aria-label={`Supprimer la bibliothèque ${l.code}`}
-                disabled={deleteLib.isPending}
-                onClick={(e) => askDeleteLib(e, l)}
-              >✕</button>
+              {peutEcrire && (
+                confirmDelId === l.id ? (
+                  <span className="lib-chip-confirm">
+                    <button className="lib-chip-yes" disabled={deleteLib.isPending}
+                      onClick={() => deleteLib.mutate(l.id)}>
+                      {deleteLib.isPending ? '…' : 'Supprimer ?'}
+                    </button>
+                    <button className="lib-chip-no" title="Annuler" onClick={() => setConfirmDelId(null)}>✕</button>
+                  </span>
+                ) : (
+                  <button className="lib-chip-del" title={`Supprimer « ${l.code} »`}
+                    aria-label={`Supprimer la bibliothèque ${l.code}`}
+                    onClick={() => { setErr(null); setConfirmDelId(l.id); }}>✕</button>
+                )
+              )}
             </span>
           ))}
           {libs.data && libs.data.rows.length === 0 && <span className="muted">Aucune bibliothèque.</span>}
