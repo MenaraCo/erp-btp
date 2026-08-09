@@ -81,11 +81,11 @@ interface Preferences { id: string; taux_fg_default: string; taux_ben_default: s
 
 /* ─────────── tabs ─────────── */
 
-const TABS = ['Entreprise', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Doublons', 'Préférences'] as const;
+const TABS = ['Entreprise', 'Numérotation', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Doublons', 'Préférences'] as const;
 type Tab = typeof TABS[number];
 
 /** Onglets propres à la société : ce qui ne dépend d'aucun module métier. */
-export const ONGLETS_SOCIETE: Tab[] = ['Entreprise', 'Préférences'];
+export const ONGLETS_SOCIETE: Tab[] = ['Entreprise', 'Numérotation', 'Préférences'];
 
 /** Onglets propres au chiffrage : ce qui n'intéresse que l'étude de prix. */
 export const ONGLETS_ETUDE: Tab[] = ['Types de déboursé'];
@@ -146,12 +146,13 @@ export function ParametresView({
       </div>
 
       {token && tab === 'Entreprise' && <TabEntreprise token={token} />}
+      {token && tab === 'Numérotation' && <TabNumerotation />}
       {token && tab === 'Types de déboursé' && <TabDebourseTypes token={token} />}
       {token && tab === 'Familles' && <TabFamilles token={token} />}
       {token && tab === 'Codes analytiques' && <TabCodes token={token} />}
       {token && tab === 'Lots' && <TabLots token={token} />}
       {token && tab === 'Unités' && <TabUnites token={token} />}
-      {token && tab === 'Doublons' && <TabDoublons token={token} />}
+      {token && tab === 'Doublons' && <TabDoublons />}
       {token && tab === 'Préférences' && <TabPreferences token={token} />}
       {!token && <p className="muted">Chargement…</p>}
     </div>
@@ -329,7 +330,7 @@ const TYPE_LABEL: Record<string, string> = {
  * Fusionner réaffecte tout ce qui pointait sur le doublon (ressources, commandes, factures,
  * pointages) avant de le supprimer — d'où le nombre d'usages affiché, qui dit lequel garder.
  */
-function TabDoublons({ token }: { token: string }) {
+function TabDoublons() {
   const erreur = useErreurReferentiel();
   const qc = useQueryClient();
   const api = useApi();
@@ -1367,7 +1368,104 @@ const THEMES: { value: AppTheme; label: string; desc: string; preview: string }[
     desc: 'Interface épurée sur fond blanc, sans effet de transparence',
     preview: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
   },
+  {
+    value: 'flat',
+    label: 'Flat theme',
+    desc: 'À plat et aéré, typographie fine, pastilles vives façon icônes d’application',
+    preview: 'radial-gradient(120% 80% at 50% -10%, #ffffff 0%, #eef1f7 60%, #e7ebf3 100%)',
+  },
 ];
+
+/* ─────────── Numérotation automatique ─────────── */
+
+interface Scheme { entityType: string; label: string; pattern: string; nextSeq: number; preview: string }
+
+/** Aperçu client, miroir du moteur serveur (core/numbering/code-pattern.ts). */
+function apercuCode(pattern: string, seq: number): string {
+  const now = new Date();
+  const yyyy = now.getFullYear().toString();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return pattern
+    .replace(/\{YYYY\}/g, yyyy)
+    .replace(/\{YY\}/g, yyyy.slice(-2))
+    .replace(/\{MM\}/g, mm)
+    .replace(/\{DD\}/g, dd)
+    .replace(/\{SEQ:(\d+)\}/g, (_m, n: string) => String(seq).padStart(Number(n), '0'))
+    .replace(/\{SEQ\}/g, String(seq));
+}
+
+function TabNumerotation() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, { pattern: string; nextSeq: string }>>({});
+
+  const { data: schemes = [], isLoading } = useQuery<Scheme[]>({
+    queryKey: ['numbering'],
+    queryFn: () => api('/numbering'),
+  });
+
+  const save = useMutation({
+    mutationFn: (v: { type: string; pattern: string; nextSeq: number }) =>
+      api(`/numbering/${v.type}`, { method: 'PATCH', body: { pattern: v.pattern, nextSeq: v.nextSeq } }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ['numbering'] });
+      setDrafts((d) => { const n = { ...d }; delete n[v.type]; return n; });
+      setErr(null);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Enregistrement impossible.'),
+  });
+
+  const draftOf = (s: Scheme) => drafts[s.entityType] ?? { pattern: s.pattern, nextSeq: String(s.nextSeq) };
+  const setDraft = (type: string, patch: Partial<{ pattern: string; nextSeq: string }>, base: Scheme) =>
+    setDrafts((d) => ({ ...d, [type]: { ...(d[type] ?? { pattern: base.pattern, nextSeq: String(base.nextSeq) }), ...patch } }));
+
+  return (
+    <Card title="Numérotation automatique">
+      <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+        Chaque code est attribué automatiquement à la création — plus aucune saisie manuelle.
+        Jetons disponibles : <code>{'{YYYY}'}</code> <code>{'{YY}'}</code> <code>{'{MM}'}</code> <code>{'{DD}'}</code> et{' '}
+        <code>{'{SEQ}'}</code> ou <code>{'{SEQ:n}'}</code> (numéro complété de zéros). Ex.{' '}
+        <code>AFF-{'{YYYY}'}-{'{SEQ:4}'}</code> → <strong>AFF-{new Date().getFullYear()}-0001</strong>.
+      </p>
+      {err && <div className="error">{err}</div>}
+      {isLoading ? <p className="muted">Chargement…</p> : (
+        <table className="grid" style={{ marginTop: 6 }}>
+          <thead><tr>
+            <th>Objet</th><th>Motif</th><th style={{ width: 90 }}>Prochain n°</th><th>Aperçu</th><th style={{ width: 110 }} />
+          </tr></thead>
+          <tbody>
+            {schemes.map((s) => {
+              const d = draftOf(s);
+              const seqN = Number(d.nextSeq) || 1;
+              const modifie = d.pattern !== s.pattern || String(seqN) !== String(s.nextSeq);
+              return (
+                <tr key={s.entityType}>
+                  <td style={{ fontWeight: 600 }}>{s.label}</td>
+                  <td><input value={d.pattern} style={{ width: 200, fontFamily: 'monospace' }}
+                    onChange={(e) => setDraft(s.entityType, { pattern: e.target.value }, s)} /></td>
+                  <td><input value={d.nextSeq} inputMode="numeric" style={{ width: 70 }}
+                    onChange={(e) => setDraft(s.entityType, { nextSeq: e.target.value.replace(/[^0-9]/g, '') }, s)} /></td>
+                  <td className="code-cell">{apercuCode(d.pattern, seqN)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button className="btn" disabled={!modifie || save.isPending}
+                      onClick={() => save.mutate({ type: s.entityType, pattern: d.pattern.trim(), nextSeq: seqN })}>
+                      Enregistrer
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <p className="muted" style={{ fontSize: 11, marginTop: 10 }}>
+        Les codes déjà attribués ne changent pas. Modifier « prochain n° » ne sert qu’à repartir d’une valeur précise.
+      </p>
+    </Card>
+  );
+}
 
 function ThemeCard() {
   const { theme, setTheme } = useTheme();
@@ -1415,6 +1513,16 @@ function ThemeCard() {
                     <div style={{ position: 'absolute', left: 32, top: 0, right: 0, height: 16,
                       background: '#ffffff', borderBottom: '1px solid #e2e8f0' }} />
                   </>
+                )}
+                {t.value === 'flat' && (
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', gap: 7,
+                    alignItems: 'center', justifyContent: 'center' }}>
+                    {['#007aff', '#34c759', '#ff9500', '#af52de'].map((c) => (
+                      <div key={c} style={{ width: 16, height: 16, borderRadius: 5,
+                        background: `linear-gradient(180deg, ${c}cc, ${c})`,
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.5)' }} />
+                    ))}
+                  </div>
                 )}
               </div>
               <div>

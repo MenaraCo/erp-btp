@@ -141,8 +141,8 @@ export function PartyManager({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (!form.code || !form.name) {
-                setError('Code et nom sont obligatoires.');
+              if (!form.name) {
+                setError('Le nom est obligatoire.');
                 return;
               }
               save.mutate();
@@ -155,14 +155,15 @@ export function PartyManager({
                   ...prev,
                   name: c.name,
                   vatNumber: c.vatIntra ?? prev.vatNumber,
-                  code: prev.code || c.siren,
                 }))}
               />
             </div>
-            <div className="field">
-              <label>Code *</label>
-              <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
-            </div>
+            {editingId && (
+              <div className="field">
+                <label>Code</label>
+                <input value={form.code} disabled title="Attribué automatiquement" />
+              </div>
+            )}
             <div className="field">
               <label>Nom *</label>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />

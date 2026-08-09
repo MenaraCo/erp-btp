@@ -3,6 +3,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, DeepPartial, EntityTarget, ObjectLiteral } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { NumberingService } from '../../core/numbering/numbering.service';
+import { NumberedEntity } from '../../core/numbering/code-pattern';
 import { PartyExistante, trouverDoublon } from './party-doublon';
 import {
   DataGridQuery,
@@ -13,7 +15,8 @@ import { ClientEntity } from './entities/client.entity';
 import { SupplierEntity } from './entities/supplier.entity';
 
 export interface PartyInput {
-  code: string;
+  /** Facultatif : généré automatiquement par la numérotation société si absent. */
+  code?: string;
   name: string;
   vatNumber?: string | null;
   email?: string | null;
@@ -32,10 +35,11 @@ export class DirectoryService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
+    private readonly numbering: NumberingService,
   ) {}
 
   createClient(input: PartyInput): Promise<ClientEntity> {
-    return this.create(ClientEntity, input);
+    return this.create(ClientEntity, 'client', input);
   }
 
   listClients(query: DataGridQuery): Promise<PaginatedResult<ClientEntity>> {
@@ -48,7 +52,7 @@ export class DirectoryService {
    * n'attend pas — mais signalée jusqu'à sa régularisation.
    */
   createSupplier(input: PartyInput, aValider = false): Promise<SupplierEntity> {
-    return this.create(SupplierEntity, input, aValider);
+    return this.create(SupplierEntity, 'supplier', input, aValider);
   }
 
   /** File d'attente : les fiches proposées, de la plus ancienne à la plus récente. */
@@ -122,7 +126,9 @@ export class DirectoryService {
         throw new NotFoundException(`Unknown record "${id}"`);
       }
       await repo.update(id, {
-        code: input.code,
+        // Le code ne se modifie pas depuis le formulaire (numérotation automatique) : on garde
+        // celui déjà attribué si l'appel ne le fournit pas.
+        code: input.code ?? (existing as unknown as { code: string }).code,
         name: input.name,
         vatNumber: input.vatNumber ?? null,
         email: input.email ?? null,
@@ -148,6 +154,7 @@ export class DirectoryService {
 
   private create<T extends ObjectLiteral>(
     entity: EntityTarget<T>,
+    numberedType: NumberedEntity,
     input: PartyInput,
     aValider = false,
   ): Promise<T> {
@@ -167,11 +174,16 @@ export class DirectoryService {
         throw new ConflictException(doublon.message);
       }
 
+      // Code réservé automatiquement (numérotation société), dans la MÊME transaction. Un code
+      // fourni explicitement (import, reprise) reste prioritaire.
+      const code = input.code?.trim() || (await this.numbering.next(em, numberedType));
+
       const extra = aValider
         ? { statut: 'a_valider', proposedBy: userId, proposedAt: new Date() }
         : {};
       return repo.save({
         ...input,
+        code,
         ...extra,
         tenantId,
       } as unknown as DeepPartial<T>) as Promise<T>;

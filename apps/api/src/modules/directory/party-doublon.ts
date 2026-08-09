@@ -39,7 +39,7 @@ export interface Doublon {
  * très probablement.
  */
 export function trouverDoublon(
-  candidat: { code: string; name: string; vatNumber?: string | null },
+  candidat: { code?: string | null; name: string; vatNumber?: string | null },
   existantes: PartyExistante[],
 ): Doublon | null {
   const code = (candidat.code ?? '').trim().toLowerCase();

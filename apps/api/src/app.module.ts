@@ -14,6 +14,7 @@ import { PaymentsModule } from './core/payments/payments.module';
 import { CompanyLookupModule } from './core/company-lookup/company-lookup.module';
 import { EditorModule } from './core/editor/editor.module';
 import { ActivityModule } from './core/activity/activity.module';
+import { NumberingModule } from './core/numbering/numbering.module';
 import { RbacModule } from './core/rbac/rbac.module';
 import { AuthModule } from './core/auth/auth.module';
 import { UsersModule } from './core/users/users.module';
@@ -45,6 +46,7 @@ import { HealthModule } from './health/health.module';
     CompanyLookupModule,
     EditorModule,
     ActivityModule,
+    NumberingModule,
     RbacModule,
     AuthModule,
     UsersModule,

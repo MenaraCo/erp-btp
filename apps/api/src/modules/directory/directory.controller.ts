@@ -111,8 +111,9 @@ export class DirectoryController {
   }
 
   private assertParty(body: PartyInput): void {
-    if (!body?.code || !body?.name) {
-      throw new BadRequestException('code and name are required');
+    // Le code n'est plus exigé : il est attribué automatiquement par la numérotation société.
+    if (!body?.name) {
+      throw new BadRequestException('name is required');
     }
   }
 }
