@@ -11,8 +11,9 @@ export class ChantierController {
   @RequiresCapability('site_tracking.budget')
   @RequiresPermission('site_tracking.write')
   create(@Body() body: { code?: string; name?: string }) {
-    if (!body?.code || !body?.name) {
-      throw new BadRequestException('code and name are required');
+    // Le code n'est plus exigé : il est attribué automatiquement par la numérotation société.
+    if (!body?.name) {
+      throw new BadRequestException('name is required');
     }
     return this.chantiers.createChantier({ code: body.code, name: body.name });
   }

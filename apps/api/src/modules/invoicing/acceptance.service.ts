@@ -304,7 +304,7 @@ export class AcceptanceService {
       throw new ConflictException('Seul un devis « Gagné » peut être accepté.');
     }
     const affaire = [{ id: devis.affaire_id, code: devis.affaire_code, name: devis.affaire_name }];
-    const marcheCode = (devis.numero as string | null) ?? `${devis.affaire_code}-${devisId.slice(0, 8)}`;
+    // Le code du marché est attribué automatiquement par la numérotation société (dans createMarche).
     const marcheName = devis.designation as string;
     const versionRow = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
@@ -387,7 +387,6 @@ export class AcceptanceService {
       const m = await this.chantiers.createMarche(em, {
         tenantId,
         affaire: affaire[0],
-        marcheCode,
         marcheName,
         versionId,
         venteTotal,
@@ -447,7 +446,7 @@ export class AcceptanceService {
         entityType: 'marche',
         entityId: m.id,
         action: 'acceptation',
-        label: `Commande acceptée : ${marcheCode} — ${marcheName} (${affaire[0].code})`,
+        label: `Commande acceptée : ${m.code} — ${marcheName} (${affaire[0].code})`,
         detail: { devisId, versionId, chantierId: m.chantier_id, montantHt: venteTotal },
       });
       return { m, executionLineCount };

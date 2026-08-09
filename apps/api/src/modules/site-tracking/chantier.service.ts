@@ -8,6 +8,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { NumberingService } from '../../core/numbering/numbering.service';
 import { returningRows } from '../../core/database/returning.util';
 import {
   CalcComponent,
@@ -39,6 +40,7 @@ export class ChantierService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
+    private readonly numbering: NumberingService,
   ) {}
 
   /**
@@ -51,15 +53,13 @@ export class ChantierService {
     args: {
       tenantId: string;
       affaire: { id: string; code: string; name: string };
-      marcheCode: string;
       marcheName: string;
       versionId: string;
       venteTotal: string;
       targetChantierId?: string | null;
     },
   ) {
-    const { tenantId, affaire, marcheCode, marcheName, versionId, venteTotal, targetChantierId } =
-      args;
+    const { tenantId, affaire, marcheName, versionId, venteTotal, targetChantierId } = args;
     if ((await em.query(`SELECT id FROM marche WHERE devis_version_id = $1`, [versionId])).length > 0) {
       throw new ConflictException('Cette version du devis a déjà été acceptée (un marché existe).');
     }
@@ -75,14 +75,18 @@ export class ChantierService {
         [venteTotal, chantierId],
       );
     } else {
+      // Code chantier attribué automatiquement (numérotation société), dans cette transaction.
+      const chantierCode = await this.numbering.next(em, 'chantier');
       chantierId = (
         await em.query(
           `INSERT INTO chantier (tenant_id, code, name, affaire_id, devis_version_id, budget_vente_ht)
            VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-          [tenantId, `${affaire.code}-CH`, affaire.name, affaire.id, versionId, venteTotal],
+          [tenantId, chantierCode, affaire.name, affaire.id, versionId, venteTotal],
         )
       )[0].id;
     }
+    // Code marché attribué automatiquement (distinct du numéro de devis).
+    const marcheCode = await this.numbering.next(em, 'marche');
     return (
       await em.query(
         `INSERT INTO marche
@@ -802,18 +806,20 @@ export class ChantierService {
   }
 
   /** Creates a standalone (empty) chantier — an aggregation unit; marchés are added by acceptance. */
-  createChantier(input: { code: string; name: string }) {
+  createChantier(input: { code?: string; name: string }) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      const existing = await em.query(`SELECT id FROM chantier WHERE code = $1`, [input.code]);
+      // Code chantier attribué automatiquement, sauf code explicite (import/reprise).
+      const code = input.code?.trim() || (await this.numbering.next(em, 'chantier'));
+      const existing = await em.query(`SELECT id FROM chantier WHERE code = $1`, [code]);
       if (existing.length > 0) {
-        throw new ConflictException(`Chantier code "${input.code}" already exists`);
+        throw new ConflictException(`Chantier code "${code}" already exists`);
       }
       return (
         await em.query(
           `INSERT INTO chantier (tenant_id, code, name, budget_vente_ht, status)
            VALUES ($1, $2, $3, 0, 'open') RETURNING *`,
-          [tenantId, input.code, input.name],
+          [tenantId, code, input.name],
         )
       )[0];
     });

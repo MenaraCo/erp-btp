@@ -23,7 +23,6 @@ export default function ChantiersPage() {
   const qc = useQueryClient();
   const router = useRouter();
   const [showForm, setShowForm] = useState(false);
-  const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -37,11 +36,10 @@ export default function ChantiersPage() {
   const chantierRows = applySort(data ?? [], sort, (c, k) => (c as unknown as Record<string, unknown>)[k]);
 
   const create = useMutation({
-    mutationFn: () => apiFetch('/chantiers', { method: 'POST', body: { code, name }, token }),
+    mutationFn: () => apiFetch('/chantiers', { method: 'POST', body: { name }, token }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['chantiers'] });
       setShowForm(false);
-      setCode('');
       setName('');
       setError(null);
     },
@@ -66,20 +64,17 @@ export default function ChantiersPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (!code || !name) {
-                setError('Code et nom sont obligatoires.');
+              if (!name) {
+                setError('Le nom est obligatoire.');
                 return;
               }
               create.mutate();
             }}
           >
             <div className="field">
-              <label>Code *</label>
-              <input value={code} onChange={(e) => setCode(e.target.value)} />
-            </div>
-            <div className="field">
               <label>Nom *</label>
               <input value={name} onChange={(e) => setName(e.target.value)} />
+              <span className="muted" style={{ fontSize: 11 }}>Le code chantier est attribué automatiquement.</span>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" type="submit" disabled={create.isPending}>
