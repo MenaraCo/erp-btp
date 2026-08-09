@@ -268,54 +268,107 @@ body.sidebar-collapsed .sidebar-toggle .nav-label {
   padding: 16px;
 }
 
-/* ── Tuiles du menu de démarrage ──
-   En classes plutôt qu'en styles inline : c'est ce qui permet à chaque thème de les habiller
-   (voir `.theme-lg .tuile`). Le thème par défaut garde le bloc plein, franc et lisible. */
+/* ── Menu de démarrage (lanceur plein écran) ──
+   Sur `/`, le shell n'a PAS de barre latérale : le lanceur occupe toute la largeur, centré. */
+.app-shell--menu {
+  grid-template-columns: 1fr;
+  grid-template-areas: 'topbar' 'main';
+}
+.menu-demarrage {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 10px 0 44px;
+}
+.menu-titre {
+  text-align: center;
+  margin: 6px 0 4px;
+}
+.menu-sous {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 30px;
+}
+.grille-tuiles {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  justify-content: center;
+}
+
+/* ── Tuiles ── (balisage unique, décliné par chaque thème via `.theme-* .tuile`)
+   Défaut « classique » : carte claire, pastille colorée par module, titre net. La couleur de la
+   pastille arrive en variable `--tint` posée sur chaque tuile depuis le composant. */
 .tuile {
   position: relative;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-  min-height: 148px;
-  padding: 22px 24px;
-  border-radius: var(--radius-md);
-  background: var(--primary);
-  color: var(--primary-ink);
+  align-items: center;
+  gap: 16px;
+  min-height: 92px;
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink-strong);
   text-decoration: none;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   text-align: left;
   cursor: pointer;
   font: inherit;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
 }
 
 .tuile:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  border-color: var(--tint, var(--primary));
+}
+
+.tuile-ico {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  color: #fff;
+  background: var(--tint, var(--primary));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.tuile-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
 }
 
 .tuile-titre {
-  font-size: 19px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
   letter-spacing: -0.2px;
-  line-height: 1.15;
+  line-height: 1.2;
 }
 
 .tuile-sub {
   font-size: 12px;
-  opacity: 0.85;
+  color: var(--muted);
   line-height: 1.35;
 }
 
-/* Non souscrite : elle reste visible et cliquable — masquer laisserait croire que la fonction
-   n'existe pas — mais son allure dit clairement qu'elle n'est pas ouverte. */
+/* Non souscrite : visible et cliquable (masquer laisserait croire que la fonction n'existe pas),
+   mais atténuée — elle mène à l'offre. */
 .tuile-off {
   background: var(--surface);
-  border: 1px dashed var(--border-strong);
-  color: var(--muted);
+  border-style: dashed;
 }
-
+.tuile-off .tuile-ico {
+  background: var(--border-strong);
+  color: var(--surface);
+  box-shadow: none;
+}
+.tuile-off .tuile-titre { color: var(--muted); }
 .tuile-off:hover {
   border-color: var(--accent);
   transform: none;
@@ -324,8 +377,8 @@ body.sidebar-collapsed .sidebar-toggle .nav-label {
 
 .tuile-badge {
   position: absolute;
-  top: 12px;
-  right: 14px;
+  top: 10px;
+  right: 12px;
   font-size: 9.5px;
   font-weight: 700;
   text-transform: uppercase;
@@ -334,7 +387,33 @@ body.sidebar-collapsed .sidebar-toggle .nav-label {
   border: 1px solid var(--accent);
   border-radius: 20px;
   padding: 2px 8px;
+  background: #fff;
 }
+
+/* ── Puce bibliothèque : bouton de sélection + suppression accolée ── */
+.lib-chip { display: inline-flex; align-items: stretch; }
+.lib-chip-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  border: 1px solid var(--border-strong);
+  border-left: none;
+  border-top-right-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.lib-chip-del:hover {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+.lib-chip-del:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Modales ──
    Ces deux classes n'existaient QUE sous `.theme-lg` : dans le thème par défaut, le panneau

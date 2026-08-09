@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { FileText, ClipboardCheck, HardHat, Receipt, Gauge, Users, Settings } from 'lucide-react';
 import { useCapabilities } from '@/lib/capabilities';
 import { AppModule, MODULES, moduleIsOpen } from '@/lib/modules';
 
@@ -11,18 +12,31 @@ import { AppModule, MODULES, moduleIsOpen } from '@/lib/modules';
  * Une tuile par module. Celles que la société n'a pas souscrites restent VISIBLES mais grisées :
  * les masquer laisserait croire que la fonction n'existe pas, alors qu'elle s'ouvre d'un
  * abonnement. Un clic mène donc à l'écran Abonnement plutôt qu'à un accès refusé.
+ *
+ * L'habillage (fond, pastilles, relief) est porté par le thème choisi : le balisage est unique,
+ * chaque thème le décline (classique, Liquid Glass, iOS 7) via `.tuile` dans son fichier CSS.
  */
+
+// Icône + teinte par module. La teinte colore la pastille façon « icône d'application ».
+const DECOR: Record<string, { icon: React.ElementType; tint: string }> = {
+  estimating: { icon: FileText, tint: '#007aff' },
+  acceptation: { icon: ClipboardCheck, tint: '#34c759' },
+  chantiers: { icon: HardHat, tint: '#ff9500' },
+  invoicing: { icon: Receipt, tint: '#af52de' },
+  direction: { icon: Gauge, tint: '#ff3b30' },
+  referentiel: { icon: Users, tint: '#5ac8fa' },
+  configuration: { icon: Settings, tint: '#8e8e93' },
+};
+
 export default function MenuDemarragePage() {
   const caps = useCapabilities();
 
   return (
-    <div>
-      <h1 style={{ marginBottom: 2 }}>Par où commencer&nbsp;?</h1>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Choisissez un module. Vous retrouverez ce menu à tout moment depuis la barre de gauche.
-      </p>
+    <div className="menu-demarrage">
+      <h1 className="menu-titre">Par où commencer&nbsp;?</h1>
+      <p className="menu-sous">Choisissez un module pour ouvrir son espace de travail.</p>
 
-      <div style={grille}>
+      <div className="grille-tuiles">
         {MODULES.map((m) => (
           <Tuile key={m.key} module={m} ouvert={caps.isLoading || moduleIsOpen(m, caps.has)} />
         ))}
@@ -33,6 +47,19 @@ export default function MenuDemarragePage() {
 
 function Tuile({ module: m, ouvert }: { module: AppModule; ouvert: boolean }) {
   const router = useRouter();
+  const d = DECOR[m.key] ?? { icon: Settings, tint: '#8e8e93' };
+  const Icon = d.icon;
+  const tint = { '--tint': d.tint } as React.CSSProperties;
+
+  const inner = (
+    <>
+      <span className="tuile-ico"><Icon size={26} strokeWidth={2} /></span>
+      <span className="tuile-txt">
+        <span className="tuile-titre">{m.label}</span>
+        <span className="tuile-sub">{m.tagline}</span>
+      </span>
+    </>
+  );
 
   // Grisée : la tuile reste cliquable, mais elle mène à l'offre — pas à un mur.
   if (!ouvert) {
@@ -40,27 +67,19 @@ function Tuile({ module: m, ouvert }: { module: AppModule; ouvert: boolean }) {
       <button
         type="button"
         className="tuile tuile-off"
+        style={tint}
         title={`${m.label} — module non souscrit`}
         onClick={() => router.push(`/abonnement?decouvrir=${m.key}`)}
       >
-        <span className="tuile-titre">{m.label}</span>
-        <span className="tuile-sub">{m.tagline}</span>
+        {inner}
         <span className="tuile-badge">Non souscrit</span>
       </button>
     );
   }
 
   return (
-    <Link href={m.home} className="tuile" title={m.label}>
-      <span className="tuile-titre">{m.label}</span>
-      <span className="tuile-sub">{m.tagline}</span>
+    <Link href={m.home} className="tuile" style={tint} title={m.label}>
+      {inner}
     </Link>
   );
 }
-
-const grille: React.CSSProperties = {
-  display: 'grid',
-  gap: 14,
-  marginTop: 20,
-  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-};

@@ -1,0 +1,188 @@
+/* ============================================================================
+   Thème « Flat » — un thème à part entière, au même titre que Liquid Glass.
+   Inspiration flat design (façon iOS 7, 2013) : à plat, aéré, translucidité douce,
+   typographie fine, dégradés vifs, profondeur par les calques (jamais de relief).
+   Activé par la classe `body.theme-flat` (posée par lib/theme.tsx).
+   On NE touche PAS aux couleurs de société (--primary/--accent) : le côté vif
+   d'iOS vient des pastilles de module, colorées comme des icônes d'application.
+   ============================================================================ */
+
+body.theme-flat {
+  /* Fond clair « papier peint » : léger dégradé froid pour faire ressortir les icônes. */
+  background:
+    radial-gradient(120% 80% at 50% -10%, #ffffff 0%, #eef1f7 55%, #e7ebf3 100%);
+  background-attachment: fixed;
+  color: #1c1c1e;
+  font-weight: 300; /* typographie fine, marque de fabrique d'iOS 7 */
+  letter-spacing: 0.1px;
+}
+
+.theme-flat h1,
+.theme-flat h2 {
+  font-weight: 500;
+  letter-spacing: -0.2px;
+}
+
+/* ── Barres : blanc translucide flouté, hairline (barre de nav iOS) ── */
+.theme-flat .sidebar {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px) saturate(1.6);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  border-right: 1px solid rgba(60, 60, 67, 0.12);
+}
+.theme-flat .topbar {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px) saturate(1.6);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  border-bottom: 1px solid rgba(60, 60, 67, 0.12);
+}
+.theme-flat .sidebar a:hover {
+  background: rgba(120, 120, 128, 0.10);
+}
+.theme-flat .sidebar a.active {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+/* ── Cartes : blanches, coins généreux, ombre minimale, hairline ── */
+.theme-flat .card {
+  background: #ffffff;
+  border: 1px solid rgba(60, 60, 67, 0.10);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* ── Champs : remplissage gris doux, arrondi, sans bordure dure (style iOS) ── */
+.theme-flat input,
+.theme-flat select,
+.theme-flat textarea {
+  background: rgba(118, 118, 128, 0.08);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #1c1c1e;
+}
+.theme-flat input:focus,
+.theme-flat select:focus,
+.theme-flat textarea:focus {
+  background: #ffffff;
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+  outline: none;
+}
+
+/* ── Boutons : à plat, arrondis, réaction par l'opacité (pas d'ombre lourde) ── */
+.theme-flat button.btn,
+.theme-flat .btn {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-weight: 500;
+  box-shadow: none;
+  transition: opacity 0.12s;
+}
+.theme-flat button.btn:hover:not(:disabled),
+.theme-flat .btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.theme-flat button.btn-secondary,
+.theme-flat .btn-secondary {
+  background: rgba(120, 120, 128, 0.12);
+  color: var(--primary);
+  border: none;
+  border-radius: 10px;
+  font-weight: 500;
+}
+.theme-flat button.btn-secondary:hover:not(:disabled),
+.theme-flat .btn-secondary:hover:not(:disabled) {
+  background: rgba(120, 120, 128, 0.20);
+}
+
+/* ── Tables : lignes en hairline, sans zébrage lourd ── */
+.theme-flat table.grid td,
+.theme-flat table.grid th {
+  border-color: rgba(60, 60, 67, 0.10);
+}
+
+/* ============================================================================
+   Tuiles du menu — le cœur du thème : des icônes d'application iOS 7.
+   Squircle à dégradé, reflet en haut, ombre douce, libellé fin centré dessous.
+   Pas de carte : les icônes « flottent » sur le papier peint, comme un écran d'accueil.
+   ============================================================================ */
+.theme-flat .grille-tuiles {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 26px 18px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.theme-flat .tuile {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 6px 4px;
+  background: none;
+  border: none;
+  border-radius: 18px;
+  box-shadow: none;
+  color: #1c1c1e;
+}
+.theme-flat .tuile:hover {
+  transform: none;
+  box-shadow: none;
+  border: none;
+}
+.theme-flat .tuile:hover .tuile-ico {
+  transform: scale(1.06);
+}
+
+/* La pastille devient une vraie icône d'app : squircle, dégradé vertical du module,
+   reflet lumineux en haut, ombre portée douce. */
+.theme-flat .tuile-ico {
+  width: 68px;
+  height: 68px;
+  border-radius: 22px; /* ≈ squircle iOS sur 68px */
+  color: #fff;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--tint, var(--primary)) 78%, #ffffff) 0%,
+      var(--tint, var(--primary)) 55%,
+      color-mix(in srgb, var(--tint, var(--primary)) 82%, #000000) 100%);
+  box-shadow:
+    0 6px 14px color-mix(in srgb, var(--tint, var(--primary)) 40%, transparent),
+    inset 0 1px 1px rgba(255, 255, 255, 0.55);
+  transition: transform 0.15s ease;
+}
+.theme-flat .tuile-ico svg { width: 30px; height: 30px; }
+
+.theme-flat .tuile-txt {
+  align-items: center;
+  gap: 2px;
+}
+.theme-flat .tuile-titre {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.1px;
+  color: #1c1c1e;
+}
+.theme-flat .tuile-sub {
+  font-size: 11px;
+  font-weight: 300;
+  color: #6b6b70;
+  max-width: 15ch;
+}
+
+/* Non souscrite : icône désaturée et estompée, l'app est « installée mais pas activée ». */
+.theme-flat .tuile-off .tuile-ico {
+  background: linear-gradient(180deg, #d8d8dd 0%, #b9b9c0 100%);
+  box-shadow: 0 4px 10px rgba(60, 60, 67, 0.18), inset 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+.theme-flat .tuile-off .tuile-titre { color: #8e8e93; }
+.theme-flat .tuile-badge {
+  position: static;
+  margin-top: 2px;
+  border: none;
+  background: rgba(120, 120, 128, 0.16);
+  color: #6b6b70;
+}

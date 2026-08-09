@@ -272,19 +272,24 @@ body.theme-lg {
    pour garder son identité. `color-mix` la suit automatiquement ; la ligne pleine qui précède
    sert de repli aux moteurs qui ne la connaissent pas. */
 .theme-lg .tuile {
-  background: rgba(26, 58, 92, 0.78);
-  background: color-mix(in srgb, var(--primary) 74%, transparent);
+  background: rgba(255, 255, 255, 0.50);
   backdrop-filter: blur(20px) saturate(1.9);
   -webkit-backdrop-filter: blur(20px) saturate(1.9);
-  border: 1px solid rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.55);
   box-shadow: 0 4px 20px rgba(26, 58, 92, 0.10),
-              inset 0 1px 0 rgba(255, 255, 255, 0.35);
+              inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
 .theme-lg .tuile:hover {
-  border-color: rgba(255, 255, 255, 0.7);
-  box-shadow: 0 10px 30px rgba(26, 58, 92, 0.16),
-              inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 12px 30px rgba(26, 58, 92, 0.18),
+              inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* La pastille garde sa couleur vive de module mais gagne un léger halo de verre. */
+.theme-lg .tuile-ico {
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--tint, var(--primary)) 45%, transparent),
+              inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 /* Non souscrite : même verre, mais incolore et en pointillés — elle se distingue au premier

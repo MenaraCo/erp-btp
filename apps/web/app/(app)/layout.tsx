@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { PrefsProvider } from '@/lib/preferences';
 import { WorkspaceProvider } from '@/lib/workspace';
@@ -20,12 +20,15 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  // Le menu de démarrage (/) est un lanceur plein écran : pas de barre latérale, elle n'y sert à rien.
+  const isMenu = pathname === '/';
   return (
     <PrefsProvider>
       <WorkspaceProvider>
         <AuthGuard>
-          <div className="app-shell">
-            <Sidebar />
+          <div className={`app-shell${isMenu ? ' app-shell--menu' : ''}`}>
+            {!isMenu && <Sidebar />}
             <Topbar />
             <SplitLayout>{children}</SplitLayout>
           </div>

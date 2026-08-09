@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import './liquid-glass.css';
+import './flat-theme.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
