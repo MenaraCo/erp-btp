@@ -94,21 +94,48 @@ describe('Abonnement — paiement par redirection et webhook', () => {
     await ds.destroy();
   });
 
-  describe('ouverture de la page de paiement', () => {
-    const session = (corps: Record<string, unknown>) =>
-      request(app.getHttpServer())
-        .post('/abonnement/paiement/session')
+  describe('montant à payer', () => {
+    const appel = (method: 'get' | 'post', path: string) =>
+      request(app.getHttpServer())[method](path)
         .set('Host', 'localhost')
         .set('X-Tenant-Id', tenantId)
-        .set('X-User-Id', userId)
-        .send(corps);
+        .set('X-User-Id', userId);
 
-    it('renvoie une adresse de redirection', async () => {
-      const r = await session({
-        intitule: 'Pack Essentiel — 5 utilisateurs',
-        montantCentimes: 9900,
-        periode: 'month',
-      }).expect(201);
+    it('refuse d’ouvrir une page de paiement tant qu’aucune formule n’est choisie', async () => {
+      // Rien à prélever : mieux vaut le dire que rediriger vers une page à zéro euro.
+      const r = await appel('post', '/abonnement/paiement/session').expect(400);
+      expect(JSON.stringify(r.body.message)).toContain('formule');
+    });
+
+    it('dit POURQUOI il n’y a rien à payer, plutôt que de renvoyer une erreur', async () => {
+      // Consulter son montant n'est pas une opération qui échoue : l'écran doit pouvoir
+      // afficher une phrase, pas un rouge d'erreur.
+      const r = await appel('get', '/abonnement/paiement/devis').expect(200);
+      expect(r.body.devis).toBeNull();
+      expect(r.body.motif).toContain('formule');
+    });
+
+    it('calcule le montant DEPUIS la souscription, jamais depuis le navigateur', async () => {
+      // Essentiel à 39 €/siège/mois, 3 sièges ⇒ 117 € = 11 700 centimes.
+      await request(app.getHttpServer())
+        .post('/subscription/pack')
+        .set('Host', 'localhost').set('X-Tenant-Id', tenantId).set('X-User-Id', userId)
+        .send({ packCode: 'essentiel', seats: 3 })
+        .expect(201);
+
+      const r = await appel('get', '/abonnement/paiement/devis').expect(200);
+      expect(r.body.devis.montantCentimes).toBe(11700);
+      expect(r.body.devis.periode).toBe('month');
+      expect(r.body.fictif).toBe(true);
+    });
+
+    it('ignore un montant soufflé dans la requête — sinon on s’abonnerait à un centime', async () => {
+      const r = await request(app.getHttpServer())
+        .post('/abonnement/paiement/session')
+        .set('Host', 'localhost').set('X-Tenant-Id', tenantId).set('X-User-Id', userId)
+        .send({ montantCentimes: 1, intitule: 'Cadeau', periode: 'month' })
+        .expect(201);
+      expect(r.body.devis.montantCentimes).toBe(11700);
       expect(r.body.url).toContain('http');
       expect(r.body.sessionId).toBeTruthy();
     });
@@ -117,14 +144,50 @@ describe('Abonnement — paiement par redirection et webhook', () => {
       // Un client qui abandonne la page de paiement ne doit pas repartir abonné.
       expect(await statut()).toBe('trialing');
     });
+  });
 
-    it('refuse un montant à virgule — l’argent se compte en centiers entiers', async () => {
-      const r = await session({ intitule: 'X', montantCentimes: 99.5, periode: 'month' }).expect(400);
-      expect(JSON.stringify(r.body.message)).toContain('centimes');
+  describe('banc d’essai (prestataire de substitution)', () => {
+    const simuler = (type: string) =>
+      request(app.getHttpServer())
+        .post('/abonnement/paiement/simuler')
+        .set('Host', 'localhost').set('X-Tenant-Id', tenantId).set('X-User-Id', userId)
+        .send({ type });
+
+    it('active l’abonnement comme le ferait un vrai retour de paiement', async () => {
+      const r = await simuler('paiement_reussi').expect(201);
+      expect(r.body.applique).toBe(true);
+      expect(await statut()).toBe('active');
     });
 
-    it('refuse une périodicité inconnue', async () => {
-      await session({ intitule: 'X', montantCentimes: 100, periode: 'semaine' }).expect(400);
+    it('passe la signature comme les autres : l’événement est journalisé', async () => {
+      const [n] = await ds.query(
+        `SELECT count(*)::int AS n FROM payment_event
+          WHERE tenant_id = $1 AND provider_event_id LIKE 'fake_evt_%'`,
+        [tenantId],
+      );
+      expect(n.n).toBeGreaterThan(0);
+    });
+
+    it('refuse un type d’événement inventé', async () => {
+      await simuler('paiement_magique').expect(400);
+    });
+
+    it('n’existe pas en production, même avec le faux prestataire', async () => {
+      const avant = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        await simuler('paiement_reussi').expect(403);
+      } finally {
+        process.env.NODE_ENV = avant;
+      }
+      // Le raccourci est resté fermé : l'abonnement n'a pas bougé.
+      expect(await statut()).toBe('active');
+    });
+
+    it('remet l’abonnement en essai pour la suite des tests', async () => {
+      await runInTenant(ds, tenantId, (em) =>
+        em.query(`UPDATE subscription SET status = 'trialing' WHERE tenant_id = $1`, [tenantId]));
+      expect(await statut()).toBe('trialing');
     });
   });
 
@@ -195,7 +258,9 @@ describe('Abonnement — paiement par redirection et webhook', () => {
 
     it('journalise chaque événement reçu, avec son corps', async () => {
       const lignes = await ds.query(
-        `SELECT provider_event_id, type FROM payment_event WHERE tenant_id = $1 ORDER BY provider_event_id`,
+        `SELECT provider_event_id, type FROM payment_event
+          WHERE tenant_id = $1 AND provider_event_id LIKE 'evt\\_%'
+          ORDER BY provider_event_id`,
         [tenantId],
       );
       expect(lignes.map((l: { provider_event_id: string }) => l.provider_event_id))

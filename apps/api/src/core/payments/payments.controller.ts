@@ -2,30 +2,23 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   Headers,
   Post,
   RawBodyRequest,
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { IsIn, IsInt, IsPositive, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsIn } from 'class-validator';
 import { RequiresPermission } from '../rbac/requires-permission.decorator';
+import { TenantContext } from '../tenancy/tenant-context';
 import { PaymentProvider } from './payment-provider';
 import { PaymentsService } from './payments.service';
 
-class SessionDto {
-  @IsString()
-  @MinLength(1)
-  @MaxLength(200)
-  intitule!: string;
-
-  /** En CENTIMES : jamais de flottant pour de l'argent. */
-  @IsInt({ message: 'Le montant doit être exprimé en centimes, sans décimale.' })
-  @IsPositive()
-  montantCentimes!: number;
-
-  @IsIn(['month', 'year'])
-  periode!: 'month' | 'year';
+/** Banc d'essai uniquement : l'événement que l'on demande au faux prestataire d'émettre. */
+class SimulationDto {
+  @IsIn(['paiement_reussi', 'paiement_echoue', 'abonnement_annule'])
+  type!: 'paiement_reussi' | 'paiement_echoue' | 'abonnement_annule';
 }
 
 /**
@@ -41,13 +34,48 @@ export class PaymentsController {
   constructor(
     private readonly payments: PaymentsService,
     private readonly provider: PaymentProvider,
+    private readonly context: TenantContext,
   ) {}
 
-  /** Ouvre la page de paiement et renvoie l'adresse de redirection. */
+  /**
+   * Ce qui sera prélevé, et comment le paiement fonctionne ici. L'écran d'abonnement l'affiche
+   * avant tout clic : personne ne doit découvrir un montant après avoir été redirigé.
+   */
+  @Get('abonnement/paiement/devis')
+  @RequiresPermission('subscription.manage')
+  async devis() {
+    const fictif = this.payments.estFictif();
+    try {
+      return { fictif, devis: await this.payments.calculerDevis(this.context.requireTenantId()), motif: null };
+    } catch (e) {
+      // Consulter ce qu'on doit payer ne peut pas « échouer » : quand il n'y a rien à prélever,
+      // l'écran a besoin de la RAISON pour la dire, pas d'une erreur à afficher en rouge.
+      if (e instanceof BadRequestException) {
+        return { fictif, devis: null, motif: (e.getResponse() as { message?: string }).message ?? e.message };
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Ouvre la page de paiement et renvoie l'adresse de redirection.
+   *
+   * Aucun montant n'est accepté du navigateur : il est recalculé depuis la souscription.
+   */
   @Post('abonnement/paiement/session')
   @RequiresPermission('subscription.manage')
-  creerSession(@Body() body: SessionDto) {
-    return this.payments.creerSession(body);
+  creerSession() {
+    return this.payments.creerSession();
+  }
+
+  /**
+   * Banc d'essai — émet l'événement qu'enverrait le prestataire. N'existe qu'avec le prestataire
+   * de substitution et hors production ; le service refuse dans tous les autres cas.
+   */
+  @Post('abonnement/paiement/simuler')
+  @RequiresPermission('subscription.manage')
+  simuler(@Body() body: SimulationDto) {
+    return this.payments.simuler(body.type);
   }
 
   /**

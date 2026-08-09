@@ -1,16 +1,30 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { randomUUID } from 'node:crypto';
 import { loadAppConfig } from '../../config/env.config';
 import { TenantContext } from '../tenancy/tenant-context';
 import { runInTenant } from '../tenancy/tenant-transaction';
+import { PackSubscriptionService } from '../subscriptions/pack-subscription.service';
+import { PricingService } from '../pricing/pricing.service';
+import type { BillingInterval, BillingTerm } from '../pricing/pricing.calc';
 import { EvenementPaiement, PaymentProvider, SessionPaiement } from './payment-provider';
+import { FakePaymentProvider } from './fake-payment.provider';
 
-/** Ce que l'abonné a choisi, et que l'on s'apprête à faire payer. */
-export interface DemandeSouscription {
+/** Ce qui va être prélevé, tel que l'application le calcule — jamais tel que le client l'annonce. */
+export interface DevisPaiement {
+  /** Intitulé présenté sur la page de paiement. */
   intitule: string;
+  /** Montant de la prochaine échéance, en CENTIMES. */
   montantCentimes: number;
+  /** Rythme du prélèvement chez le prestataire. */
   periode: 'month' | 'year';
+  lignes: Array<{ libelle: string; jetons: number; prixUnitaire: number; total: number }>;
+  /** Mensuel catalogue avant remise d'engagement. */
+  mensuelBase: number;
+  remisePct: number;
+  /** Mensuel réellement facturé (le MRR). */
+  mensuelNet: number;
 }
 
 @Injectable()
@@ -21,7 +35,80 @@ export class PaymentsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly provider: PaymentProvider,
     private readonly context: TenantContext,
+    private readonly packs: PackSubscriptionService,
+    private readonly pricing: PricingService,
   ) {}
+
+  /**
+   * Ce que la société doit payer, calculé À PARTIR DE SA SOUSCRIPTION.
+   *
+   * Le montant n'est jamais dicté par le navigateur : sinon n'importe quel client pourrait
+   * s'abonner à un centime en modifiant la requête. Le prix se déduit du palier, des options et
+   * de la formule d'engagement enregistrés en base, par le moteur de tarification — source unique
+   * de vérité, partagée avec l'affichage du catalogue.
+   */
+  async calculerDevis(tenantId: string): Promise<DevisPaiement> {
+    const [etat, packs, addons] = await Promise.all([
+      this.packs.getState(tenantId),
+      this.packs.listPacks(),
+      this.packs.listAddons(tenantId),
+    ]);
+    if (!etat.packCode || etat.packSeats <= 0) {
+      throw new BadRequestException(
+        'Choisissez d’abord une formule et un nombre de jetons : il n’y a rien à payer.',
+      );
+    }
+
+    const pack = packs.find((p) => p.code === etat.packCode);
+    const lignes: DevisPaiement['lignes'] = [];
+    const ajouter = (libelle: string, jetons: number, prixUnitaire: number | null) => {
+      if (prixUnitaire == null || jetons <= 0) return;
+      lignes.push({
+        libelle,
+        jetons,
+        prixUnitaire,
+        total: Math.round(jetons * prixUnitaire * 100) / 100,
+      });
+    };
+    ajouter(pack?.label ?? etat.packCode, etat.packSeats, pack?.priceMonthly ?? null);
+    for (const a of addons.filter((x) => x.seats > 0)) {
+      ajouter(a.label, a.seats, a.priceMonthly);
+    }
+    if (lignes.length === 0) {
+      // Palier « sur devis » : rien de chiffré, donc rien à prélever automatiquement.
+      throw new BadRequestException(
+        'Votre formule est tarifée sur devis : le paiement en ligne ne s’applique pas.',
+      );
+    }
+
+    const [abo] = await runInTenant(this.dataSource, tenantId, (em) =>
+      em.query(
+        `SELECT billing_term, billing_interval FROM subscription WHERE tenant_id = $1`,
+        [tenantId],
+      ),
+    );
+    const billingTerm = (abo?.billing_term ?? 'monthly') as BillingTerm;
+    const billingInterval = (abo?.billing_interval ?? 'monthly') as BillingInterval;
+
+    const prix = await this.pricing.compute({
+      lines: lignes.map((l) => ({ seats: l.jetons, unitPrice: l.prixUnitaire })),
+      billingTerm,
+      billingInterval,
+    });
+    const periode: 'month' | 'year' = billingInterval === 'yearly' ? 'year' : 'month';
+    const jetonsTotal = lignes.reduce((n, l) => n + l.jetons, 0);
+
+    return {
+      intitule: `${pack?.label ?? etat.packCode} — ${jetonsTotal} jeton${jetonsTotal > 1 ? 's' : ''}`,
+      // L'argent se compte en centimes entiers : jamais de flottant transmis au prestataire.
+      montantCentimes: Math.round(prix.amountPerInvoice * 100),
+      periode,
+      lignes,
+      mensuelBase: prix.monthlyBase,
+      remisePct: prix.termDiscountPct,
+      mensuelNet: prix.monthlyNet,
+    };
+  }
 
   /**
    * Ouvre une page de paiement pour la société courante et renvoie l'adresse de redirection.
@@ -30,25 +117,67 @@ export class PaymentsService {
    * reste dans l'état où il était. Un client qui abandonne la page de paiement ne doit pas
    * repartir avec un abonnement actif.
    */
-  async creerSession(demande: DemandeSouscription): Promise<SessionPaiement> {
-    if (!Number.isInteger(demande.montantCentimes) || demande.montantCentimes <= 0) {
-      throw new BadRequestException('Montant de souscription invalide.');
-    }
+  async creerSession(): Promise<SessionPaiement & { devis: DevisPaiement }> {
     const tenantId = this.context.requireTenantId();
     const email = this.context.getEmail() ?? '';
+    const devis = await this.calculerDevis(tenantId);
 
     const [abo] = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(`SELECT provider_customer_id FROM subscription WHERE tenant_id = $1`, [tenantId]),
     );
 
-    return this.provider.creerSession({
+    const session = await this.provider.creerSession({
       tenantId,
       email,
-      intitule: demande.intitule,
-      montantCentimes: demande.montantCentimes,
-      periode: demande.periode,
+      intitule: devis.intitule,
+      montantCentimes: devis.montantCentimes,
+      periode: devis.periode,
       providerCustomerId: abo?.provider_customer_id ?? null,
     });
+    return { ...session, devis };
+  }
+
+  /** Le prestataire réellement actif — l'écran d'abonnement en dépend pour s'annoncer honnêtement. */
+  estFictif(): boolean {
+    return loadAppConfig().payment.provider !== 'stripe';
+  }
+
+  /**
+   * Banc d'essai : fabrique l'événement que le prestataire enverrait, et le fait passer par le
+   * CHEMIN RÉEL — signature comprise. Sans cela, on ne pourrait éprouver le retour de paiement
+   * qu'avec un vrai compte, une vraie carte et un tunnel vers la machine locale.
+   *
+   * Deux verrous, car un tel raccourci ouvrirait l'abonnement gratuit à qui le trouverait :
+   * il n'existe qu'avec le prestataire de substitution, et jamais en production.
+   */
+  async simuler(type: 'paiement_reussi' | 'paiement_echoue' | 'abonnement_annule') {
+    const conf = loadAppConfig().payment;
+    if (conf.provider === 'stripe' || process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException(
+        'La simulation de paiement n’existe qu’avec le prestataire de substitution, hors production.',
+      );
+    }
+    const tenantId = this.context.requireTenantId();
+    const dansUnMois = new Date();
+    dansUnMois.setMonth(dansUnMois.getMonth() + 1);
+
+    const corps = {
+      // Identifiant unique : rejouer deux fois le même serait ignoré par l'idempotence.
+      id: `fake_evt_${randomUUID()}`,
+      type,
+      tenantId,
+      providerCustomerId: `cus_fictif_${tenantId.slice(0, 8)}`,
+      providerSubscriptionId: `sub_fictif_${tenantId.slice(0, 8)}`,
+      periodeFin: type === 'paiement_reussi' ? dansUnMois.toISOString() : null,
+    };
+    const brut = Buffer.from(JSON.stringify(corps), 'utf8');
+    const signature = FakePaymentProvider.signer(brut, conf.webhookSecret || undefined);
+
+    // On repasse par la vérification de signature : c'est le chemin de production qui est
+    // éprouvé, pas un raccourci parallèle qui pourrait diverger sans qu'on le voie.
+    const evt = await this.provider.lireEvenement(brut, signature);
+    const { applique } = await this.appliquer(evt, corps);
+    return { applique, evenement: evt.id, type: evt.type };
   }
 
   /**

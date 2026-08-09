@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Lock, Plus, Trash2, Sparkles } from 'lucide-react';
+import { Lock, Plus, Trash2, Sparkles, CreditCard, FlaskConical } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
@@ -66,6 +66,22 @@ interface SeatAssignment {
   email: string;
   fullName: string | null;
   assignedAt: string;
+}
+interface Devis {
+  intitule: string;
+  montantCentimes: number;
+  periode: 'month' | 'year';
+  lignes: Array<{ libelle: string; jetons: number; prixUnitaire: number; total: number }>;
+  mensuelBase: number;
+  remisePct: number;
+  mensuelNet: number;
+}
+interface EtatPaiement {
+  /** Prestataire de substitution : aucun euro ne circule, tout se teste par des boutons. */
+  fictif: boolean;
+  devis: Devis | null;
+  /** Pourquoi il n'y a rien à prélever, le cas échéant. */
+  motif: string | null;
 }
 
 /* ─────────── helpers ─────────── */
@@ -253,6 +269,8 @@ function TabEtat() {
         </div>
       </div>
 
+      <CartePaiement />
+
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Modules actifs ({activeModules.length})</h2>
         {activeModules.length === 0 ? (
@@ -268,6 +286,139 @@ function TabEtat() {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ─────────── Paiement ─────────── */
+/**
+ * Payer son abonnement.
+ *
+ * Le montant affiché ici vient du serveur, jamais d'un calcul de l'écran : c'est le même chiffre
+ * qui sera présenté au prestataire. Et le paiement se fait par REDIRECTION — aucune carte n'est
+ * jamais saisie dans l'application.
+ *
+ * Tant que le prestataire de substitution est actif, un banc d'essai permet de dérouler tout le
+ * parcours (retour de paiement, échec, résiliation) sans compte, sans clé et sans un euro.
+ */
+function CartePaiement() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const retour = useSearchParams().get('paiement');
+  const [err, setErr] = useState<string | null>(null);
+
+  const etat = useQuery({
+    queryKey: ['paiement-devis'],
+    queryFn: () => api<EtatPaiement>('/abonnement/paiement/devis'),
+  });
+
+  const payer = useMutation({
+    mutationFn: () => api<{ url: string }>('/abonnement/paiement/session', { method: 'POST' }),
+    // On quitte l'application : c'est chez le prestataire que la carte se saisit.
+    onSuccess: (r) => { window.location.href = r.url; },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Ouverture du paiement impossible.'),
+  });
+
+  const simuler = useMutation({
+    mutationFn: (type: string) =>
+      api('/abonnement/paiement/simuler', { method: 'POST', body: { type } }),
+    onSuccess: () => {
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ['subscription'] });
+      qc.invalidateQueries({ queryKey: ['paiement-devis'] });
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Simulation impossible.'),
+  });
+
+  if (etat.isLoading || etat.isError) return null;
+  const d = etat.data?.devis ?? null;
+  const parPeriode = d?.periode === 'year' ? 'an' : 'mois';
+
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <CreditCard size={16} /> Paiement
+      </h2>
+
+      {retour === 'ok' && (
+        <div className="badge info" style={{ display: 'block', marginBottom: 12, padding: '8px 10px' }}>
+          Retour de la page de paiement. L’abonnement ne bascule qu’à réception de la confirmation
+          du prestataire — quelques secondes en général.
+        </div>
+      )}
+      {retour === 'annule' && (
+        <div className="badge warning" style={{ display: 'block', marginBottom: 12, padding: '8px 10px' }}>
+          Paiement abandonné. Rien n’a été prélevé, rien n’a changé.
+        </div>
+      )}
+      {err && <div className="error">{err}</div>}
+
+      {!d ? (
+        <p className="muted" style={{ margin: 0 }}>{etat.data?.motif ?? 'Rien à prélever pour l’instant.'}</p>
+      ) : (
+        <>
+          <table className="grid" style={{ marginBottom: 12 }}>
+            <tbody>
+              {d.lignes.map((l) => (
+                <tr key={l.libelle}>
+                  <td>{l.libelle}</td>
+                  <td className="muted" style={{ textAlign: 'right' }}>
+                    {l.jetons} × {euro(l.prixUnitaire)}
+                  </td>
+                  <td style={{ textAlign: 'right', width: 90 }}>{euro(l.total)}</td>
+                </tr>
+              ))}
+              {d.remisePct > 0 && (
+                <tr>
+                  <td colSpan={2} className="muted">Remise engagement annuel ({d.remisePct} %)</td>
+                  <td style={{ textAlign: 'right' }}>−{euro(d.mensuelBase - d.mensuelNet)}</td>
+                </tr>
+              )}
+              <tr>
+                <td colSpan={2} style={{ fontWeight: 700 }}>Prochaine échéance</td>
+                <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                  {euro(d.montantCentimes / 100)}<span className="muted" style={{ fontWeight: 400 }}> /{parPeriode}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <button className="btn" disabled={payer.isPending} onClick={() => { setErr(null); payer.mutate(); }}>
+            {payer.isPending ? 'Ouverture…' : 'Payer par carte'}
+          </button>
+          <p className="muted" style={{ fontSize: 11, margin: '8px 0 0' }}>
+            Vous êtes redirigé vers notre prestataire de paiement. Aucune coordonnée bancaire
+            n’est saisie ni conservée dans l’application.
+          </p>
+        </>
+      )}
+
+      {etat.data?.fictif && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px dashed var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 12.5 }}>
+            <FlaskConical size={14} color="var(--accent)" /> Banc d’essai — paiement fictif
+          </div>
+          <p className="muted" style={{ fontSize: 11.5, margin: '4px 0 10px', lineHeight: 1.5 }}>
+            Aucun prestataire réel n’est configuré : rien n’est encaissé. Ces boutons émettent
+            l’événement qu’enverrait la banque, en passant par la même vérification de signature
+            qu’en production — de quoi voir l’abonnement réagir pour de vrai.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" disabled={simuler.isPending}
+              onClick={() => simuler.mutate('paiement_reussi')}>
+              Simuler un paiement réussi
+            </button>
+            <button className="btn btn-secondary" disabled={simuler.isPending}
+              onClick={() => simuler.mutate('paiement_echoue')}>
+              Simuler un échec de prélèvement
+            </button>
+            <button className="btn btn-secondary" disabled={simuler.isPending}
+              onClick={() => simuler.mutate('abonnement_annule')}>
+              Simuler une résiliation
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -308,6 +459,8 @@ function TabModules() {
     qc.invalidateQueries({ queryKey: ['subscription-modules'] });
     qc.invalidateQueries({ queryKey: ['subscription'] });
     qc.invalidateQueries({ queryKey: ['seats'] });
+    // Changer de palier ou d'option change le montant à prélever : le devis affiché suit.
+    qc.invalidateQueries({ queryKey: ['paiement-devis'] });
   };
 
   const changePack = useMutation({
