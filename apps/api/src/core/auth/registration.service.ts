@@ -119,10 +119,15 @@ export class RegistrationService {
       if (mode === 'trial') {
         await this.subscriptions.startTrial(tenantId);
       } else if (usePack) {
-        // Une souscription vide sert de support au palier, posé juste après.
-        await this.subscriptions.subscribeDirect(tenantId, [{ moduleCode: 'core', seats: 1 }]);
+        // Une souscription vide sert de support au palier, posé juste après. Elle naît
+        // `incomplete` : s'inscrire ne doit pas suffire à obtenir un abonnement payant.
+        await this.subscriptions.subscribeDirect(
+          tenantId,
+          [{ moduleCode: 'core', seats: 1 }],
+          'incomplete',
+        );
       } else {
-        await this.subscriptions.subscribeDirect(tenantId, directModules);
+        await this.subscriptions.subscribeDirect(tenantId, directModules, 'incomplete');
       }
 
       const uid: string = (

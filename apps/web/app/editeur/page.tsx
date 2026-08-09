@@ -69,6 +69,7 @@ interface PromoCodeRow {
 }
 
 const STATUS_LABELS: Record<string, string> = {
+  incomplete: 'Paiement attendu',
   trialing: 'Essai',
   active: 'Actif',
   past_due: 'Impayé',
@@ -76,6 +77,7 @@ const STATUS_LABELS: Record<string, string> = {
   canceled: 'Résilié',
 };
 const STATUS_BADGE: Record<string, string> = {
+  incomplete: 'warning',
   trialing: 'info',
   active: 'success',
   past_due: 'warning',

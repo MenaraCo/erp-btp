@@ -166,7 +166,10 @@ export default function InscriptionPage() {
             };
       const res = await apiFetch<RegisterResult>('/auth/register', { method: 'POST', body });
       setSession(res.accessToken, email, res.tenantSlug);
-      router.push('/');
+      // Porte 2 : le compte existe, mais les modules restent fermés tant que le premier
+      // paiement n'est pas encaissé. On mène donc directement au règlement, plutôt que de
+      // déposer le client dans une application dont rien ne s'ouvrira.
+      router.push(door === 'direct' ? '/abonnement' : '/');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Inscription impossible');
       setLoading(false);
@@ -218,7 +221,7 @@ export default function InscriptionPage() {
               points={[
                 'Sélection des modules à la carte',
                 'Jetons par module',
-                'Démarrage immédiat en client payant',
+                'Accès ouvert dès le premier paiement',
               ]}
               cta="Choisir mes modules"
               onClick={() => chooseDoor('direct')}
@@ -475,9 +478,9 @@ export default function InscriptionPage() {
             }}>
               <ShieldCheck size={16} style={{ color: 'var(--accent)', marginTop: 1 }} />
               <p className="muted" style={{ margin: 0, fontSize: 11 }}>
-                Écran de paiement de démonstration. En production, le paiement se fera par
-                redirection vers la page sécurisée du prestataire (Stripe) — aucune donnée
-                bancaire n’est saisie dans l’application.
+                Nous créons d’abord votre espace, puis vous réglez la première échéance. Vos
+                modules s’ouvrent une fois le paiement encaissé — aucune donnée bancaire n’est
+                saisie dans l’application : le règlement se fait chez notre prestataire.
               </p>
             </div>
 
@@ -489,8 +492,8 @@ export default function InscriptionPage() {
 
             <button className="btn" onClick={submitRegister} disabled={loading} style={{ width: '100%' }}>
               {loading
-                ? 'Traitement…'
-                : `Payer ${euro(amountPerInvoice)} ${billingInterval === 'yearly' ? '/an' : '/mois'} et démarrer`}
+                ? 'Création de votre espace…'
+                : `Créer mon espace et régler ${euro(amountPerInvoice)} ${billingInterval === 'yearly' ? '/an' : '/mois'}`}
             </button>
           </div>
         )}

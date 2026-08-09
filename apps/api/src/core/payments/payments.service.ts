@@ -213,15 +213,26 @@ export class PaymentsService {
         return { applique: false };
       }
 
+      let etaitIncomplete = false;
       if (evt.type !== 'ignore' && evt.tenantId) {
         // `subscription` est sous Row-Level Security, et le webhook arrive SANS contexte de
         // société. On pose donc le tenant désigné par l'événement signé, sur cette transaction
         // uniquement (`set_config(..., true)`), sinon la mise à jour ne verrait aucune ligne et
         // échouerait en silence — l'abonnement resterait bloqué malgré un paiement encaissé.
         await runner.query(`SELECT set_config('app.current_tenant', $1, true)`, [evt.tenantId]);
+        const avant = (await runner.query(
+          `SELECT status FROM subscription WHERE tenant_id = $1`,
+          [evt.tenantId],
+        )) as Array<{ status: string }>;
+        etaitIncomplete = avant[0]?.status === 'incomplete';
         await this.appliquerEtat(runner, evt);
       }
       await runner.commitTransaction();
+      // Une souscription née d'une inscription attendait ce paiement pour s'ouvrir : c'est ici,
+      // et nulle part ailleurs, que ses modules deviennent réellement accessibles.
+      if (evt.type === 'paiement_reussi' && evt.tenantId) {
+        await this.ouvrirLesModules(evt.tenantId, etaitIncomplete);
+      }
       return { applique: evt.type !== 'ignore' };
     } catch (e) {
       await runner.rollbackTransaction();
@@ -229,6 +240,42 @@ export class PaymentsService {
     } finally {
       await runner.release();
     }
+  }
+
+  /**
+   * Ouvre les droits après un paiement encaissé.
+   *
+   * La projection commerciale → droits reste l'affaire de `reproject`, seule écriture autorisée
+   * de `tenant_module` : on ne recopie pas sa logique ici, on la rappelle une fois l'abonnement
+   * passé en `active`.
+   *
+   * Au TOUT PREMIER paiement seulement, le compte fondateur reçoit un jeton sur chaque module
+   * ouvert — sans quoi le client vient de payer et se retrouve devant une application vide. Aux
+   * renouvellements, rien à faire : les jetons sont déjà répartis, et y toucher écraserait les
+   * décisions de l'administrateur.
+   */
+  private async ouvrirLesModules(tenantId: string, premierPaiement: boolean): Promise<void> {
+    await runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.packs.reproject(em, tenantId);
+      if (!premierPaiement) return;
+      await em.query(
+        `INSERT INTO seat_assignment (tenant_id, module_code, user_id)
+         SELECT $1, tm.module_code, f.id
+           FROM tenant_module tm
+           CROSS JOIN (
+             SELECT id FROM user_account
+              WHERE tenant_id = $1 AND deleted_at IS NULL
+              ORDER BY created_at LIMIT 1
+           ) f
+          WHERE tm.active = true
+            AND tm.seats_purchased > 0
+            AND NOT EXISTS (
+              SELECT 1 FROM seat_assignment sa
+               WHERE sa.module_code = tm.module_code AND sa.user_id = f.id
+            )`,
+        [tenantId],
+      );
+    });
   }
 
   /**

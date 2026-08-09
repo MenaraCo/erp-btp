@@ -17,6 +17,12 @@ export const TRIAL_QUOTAS: Record<string, number> = {
 };
 
 export type SubscriptionStatus =
+  /**
+   * Souscription enregistrée, en attente du PREMIER paiement (porte 2). Les modules sont
+   * choisis mais restent fermés : sans cet état, s'inscrire suffirait à obtenir un compte
+   * payant sans payer. Seul le webhook du prestataire peut la faire passer en `active`.
+   */
+  | 'incomplete'
   | 'trialing'
   | 'active'
   | 'past_due'

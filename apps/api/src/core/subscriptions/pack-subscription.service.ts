@@ -164,7 +164,10 @@ export class PackSubscriptionService {
       const updated = await em.query(
         `UPDATE subscription
             SET pack_code = $2::varchar, pack_seats = $3,
-                status = CASE WHEN status = 'trialing' THEN status ELSE 'active' END,
+                -- Choisir un palier n'ouvre pas les droits : un essai reste un essai, et une
+                -- souscription qui attend son premier paiement continue de l'attendre.
+                status = CASE WHEN status IN ('trialing', 'incomplete') THEN status
+                              ELSE 'active' END,
                 updated_at = now()
           WHERE tenant_id = $1`,
         [tenantId, pack.code, s],

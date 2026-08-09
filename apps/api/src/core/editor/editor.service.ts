@@ -69,12 +69,15 @@ export interface EditorOverview {
 const MODULE_CODES = new Set(MODULES.map((m) => m.code));
 
 export type SubscriptionStatus =
+  /** Inscrite, en attente de son premier paiement : formule choisie mais modules fermés. */
+  | 'incomplete'
   | 'trialing'
   | 'active'
   | 'past_due'
   | 'paused'
   | 'canceled';
 const ALL_STATUSES: SubscriptionStatus[] = [
+  'incomplete',
   'trialing',
   'active',
   'past_due',

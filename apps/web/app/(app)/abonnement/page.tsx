@@ -12,7 +12,7 @@ import { MODULES } from '@/lib/modules';
 /* ─────────── types ─────────── */
 interface Subscription {
   id: string;
-  status: 'trialing' | 'active' | 'past_due' | 'paused' | 'canceled';
+  status: 'incomplete' | 'trialing' | 'active' | 'past_due' | 'paused' | 'canceled';
   trialEndsAt: string | null;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
@@ -86,6 +86,7 @@ interface EtatPaiement {
 
 /* ─────────── helpers ─────────── */
 const STATUS_LABELS: Record<Subscription['status'], string> = {
+  incomplete: 'En attente du premier paiement',
   trialing: 'Essai en cours',
   active: 'Abonnement actif',
   past_due: 'Paiement en attente',
@@ -93,6 +94,7 @@ const STATUS_LABELS: Record<Subscription['status'], string> = {
   canceled: 'Résilié',
 };
 const STATUS_BADGE: Record<Subscription['status'], string> = {
+  incomplete: 'warning',
   trialing: 'info',
   active: 'success',
   past_due: 'warning',
@@ -237,6 +239,16 @@ function TabEtat() {
           {s.cancelAtPeriodEnd && <span className="badge warning">Résiliation programmée</span>}
         </div>
 
+        {s.status === 'incomplete' && (
+          <p style={{ margin: '0 0 8px' }}>
+            <strong>Votre formule est réservée.</strong>{' '}
+            <span className="muted">
+              Les modules s’ouvriront dès le premier paiement encaissé — réglez-le ci-dessous.
+              Vos choix sont conservés, rien n’est perdu si vous revenez plus tard.
+            </span>
+          </p>
+        )}
+
         {s.status === 'trialing' && trialDays !== null && (
           <p style={{ margin: '0 0 8px' }}>
             <strong>{trialDays > 0 ? `${trialDays} jour${trialDays > 1 ? 's' : ''} restant${trialDays > 1 ? 's' : ''}` : 'Dernier jour'}</strong>{' '}
@@ -260,7 +272,8 @@ function TabEtat() {
               Annuler la résiliation
             </button>
           ) : (
-            s.status !== 'canceled' && (
+            // Rien à résilier tant que rien n'a été payé : il n'y a pas encore de période.
+            s.status !== 'canceled' && s.status !== 'incomplete' && (
               <button className="btn btn-danger" onClick={() => { setErr(null); cancel.mutate(true); }} disabled={cancel.isPending}>
                 Résilier à la fin de la période
               </button>
@@ -306,6 +319,9 @@ function CartePaiement() {
   const qc = useQueryClient();
   const retour = useSearchParams().get('paiement');
   const [err, setErr] = useState<string | null>(null);
+  const [avis, setAvis] = useState<string | null>(null);
+  /** Session ouverte en mode fictif : il n'y a pas de page externe, on la joue sur place. */
+  const [sessionFictive, setSessionFictive] = useState<{ sessionId: string } | null>(null);
 
   const etat = useQuery({
     queryKey: ['paiement-devis'],
@@ -313,19 +329,43 @@ function CartePaiement() {
   });
 
   const payer = useMutation({
-    mutationFn: () => api<{ url: string }>('/abonnement/paiement/session', { method: 'POST' }),
-    // On quitte l'application : c'est chez le prestataire que la carte se saisit.
-    onSuccess: (r) => { window.location.href = r.url; },
+    mutationFn: () =>
+      api<{ url: string; sessionId: string }>('/abonnement/paiement/session', { method: 'POST' }),
+    onSuccess: (r) => {
+      setAvis(null);
+      // Sans prestataire réel, il n'existe aucune page à visiter : rediriger mènerait dans le
+      // vide. On joue le guichet sur place, avec la session réellement créée par l'API.
+      if (etat.data?.fictif) {
+        setSessionFictive({ sessionId: r.sessionId });
+        return;
+      }
+      // Sinon on quitte l'application : c'est chez le prestataire que la carte se saisit.
+      window.location.href = r.url;
+    },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Ouverture du paiement impossible.'),
   });
 
   const simuler = useMutation({
     mutationFn: (type: string) =>
       api('/abonnement/paiement/simuler', { method: 'POST', body: { type } }),
-    onSuccess: () => {
+    onSuccess: (_r, type) => {
       setErr(null);
+      setSessionFictive(null);
+      setAvis(
+        type === 'paiement_reussi'
+          ? 'Paiement confirmé par le prestataire : l’abonnement est actif.'
+          : type === 'paiement_echoue'
+            ? 'Prélèvement refusé : l’abonnement passe en impayé, sans coupure d’accès.'
+            : 'Résiliation enregistrée chez le prestataire.',
+      );
       qc.invalidateQueries({ queryKey: ['subscription'] });
       qc.invalidateQueries({ queryKey: ['paiement-devis'] });
+      // Un premier paiement ouvre les modules et attribue les jetons : la liste des modules
+      // ET les droits de l'utilisateur changent au même instant. Sans cela, le client vient de
+      // payer et continue de voir « aucun module actif ».
+      qc.invalidateQueries({ queryKey: ['subscription-modules'] });
+      qc.invalidateQueries({ queryKey: ['seats'] });
+      qc.invalidateQueries({ queryKey: ['me-capabilities'] });
     },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Simulation impossible.'),
   });
@@ -352,6 +392,11 @@ function CartePaiement() {
         </div>
       )}
       {err && <div className="error">{err}</div>}
+      {avis && (
+        <div className="badge info" style={{ display: 'block', marginBottom: 12, padding: '8px 10px' }}>
+          {avis}
+        </div>
+      )}
 
       {!d ? (
         <p className="muted" style={{ margin: 0 }}>{etat.data?.motif ?? 'Rien à prélever pour l’instant.'}</p>
@@ -383,13 +428,50 @@ function CartePaiement() {
             </tbody>
           </table>
 
-          <button className="btn" disabled={payer.isPending} onClick={() => { setErr(null); payer.mutate(); }}>
-            {payer.isPending ? 'Ouverture…' : 'Payer par carte'}
-          </button>
-          <p className="muted" style={{ fontSize: 11, margin: '8px 0 0' }}>
-            Vous êtes redirigé vers notre prestataire de paiement. Aucune coordonnée bancaire
-            n’est saisie ni conservée dans l’application.
-          </p>
+          {sessionFictive ? (
+            /* Le guichet du prestataire, joué sur place : en fictif il n'existe aucune page
+               externe, et rediriger vers une adresse inventée n'aboutirait nulle part. */
+            <div style={{
+              border: '1px solid var(--accent)', borderRadius: 10, padding: '14px 16px',
+              background: 'var(--surface-2, #fff7ed)',
+            }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
+                Guichet de paiement (simulation)
+              </div>
+              <p className="muted" style={{ fontSize: 11.5, margin: '0 0 10px' }}>
+                Session <code>{sessionFictive.sessionId}</code> — chez le vrai prestataire, c’est
+                ici que la carte serait saisie, sur son site et non sur le nôtre.
+              </p>
+              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>
+                {euro(d.montantCentimes / 100)}
+                <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}> /{parPeriode}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" disabled={simuler.isPending}
+                  onClick={() => simuler.mutate('paiement_reussi')}>
+                  {simuler.isPending ? 'Traitement…' : 'Confirmer le paiement'}
+                </button>
+                <button className="btn btn-secondary" disabled={simuler.isPending}
+                  onClick={() => {
+                    setSessionFictive(null);
+                    setAvis('Paiement abandonné. Rien n’a été prélevé, rien n’a changé.');
+                  }}>
+                  Abandonner
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button className="btn" disabled={payer.isPending} onClick={() => { setErr(null); payer.mutate(); }}>
+                {payer.isPending ? 'Ouverture…' : 'Payer par carte'}
+              </button>
+              <p className="muted" style={{ fontSize: 11, margin: '8px 0 0' }}>
+                {etat.data?.fictif
+                  ? 'Aucun prestataire réel n’est configuré : le guichet est simulé sur place, rien n’est encaissé.'
+                  : 'Vous êtes redirigé vers notre prestataire de paiement. Aucune coordonnée bancaire n’est saisie ni conservée dans l’application.'}
+              </p>
+            </>
+          )}
         </>
       )}
 

@@ -225,12 +225,18 @@ export class SubscriptionService {
   }
 
   /**
-   * Porte 2 (cahier §3.3): direct subscription WITHOUT a trial — creates the subscription
-   * straight in `active` for the chosen modules. Never goes through `trialing`.
+   * Porte 2 (cahier §3.3): direct subscription WITHOUT a trial — for the chosen modules, never
+   * through `trialing`.
+   *
+   * `statutInitial` vaut `incomplete` quand la souscription naît d'une INSCRIPTION : les modules
+   * sont retenus mais fermés jusqu'au premier paiement, sinon créer un compte suffirait à
+   * obtenir un abonnement payant sans payer. Les souscriptions ouvertes depuis l'application par
+   * un client déjà connu restent en `active`.
    */
   subscribeDirect(
     tenantId: string,
     modules: Array<{ moduleCode: string; seats: number }>,
+    statutInitial: 'active' | 'incomplete' = 'active',
   ): Promise<void> {
     if (!modules || modules.length === 0) {
       throw new BadRequestException('At least one module is required');
@@ -245,10 +251,11 @@ export class SubscriptionService {
       }
 
       const sub = await em.query(
-        `INSERT INTO subscription (tenant_id, status) VALUES ($1, 'active') RETURNING id`,
-        [tenantId],
+        `INSERT INTO subscription (tenant_id, status) VALUES ($1, $2) RETURNING id`,
+        [tenantId, statutInitial],
       );
       const subscriptionId = sub[0].id;
+      const ouvert = statutInitial === 'active';
 
       for (const m of modules) {
         await em.query(
@@ -257,7 +264,8 @@ export class SubscriptionService {
            VALUES ($1, $2, $3, $4, 'monthly')`,
           [tenantId, subscriptionId, m.moduleCode, m.seats],
         );
-        await this.upsertTenantModule(em, tenantId, m.moduleCode, m.seats, true);
+        // Les modules ne s'ouvrent qu'une fois le paiement encaissé.
+        await this.upsertTenantModule(em, tenantId, m.moduleCode, m.seats, ouvert);
       }
 
       for (const [metric, limit] of Object.entries(TRIAL_QUOTAS)) {
