@@ -6,7 +6,9 @@ import { loadAppConfig } from './config/env.config';
 import { applyGlobalPipes } from './core/common/global-pipes';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // `rawBody` : la signature des webhooks porte sur les OCTETS reçus. Sans cela, le corps reparsé
+  // puis re-sérialisé ne correspondrait plus et tout paiement légitime serait refusé.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   applyGlobalPipes(app);
   // Dev: allow the local web app (and tooling) to call the API cross-origin.
   app.enableCors({

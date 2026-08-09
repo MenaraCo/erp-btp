@@ -10,6 +10,7 @@ import { EntitlementsModule } from './core/entitlements/entitlements.module';
 import { SubscriptionsModule } from './core/subscriptions/subscriptions.module';
 import { PromoModule } from './core/promo/promo.module';
 import { PricingModule } from './core/pricing/pricing.module';
+import { PaymentsModule } from './core/payments/payments.module';
 import { CompanyLookupModule } from './core/company-lookup/company-lookup.module';
 import { EditorModule } from './core/editor/editor.module';
 import { ActivityModule } from './core/activity/activity.module';
@@ -40,6 +41,7 @@ import { HealthModule } from './health/health.module';
     SubscriptionsModule,
     PromoModule,
     PricingModule,
+    PaymentsModule,
     CompanyLookupModule,
     EditorModule,
     ActivityModule,
@@ -62,11 +64,14 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     // Every route requires a tenant, except the public health check and public sign-up
     // (register creates the tenant, so it cannot be tenant-scoped — cahier §3.3).
+    // Le webhook de paiement en est également exclu : le prestataire n'a ni compte ni société
+    // chez nous, c'est le CONTENU SIGNÉ de l'événement qui désigne le tenant concerné.
     consumer
       .apply(TenantMiddleware)
       .exclude(
         'health',
         'auth/register',
+        'webhooks/paiement',
         'public/catalog/modules',
         'public/catalog/packs',
         'public/catalog/pricing',

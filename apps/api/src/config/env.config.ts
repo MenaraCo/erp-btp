@@ -30,7 +30,25 @@ export interface AppConfig {
    * Defaults to the demo admin in dev so the console is testable out of the box.
    */
   platformAdminEmails: string[];
+  payment: PaymentConfig;
   database: DatabaseConfig;
+}
+
+/**
+ * Paiement des abonnements.
+ *
+ * `provider: 'fake'` est le défaut hors production : le développement et les tests ne doivent
+ * jamais dépendre d'un service externe ni d'une clé. Passer à `stripe` exige les deux secrets,
+ * qui ne vivent QUE dans l'environnement — jamais dans le dépôt.
+ */
+export interface PaymentConfig {
+  provider: 'stripe' | 'fake';
+  secretKey: string;
+  /** Secret de signature du webhook : sans lui, n'importe qui pourrait feindre un paiement. */
+  webhookSecret: string;
+  /** Où le prestataire renvoie le client, une fois la page de paiement quittée. */
+  successUrl: string;
+  cancelUrl: string;
 }
 
 export function loadAppConfig(): AppConfig {
@@ -53,6 +71,14 @@ export function loadAppConfig(): AppConfig {
       .split(',')
       .map((e) => e.trim().toLowerCase())
       .filter(Boolean),
+    payment: {
+      // Défaut prudent : on ne bascule sur le vrai prestataire que si on le demande explicitement.
+      provider: process.env.PAYMENT_PROVIDER === 'stripe' ? 'stripe' : 'fake',
+      secretKey: process.env.STRIPE_SECRET_KEY ?? '',
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+      successUrl: process.env.PAYMENT_SUCCESS_URL ?? 'http://localhost:3000/abonnement?paiement=ok',
+      cancelUrl: process.env.PAYMENT_CANCEL_URL ?? 'http://localhost:3000/abonnement?paiement=annule',
+    },
     database: {
       host: process.env.DATABASE_HOST ?? 'localhost',
       port: Number(process.env.DATABASE_PORT ?? 5432),

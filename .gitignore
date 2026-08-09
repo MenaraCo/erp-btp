@@ -17,7 +17,9 @@ next-env.d.ts
 # env & secrets
 .env
 .env.*
+# …sauf le modèle, qui ne contient aucun secret et doit être versionné.
 !.env.example
+!**/.env.example
 
 # logs
 *.log
