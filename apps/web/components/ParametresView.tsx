@@ -81,11 +81,11 @@ interface Preferences { id: string; taux_fg_default: string; taux_ben_default: s
 
 /* ─────────── tabs ─────────── */
 
-const TABS = ['Entreprise', 'Numérotation', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Doublons', 'Préférences'] as const;
+const TABS = ['Entreprise', 'Numérotation', 'Listes de valeurs', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Doublons', 'Préférences'] as const;
 type Tab = typeof TABS[number];
 
 /** Onglets propres à la société : ce qui ne dépend d'aucun module métier. */
-export const ONGLETS_SOCIETE: Tab[] = ['Entreprise', 'Numérotation', 'Préférences'];
+export const ONGLETS_SOCIETE: Tab[] = ['Entreprise', 'Numérotation', 'Listes de valeurs', 'Préférences'];
 
 /** Onglets propres au chiffrage : ce qui n'intéresse que l'étude de prix. */
 export const ONGLETS_ETUDE: Tab[] = ['Types de déboursé'];
@@ -147,6 +147,7 @@ export function ParametresView({
 
       {token && tab === 'Entreprise' && <TabEntreprise token={token} />}
       {token && tab === 'Numérotation' && <TabNumerotation />}
+      {token && tab === 'Listes de valeurs' && <TabListes />}
       {token && tab === 'Types de déboursé' && <TabDebourseTypes token={token} />}
       {token && tab === 'Familles' && <TabFamilles token={token} />}
       {token && tab === 'Codes analytiques' && <TabCodes token={token} />}
@@ -1463,6 +1464,71 @@ function TabNumerotation() {
       <p className="muted" style={{ fontSize: 11, marginTop: 10 }}>
         Les codes déjà attribués ne changent pas. Modifier « prochain n° » ne sert qu’à repartir d’une valeur précise.
       </p>
+    </Card>
+  );
+}
+
+/* ─────────── Listes de valeurs paramétrables ─────────── */
+
+interface ListItem { id: string; label: string; sort_order: number }
+const LISTES: { type: string; titre: string; hint: string }[] = [
+  { type: 'payment_term', titre: 'Conditions de paiement', hint: 'Ex : 30 j fin de mois, acompte 30 %…' },
+  { type: 'work_nature', titre: 'Nature des travaux', hint: 'Ex : Neuf, Rénovation, Réhabilitation…' },
+  { type: 'work_lot', titre: 'Lots traités', hint: 'Ex : Peinture, Sols souples, Faux-plafonds…' },
+];
+
+function TabListes() {
+  return (
+    <div>
+      <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+        Ces valeurs alimentent les listes déroulantes des fiches (affaire…) pour harmoniser la
+        saisie et éviter les différences de frappe entre utilisateurs.
+      </p>
+      {LISTES.map((l) => <ListeCard key={l.type} type={l.type} titre={l.titre} hint={l.hint} />)}
+    </div>
+  );
+}
+
+function ListeCard({ type, titre, hint }: { type: string; titre: string; hint: string }) {
+  const api = useApi();
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const { data: items = [] } = useQuery<ListItem[]>({ queryKey: ['list', type], queryFn: () => api(`/params/lists/${type}`) });
+
+  const invalide = () => qc.invalidateQueries({ queryKey: ['list', type] });
+  const add = useMutation({
+    mutationFn: (label: string) => api(`/params/lists/${type}`, { method: 'POST', body: { label } }),
+    onSuccess: () => { invalide(); setDraft(''); setErr(null); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Ajout impossible.'),
+  });
+  const rename = useMutation({
+    mutationFn: (v: { id: string; label: string }) => api(`/params/lists/items/${v.id}`, { method: 'PATCH', body: { label: v.label } }),
+    onSuccess: invalide,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/params/lists/items/${id}`, { method: 'DELETE' }),
+    onSuccess: invalide,
+  });
+
+  return (
+    <Card title={titre}>
+      {err && <div className="error" style={{ marginBottom: 8 }}>{err}</div>}
+      {items.length === 0 && <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Aucune valeur — ajoutez-en ci-dessous.</p>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {items.map((it) => (
+          <div key={it.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input className="input" defaultValue={it.label} style={{ flex: 1 }}
+              onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.label) rename.mutate({ id: it.id, label: v }); }} />
+            <IconBtn title="Supprimer" color="var(--danger)" onClick={() => remove.mutate(it.id)}><Trash2 size={14} /></IconBtn>
+          </div>
+        ))}
+      </div>
+      <form style={{ display: 'flex', gap: 8, marginTop: 10 }}
+        onSubmit={(e) => { e.preventDefault(); if (draft.trim()) add.mutate(draft.trim()); }}>
+        <input className="input" placeholder={hint} value={draft} onChange={(e) => setDraft(e.target.value)} style={{ flex: 1 }} />
+        <button className="btn" type="submit" disabled={!draft.trim() || add.isPending}>+ Ajouter</button>
+      </form>
     </Card>
   );
 }

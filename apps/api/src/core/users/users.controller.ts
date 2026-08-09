@@ -24,6 +24,13 @@ export class UsersController {
     return this.users.listUsersWithRoles(this.context.requireTenantId());
   }
 
+  /** Liste légère (id + libellé) pour les sélecteurs — responsable, conducteur de travaux… */
+  @Get('users/pickable')
+  @RequiresPermission('estimating.devis.read')
+  pickable() {
+    return this.users.listPickable(this.context.requireTenantId());
+  }
+
   /** Creates a colleague account (+ optional initial role). */
   @Post('admin/users')
   @RequiresPermission('rbac.user_role.assign')

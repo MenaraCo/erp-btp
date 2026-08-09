@@ -646,4 +646,79 @@ export class ParamsService {
     const rows = await em.query(`SELECT id FROM ${table} WHERE id = $1`, [id]);
     if (rows.length === 0) throw new NotFoundException(`${table} "${id}" not found`);
   }
+
+  /* ==================== LISTES DE VALEURS ====================
+     Listes déroulantes paramétrables par société (conditions de paiement, nature des travaux,
+     lots traités…) : une table générique, un `list_type` par liste. */
+
+  private assertListType(t: string): void {
+    if (!COMPANY_LIST_TYPES.includes(t)) {
+      throw new BadRequestException('Type de liste inconnu.');
+    }
+  }
+
+  listItems(listType: string) {
+    this.assertListType(listType);
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, (em) =>
+      em.query(
+        `SELECT id, label, sort_order FROM company_list_item
+          WHERE list_type = $1 AND deleted_at IS NULL
+          ORDER BY sort_order ASC, label ASC`,
+        [listType],
+      ),
+    );
+  }
+
+  async createItem(listType: string, label: string) {
+    this.assertListType(listType);
+    if (!label?.trim()) throw new BadRequestException('Le libellé est obligatoire.');
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const [{ next }] = await em.query(
+        `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM company_list_item
+          WHERE list_type = $1 AND deleted_at IS NULL`,
+        [listType],
+      );
+      const [row] = await em.query(
+        `INSERT INTO company_list_item (tenant_id, list_type, label, sort_order)
+         VALUES ($1, $2, $3, $4) RETURNING id, label, sort_order`,
+        [tenantId, listType, label.trim(), next],
+      );
+      return row;
+    });
+  }
+
+  async updateItem(id: string, label: string) {
+    if (!label?.trim()) throw new BadRequestException('Le libellé est obligatoire.');
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      // UPDATE puis SELECT : em.query(UPDATE … RETURNING) renvoie [rows, count], pas la ligne.
+      await em.query(
+        `UPDATE company_list_item SET label = $2, updated_at = now()
+          WHERE id = $1 AND deleted_at IS NULL`,
+        [id, label.trim()],
+      );
+      const rows = await em.query(
+        `SELECT id, label, sort_order FROM company_list_item WHERE id = $1 AND deleted_at IS NULL`,
+        [id],
+      );
+      if (rows.length === 0) throw new NotFoundException('Valeur introuvable.');
+      return rows[0];
+    });
+  }
+
+  async deleteItem(id: string): Promise<{ deleted: true }> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await em.query(
+        `UPDATE company_list_item SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+        [id],
+      );
+      return { deleted: true as const };
+    });
+  }
 }
+
+/** Les listes de valeurs paramétrables (une table générique, un type par liste). */
+export const COMPANY_LIST_TYPES = ['payment_term', 'work_nature', 'work_lot'];

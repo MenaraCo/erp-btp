@@ -222,4 +222,29 @@ export class ParamsController {
     return this.params.fusionnerDoublon(body.type, body.gardeId, body.supprimeId);
   }
 
+  /* ===================== LISTES DE VALEURS ===================== */
+
+  @Get('lists/:type')
+  @RequiresPermission('estimating.devis.read')
+  listItems(@Param('type') type: string) {
+    return this.params.listItems(type);
+  }
+
+  @Post('lists/:type')
+  @RequiresPermission('estimating.devis.write')
+  createItem(@Param('type') type: string, @Body() body: { label?: string }) {
+    return this.params.createItem(type, body?.label ?? '');
+  }
+
+  @Patch('lists/items/:id')
+  @RequiresPermission('estimating.devis.write')
+  updateItem(@Param('id') id: string, @Body() body: { label?: string }) {
+    return this.params.updateItem(id, body?.label ?? '');
+  }
+
+  @Delete('lists/items/:id')
+  @RequiresPermission('estimating.devis.write')
+  deleteItem(@Param('id') id: string) {
+    return this.params.deleteItem(id);
+  }
 }

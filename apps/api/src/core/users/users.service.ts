@@ -59,6 +59,25 @@ export class UsersService {
     });
   }
 
+  /**
+   * Liste légère des utilisateurs actifs pour les sélecteurs (responsable, conducteur…) :
+   * juste un identifiant et un libellé affichable. Accessible plus largement que la console
+   * d'administration — n'importe quel deviseur doit pouvoir désigner un responsable.
+   */
+  listPickable(tenantId: string): Promise<{ id: string; label: string }[]> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT id, full_name, email FROM user_account
+          WHERE status = 'active' AND deleted_at IS NULL
+          ORDER BY full_name NULLS LAST, email`,
+      );
+      return rows.map((r: { id: string; full_name: string | null; email: string }) => ({
+        id: r.id,
+        label: r.full_name || r.email,
+      }));
+    });
+  }
+
   /** Creates a colleague account within the tenant and optionally grants an initial role. */
   async createUser(tenantId: string, input: CreateUserInput): Promise<UserWithRoles> {
     const email = (input.email ?? '').trim().toLowerCase();

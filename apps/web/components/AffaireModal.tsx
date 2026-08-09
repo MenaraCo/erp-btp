@@ -53,6 +53,18 @@ export function AffaireModal({ affaire, onClose, onSaved }: {
     queryKey: ['clients-picker'], enabled: Boolean(token),
     queryFn: () => apiFetch<{ rows: ClientLite[] }>('/clients?sort=name&pageSize=500', { token }),
   });
+  // Listes de valeurs paramétrées (Configuration) + utilisateurs, pour harmoniser la saisie.
+  const useList = (type: string) => useQuery({
+    queryKey: ['list', type], enabled: Boolean(token),
+    queryFn: () => apiFetch<{ id: string; label: string }[]>(`/params/lists/${type}`, { token }),
+  });
+  const paymentTerms = useList('payment_term');
+  const natures = useList('work_nature');
+  const lots = useList('work_lot');
+  const users = useQuery({
+    queryKey: ['users-pickable'], enabled: Boolean(token),
+    queryFn: () => apiFetch<{ id: string; label: string }[]>('/users/pickable', { token }),
+  });
 
   useEffect(() => {
     if (affaire) {
@@ -153,28 +165,30 @@ export function AffaireModal({ affaire, onClose, onSaved }: {
         </Field>
         <Grid>
           <Field label="Responsable">
-            <input className="input" value={f.responsable} onChange={(e) => setF({ ...f, responsable: e.target.value })} />
+            <SelectFromList value={f.responsable} options={users.data ?? []}
+              onChange={(v) => setF({ ...f, responsable: v })} placeholder="— choisir un utilisateur —" />
           </Field>
           <Field label="Conducteur de travaux">
-            <input className="input" value={f.conducteur} onChange={(e) => setF({ ...f, conducteur: e.target.value })} />
+            <SelectFromList value={f.conducteur} options={users.data ?? []}
+              onChange={(v) => setF({ ...f, conducteur: v })} placeholder="— choisir un utilisateur —" />
           </Field>
         </Grid>
 
         <SectionTitle>Travaux</SectionTitle>
         <Field label="Nature des travaux">
-          <input className="input" style={{ width: '100%' }} placeholder="Ex : rénovation, neuf, réhabilitation…"
-            value={f.natureTravaux} onChange={(e) => setF({ ...f, natureTravaux: e.target.value })} />
+          <SelectFromList value={f.natureTravaux} options={natures.data ?? []}
+            onChange={(v) => setF({ ...f, natureTravaux: v })} />
         </Field>
         <Field label="Lots traités">
-          <input className="input" style={{ width: '100%' }} placeholder="Ex : Peinture, Sols souples, Faux-plafonds…"
-            value={f.lotsTraites} onChange={(e) => setF({ ...f, lotsTraites: e.target.value })} />
+          <MultiFromList value={f.lotsTraites} options={lots.data ?? []}
+            onChange={(v) => setF({ ...f, lotsTraites: v })} />
         </Field>
 
         <SectionTitle>Commercial</SectionTitle>
         <Grid>
           <Field label="Conditions de paiement">
-            <input className="input" placeholder="Ex : 30 j fin de mois, acompte 30 %…"
-              value={f.conditionsPaiement} onChange={(e) => setF({ ...f, conditionsPaiement: e.target.value })} />
+            <SelectFromList value={f.conditionsPaiement} options={paymentTerms.data ?? []}
+              onChange={(v) => setF({ ...f, conditionsPaiement: v })} />
           </Field>
           <Field label="Budget objectif (€)">
             <input className="input" inputMode="decimal" value={f.budget}
@@ -260,6 +274,53 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 function Grid({ children }: { children: React.ReactNode }) {
   return <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>{children}</div>;
+}
+
+/** Liste déroulante depuis un référentiel société (on stocke le libellé, valeur harmonisée).
+ *  Une valeur héritée absente de la liste reste sélectionnée pour ne rien perdre. */
+function SelectFromList({ value, options, onChange, placeholder }: {
+  value: string; options: { id: string; label: string }[]; onChange: (v: string) => void; placeholder?: string;
+}) {
+  const known = options.some((o) => o.label === value);
+  return (
+    <select className="input" style={{ width: '100%' }} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{placeholder ?? '— choisir —'}</option>
+      {value && !known && <option value={value}>{value} (valeur héritée)</option>}
+      {options.map((o) => <option key={o.id} value={o.label}>{o.label}</option>)}
+    </select>
+  );
+}
+
+/** Choix multiple depuis un référentiel : on stocke les libellés joints par « , ». */
+function MultiFromList({ value, options, onChange }: {
+  value: string; options: { id: string; label: string }[]; onChange: (v: string) => void;
+}) {
+  const selected = value ? value.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const toggle = (label: string) => {
+    const next = selected.includes(label) ? selected.filter((l) => l !== label) : [...selected, label];
+    onChange(next.join(', '));
+  };
+  const legacy = selected.filter((l) => !options.some((o) => o.label === l));
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {options.map((o) => {
+        const on = selected.includes(o.label);
+        return (
+          <button type="button" key={o.id} onClick={() => toggle(o.label)}
+            className={on ? 'btn' : 'btn-secondary'} style={{ fontSize: 11, padding: '3px 10px' }}>
+            {on ? '✓ ' : ''}{o.label}
+          </button>
+        );
+      })}
+      {legacy.map((l) => (
+        <button type="button" key={l} onClick={() => toggle(l)} className="btn"
+          style={{ fontSize: 11, padding: '3px 10px' }} title="Valeur héritée">✓ {l}</button>
+      ))}
+      {options.length === 0 && legacy.length === 0 && (
+        <span className="muted" style={{ fontSize: 11 }}>Aucun lot paramétré (Configuration → Listes de valeurs).</span>
+      )}
+    </div>
+  );
 }
 
 const overlay: React.CSSProperties = {
