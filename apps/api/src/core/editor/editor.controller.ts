@@ -87,9 +87,13 @@ export class EditorController {
   @Delete('tenants/:id')
   supprimerTenant(
     @Param('id') id: string,
-    @Body() body: { confirmationSlug?: string },
+    @Body() body: { confirmationSlug?: string; resilierDabord?: boolean },
   ) {
-    return this.editor.deleteTenant(id, body?.confirmationSlug ?? '');
+    return this.editor.deleteTenant(
+      id,
+      body?.confirmationSlug ?? '',
+      body?.resilierDabord === true,
+    );
   }
 
   /** Support action: extend a tenant's trial by `days` (default 30). */

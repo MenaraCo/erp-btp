@@ -180,7 +180,7 @@ export class EditorService {
    *  - une société dont l'abonnement est encore actif est refusée. Résilier d'abord force à
    *    regarder ce qu'on fait, et évite de détruire un client qui paie encore.
    */
-  async deleteTenant(tenantId: string, confirmationSlug: string) {
+  async deleteTenant(tenantId: string, confirmationSlug: string, resilierDabord = false) {
     const [t] = await this.dataSource.query(
       `SELECT id, slug, name FROM tenant WHERE id = $1`,
       [tenantId],
@@ -196,9 +196,18 @@ export class EditorService {
     const [abo] = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(`SELECT status FROM subscription WHERE tenant_id = $1`, [tenantId]),
     );
-    if (abo && abo.status === 'active') {
+    if (abo && abo.status === 'active' && !resilierDabord) {
+      // Refus par DÉFAUT : on ne supprime pas un client qui paie par inadvertance. Mais le refus
+      // ne doit pas être un mur — l'appelant peut assumer explicitement les deux gestes à la fois
+      // (voir `resilierDabord`), plutôt que d'aller chercher la résiliation ailleurs et revenir.
       throw new ConflictException(
-        'Cette société a un abonnement ACTIF. Résiliez-le d’abord — on ne supprime pas un client qui paie.',
+        'Cette société a un abonnement ACTIF. Résiliez-le d’abord, ou demandez explicitement '
+        + 'la résiliation avec la suppression.',
+      );
+    }
+    if (abo && abo.status === 'active') {
+      this.logger.warn(
+        `Suppression d'un abonné ACTIF demandée explicitement : ${t.slug} — résiliation puis effacement.`,
       );
     }
 

@@ -965,7 +965,10 @@ function FicheAbonne({
     setSuppression(true);
     try {
       await apiFetch(`/editor/tenants/${tenant.tenantId}`, {
-        method: 'DELETE', token, body: { confirmationSlug: confirmation },
+        method: 'DELETE', token,
+        // `resilierDabord` n'est envoyé que si l'abonnement est actif ET que l'utilisateur a
+        // confirmé le libellé explicite du bouton : le geste reste délibéré.
+        body: { confirmationSlug: confirmation, resilierDabord: actif },
       });
       onSupprime();
     } catch (e) {
@@ -977,6 +980,8 @@ function FicheAbonne({
 
   const c = data?.societes?.[0];
   const total = Object.values(data?.volumes ?? {}).reduce((a, b) => a + b, 0);
+  const statutAbo = (data?.abonnement as { status?: string } | null)?.status ?? null;
+  const actif = statutAbo === 'active';
 
   return (
     <div
@@ -1040,6 +1045,15 @@ function FicheAbonne({
               ))}
             </SectionEditeur>
 
+            <SectionEditeur titre="Abonnement">
+              <div style={{ fontSize: 12 }}>
+                <span style={{ color: '#64748b' }}>Statut : </span>
+                <span style={{ color: actif ? '#4ade80' : '#e2e8f0', fontWeight: 600 }}>
+                  {statutAbo ?? '—'}
+                </span>
+              </div>
+            </SectionEditeur>
+
             <SectionEditeur titre="Contenu produit">
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
                 {Object.entries(data?.volumes ?? {}).map(([k, v]) => (
@@ -1055,8 +1069,14 @@ function FicheAbonne({
               <p style={{ color: '#fca5a5', fontSize: 12, margin: '0 0 10px', lineHeight: 1.5 }}>
                 Cette société et <strong>tout son contenu</strong> ({total} enregistrements) seront
                 effacés : affaires, devis, chantiers, factures, pointages. Il n’y a pas de corbeille
-                et pas de retour en arrière. Un abonnement actif doit d’abord être résilié.
+                et pas de retour en arrière.
               </p>
+              {actif && (
+                <p style={{ color: '#fbbf24', fontSize: 12, margin: '0 0 10px', lineHeight: 1.5 }}>
+                  ⚠ Son abonnement est <strong>ACTIF</strong> : la suppression le résiliera d’abord.
+                  Vous supprimez un client qui paie encore.
+                </p>
+              )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input
                   className="input"
@@ -1069,12 +1089,17 @@ function FicheAbonne({
                   className="btn-danger btn"
                   disabled={confirmation !== tenant.slug || suppression}
                   onClick={() => {
-                    if (!confirm(`Supprimer définitivement « ${tenant.name} » et tout son contenu ?`)) return;
+                    const question = actif
+                      ? `« ${tenant.name} » a un abonnement ACTIF.\n\n`
+                        + `Résilier cet abonnement ET supprimer définitivement la société avec tout `
+                        + `son contenu (${total} enregistrements) ?`
+                      : `Supprimer définitivement « ${tenant.name} » et tout son contenu ?`;
+                    if (!confirm(question)) return;
                     void supprimer();
                   }}
                 >
                   <Trash2 size={13} style={{ marginRight: 4 }} />
-                  {suppression ? '…' : 'Supprimer'}
+                  {suppression ? '…' : actif ? 'Résilier et supprimer' : 'Supprimer'}
                 </button>
               </div>
             </SectionEditeur>

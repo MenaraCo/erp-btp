@@ -156,6 +156,38 @@ describe('Éditeur — fiche d’un abonné et suppression', () => {
       expect(r.body.message).toContain('ACTIF');
     });
 
+    it("supprime un abonné actif SI la résiliation est demandée explicitement", async () => {
+      // L'abonnement est encore « active » (test précédent). Le refus ne doit pas être un mur :
+      // l'éditeur peut assumer les deux gestes d'un coup, plutôt que d'aller résilier ailleurs.
+      const jetable = await createTenant(ds, 'Force');
+      await runInTenant(ds, jetable.id, (em) =>
+        em.query(`INSERT INTO subscription (tenant_id, status) VALUES ($1, 'active')`, [jetable.id]));
+
+      await request(app.getHttpServer())
+        .delete(`/editor/tenants/${jetable.id}`)
+        .set('Host', 'localhost').set('Authorization', `Bearer ${jeton}`)
+        .send({ confirmationSlug: jetable.slug, resilierDabord: true })
+        .expect(200);
+
+      const [t] = await ds.query(`SELECT count(*)::int AS n FROM tenant WHERE id = $1`, [jetable.id]);
+      expect(t.n).toBe(0);
+    });
+
+    it("mais le slug reste exigé, même en résiliant d'office", async () => {
+      const jetable = await createTenant(ds, 'Force2');
+      await runInTenant(ds, jetable.id, (em) =>
+        em.query(`INSERT INTO subscription (tenant_id, status) VALUES ($1, 'active')`, [jetable.id]));
+
+      await request(app.getHttpServer())
+        .delete(`/editor/tenants/${jetable.id}`)
+        .set('Host', 'localhost').set('Authorization', `Bearer ${jeton}`)
+        .send({ confirmationSlug: 'nimporte-quoi', resilierDabord: true })
+        .expect(400);
+
+      const [t] = await ds.query(`SELECT count(*)::int AS n FROM tenant WHERE id = $1`, [jetable.id]);
+      expect(t.n).toBe(1);
+    });
+
     it('supprime définitivement, en emportant tout le contenu', async () => {
       await runInTenant(ds, tenantId, (em) =>
         em.query(`UPDATE subscription SET status = 'canceled' WHERE tenant_id = $1`, [tenantId]));
