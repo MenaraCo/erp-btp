@@ -38,8 +38,9 @@ export default function LoginPage() {
         <p className="muted" style={{ marginTop: 0 }}>Connexion à votre espace</p>
         {error && <div className="error">{error}</div>}
         <div className="field">
-          <label htmlFor="tenant">Entreprise (slug)</label>
-          <input id="tenant" value={tenant} onChange={(e) => setTenant(e.target.value)} />
+          <label htmlFor="tenant">Entreprise</label>
+          <input id="tenant" value={tenant} onChange={(e) => setTenant(e.target.value)}
+            placeholder="Nom de votre société" />
         </div>
         <div className="field">
           <label htmlFor="email">E-mail</label>

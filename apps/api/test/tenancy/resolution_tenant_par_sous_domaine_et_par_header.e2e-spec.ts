@@ -90,6 +90,22 @@ describe('Résolution du tenant (sous-domaine + header)', () => {
     expect(res.body.tenantId).toBe(tenant.id);
   });
 
+  it('résout l’entreprise par son NOM, pas seulement par le slug', async () => {
+    // À l'inscription, le slug est DÉRIVÉ du nom de société (normalisé) et jamais choisi :
+    // au login, l'utilisateur ne connaît que le nom. La résolution doit donc l'accepter.
+    const [row] = await ds.query(
+      `INSERT INTO tenant (slug, name) VALUES ('ma-societe-btp', 'Ma Société BTP') RETURNING id`,
+    );
+    for (const saisie of ['Ma Société BTP', 'ma societe btp', 'ma-societe-btp']) {
+      const res = await request(app.getHttpServer())
+        .get('/whoami')
+        .set('Host', 'localhost')
+        .set('X-Tenant-Slug', saisie)
+        .expect(200);
+      expect(res.body.tenantId).toBe(row.id);
+    }
+  });
+
   it('rejette 400 quand aucun tenant n’est fourni', async () => {
     await request(app.getHttpServer())
       .get('/whoami')

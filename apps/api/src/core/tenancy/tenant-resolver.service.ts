@@ -52,10 +52,34 @@ export class TenantResolverService {
     return null;
   }
 
-  private async findIdBySlug(slug: string): Promise<string | null> {
+  /** Normalisation identique à l'allocation du slug à l'inscription (nom société → slug). */
+  private toSlug(input: string): string {
+    return input
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40);
+  }
+
+  /**
+   * Résolution TOLÉRANTE de l'entreprise. Le slug est dérivé du nom de société à l'inscription et
+   * jamais choisi explicitement : au login, l'utilisateur ne connaît souvent que le NOM de sa
+   * société. On accepte donc le slug exact, le nom normalisé comme à l'inscription, ou le nom tel
+   * quel. Le mot de passe reste le vrai garde-fou (une résolution vers une homonyme échoue au
+   * contrôle du mot de passe, sans faille de sécurité).
+   */
+  private async findIdBySlug(input: string): Promise<string | null> {
+    const raw = (input ?? '').trim();
+    if (!raw) return null;
+    const normalized = this.toSlug(raw);
     const rows = await this.dataSource.query(
-      `SELECT id FROM tenant WHERE slug = $1 LIMIT 1`,
-      [slug],
+      `SELECT id FROM tenant
+         WHERE slug = $1 OR slug = $2 OR lower(name) = lower($1)
+         ORDER BY (slug = $1) DESC, (slug = $2) DESC
+         LIMIT 1`,
+      [raw, normalized],
     );
     return rows[0]?.id ?? null;
   }
