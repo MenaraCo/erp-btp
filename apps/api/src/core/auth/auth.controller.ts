@@ -43,6 +43,12 @@ class LoginDto {
 
 type RegisterDto = Partial<RegisterInput>;
 
+/** Écran de connexion : e-mail seul, pour peupler la liste des sociétés rattachées. */
+class CompaniesDto {
+  @IsEmail({}, { message: 'Adresse e-mail invalide.' })
+  email!: string;
+}
+
 /**
  * Routes publiques par nature : elles s'atteignent sans jeton. La garde de débit s'applique donc
  * ici, et seulement ici — voir AuthModule pour le plafond retenu.
@@ -80,6 +86,18 @@ export class AuthController {
     });
   }
 
+  /**
+   * Sociétés rattachées à un e-mail, pour l'écran de connexion : l'utilisateur saisit son e-mail
+   * puis choisit sa société dans la liste renvoyée (au lieu de retaper un nom/slug). Tenant-less
+   * par nature (exclu du middleware dans AppModule) : on ne connaît pas encore la société.
+   */
+  @Post('companies')
+  companies(@Body() body: CompaniesDto) {
+    return this.auth
+      .companiesForEmail(body.email)
+      .then((companies) => ({ companies }));
+  }
+
   /** Tenant is resolved by the middleware (sub-domain / X-Tenant-Id); credentials in the body. */
   @Post('login')
   login(@Body() body: LoginDto) {
@@ -112,12 +130,8 @@ export class AuthController {
     return this.auth.confirmMfa(this.tenantId(), this.userId(), body.code);
   }
 
-  /** Désactive la 2FA après vérification d'un code (TOTP ou code de secours). */
-  @Post('mfa/disable')
-  mfaDisable(@Body() body: { code?: string }) {
-    if (!body?.code) throw new BadRequestException('Le code est requis.');
-    return this.auth.disableMfa(this.tenantId(), this.userId(), body.code);
-  }
+  // La 2FA est obligatoire (exigée dès la souscription) : aucun endpoint de désactivation n'est
+  // exposé. On peut seulement la reconfigurer (setup + confirm) pour changer d'appareil.
 
   private tenantId(): string {
     return this.context.requireTenantId();

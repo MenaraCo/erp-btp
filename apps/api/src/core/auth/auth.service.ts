@@ -37,6 +37,25 @@ export class AuthService {
     private readonly tokens: AuthTokenService,
   ) {}
 
+  /**
+   * Liste les sociétés (slug + nom) auxquelles un e-mail donné est rattaché, pour l'écran de
+   * connexion : l'utilisateur saisit son e-mail puis CHOISIT sa société dans une liste, au lieu de
+   * retaper un nom/slug (source du bug « je ne me reconnecte pas après l'inscription »).
+   *
+   * S'appuie sur la fonction SQL `companies_for_email` (SECURITY DEFINER) : une lecture
+   * inter-tenants contrôlée qui ne renvoie QUE slug + nom, jamais de données sensibles. Le mot de
+   * passe reste le vrai garde-fou à l'étape suivante.
+   */
+  async companiesForEmail(email: string): Promise<{ slug: string; name: string }[]> {
+    const clean = (email ?? '').trim();
+    if (!clean) return [];
+    const rows = await this.dataSource.query(
+      `SELECT slug, name FROM companies_for_email($1)`,
+      [clean],
+    );
+    return rows.map((r: { slug: string; name: string }) => ({ slug: r.slug, name: r.name }));
+  }
+
   /** Admin action: set or reset a user's password. */
   setPassword(tenantId: string, userId: string, password: string): Promise<void> {
     const hash = hashPassword(password);
@@ -63,7 +82,7 @@ export class AuthService {
       const rows = await em.query(
         `SELECT id, email, password_hash, mfa_enabled, mfa_secret, mfa_recovery_codes
            FROM user_account
-          WHERE email = $1 AND status = 'active'`,
+          WHERE lower(email) = lower($1) AND status = 'active'`,
         [email],
       );
       return rows[0] ?? null;
@@ -166,29 +185,7 @@ export class AuthService {
     });
   }
 
-  /** Désactive la 2FA après vérification d'un code (TOTP ou code de secours). */
-  disableMfa(tenantId: string, userId: string, code: string): Promise<{ disabled: true }> {
-    return runInTenant(this.dataSource, tenantId, async (em) => {
-      const rows = await em.query(
-        `SELECT mfa_enabled, mfa_secret, mfa_recovery_codes FROM user_account WHERE id = $1`,
-        [userId],
-      );
-      const u = rows[0];
-      if (!u?.mfa_enabled) return { disabled: true as const };
-      const c = (code ?? '').trim();
-      const okTotp = u.mfa_secret && verifyTotp(u.mfa_secret, c);
-      const okRecovery =
-        Array.isArray(u.mfa_recovery_codes) && u.mfa_recovery_codes.includes(hashRecoveryCode(c));
-      if (!okTotp && !okRecovery) {
-        throw new UnauthorizedException('Code invalide.');
-      }
-      await em.query(
-        `UPDATE user_account
-            SET mfa_enabled = false, mfa_secret = NULL, mfa_recovery_codes = NULL, updated_at = now()
-          WHERE id = $1`,
-        [userId],
-      );
-      return { disabled: true as const };
-    });
-  }
+  // La 2FA est obligatoire (exigée dès la souscription de la société) : aucune méthode de
+  // désactivation n'est fournie. Pour changer d'appareil, on relance setupMfa + confirmMfa, ce
+  // qui remplace le secret et régénère les codes de secours.
 }

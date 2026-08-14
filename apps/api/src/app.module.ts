@@ -73,6 +73,7 @@ export class AppModule implements NestModule {
       .exclude(
         'health',
         'auth/register',
+        'auth/companies',
         'webhooks/paiement',
         'public/catalog/modules',
         'public/catalog/packs',

@@ -8,6 +8,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { CompanySearch } from '@/components/CompanySearch';
+import { Mfa2FASetup } from '@/components/Mfa2FASetup';
 
 /* ─────────── types ─────────── */
 interface CatalogModule {
@@ -32,15 +33,17 @@ interface RegisterResult {
   email?: string;
 }
 type Door = 'trial' | 'direct';
-type Step = 'door' | 'form' | 'payment';
+type Step = 'door' | 'form' | 'payment' | '2fa';
 
 /* ─────────── page ─────────── */
 export default function InscriptionPage() {
   const router = useRouter();
-  const { setSession } = useAuth();
+  const { setSession, token } = useAuth();
 
   const [step, setStep] = useState<Step>('door');
   const [door, setDoor] = useState<Door>('trial');
+  // Où mener l'utilisateur une fois la 2FA (obligatoire) configurée.
+  const [afterMfa, setAfterMfa] = useState('/');
 
   const [companyName, setCompanyName] = useState('');
   const [fullName, setFullName] = useState('');
@@ -166,10 +169,12 @@ export default function InscriptionPage() {
             };
       const res = await apiFetch<RegisterResult>('/auth/register', { method: 'POST', body });
       setSession(res.accessToken, email, res.tenantSlug);
-      // Porte 2 : le compte existe, mais les modules restent fermés tant que le premier
-      // paiement n'est pas encaissé. On mène donc directement au règlement, plutôt que de
-      // déposer le client dans une application dont rien ne s'ouvrira.
-      router.push(door === 'direct' ? '/abonnement' : '/');
+      // La double authentification est OBLIGATOIRE dès la souscription : le compte est créé, mais
+      // on impose la configuration 2FA avant de laisser entrer dans l'application. La destination
+      // finale (règlement pour la porte 2, tableau de bord sinon) est jouée à la fin de l'étape.
+      setAfterMfa(door === 'direct' ? '/abonnement' : '/');
+      setLoading(false);
+      setStep('2fa');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Inscription impossible');
       setLoading(false);
@@ -498,9 +503,25 @@ export default function InscriptionPage() {
           </div>
         )}
 
-        <p className="muted" style={{ textAlign: 'center', marginTop: 20, fontSize: 12 }}>
-          Déjà un compte ? <Link href="/login" className="link">Se connecter</Link>
-        </p>
+        {step === '2fa' && (
+          <div className="login-card" style={{ width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
+              <h2 style={{ margin: 0 }}>Sécurisez votre compte</h2>
+            </div>
+            <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+              La double authentification est <strong>obligatoire</strong> pour protéger les données
+              de votre entreprise. Cette étape ne prend qu’une minute et ne se fait qu’une fois.
+            </p>
+            <Mfa2FASetup token={token} onDone={() => router.push(afterMfa)} />
+          </div>
+        )}
+
+        {step !== '2fa' && (
+          <p className="muted" style={{ textAlign: 'center', marginTop: 20, fontSize: 12 }}>
+            Déjà un compte ? <Link href="/login" className="link">Se connecter</Link>
+          </p>
+        )}
       </div>
     </div>
   );

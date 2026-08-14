@@ -1386,11 +1386,9 @@ function TabSecurite() {
   const api = useApi();
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
-  const [setup, setSetup] = useState<MfaSetup | null>(null); // en cours d'activation
+  const [setup, setSetup] = useState<MfaSetup | null>(null); // configuration / re-configuration en cours
   const [code, setCode] = useState('');
   const [recovery, setRecovery] = useState<string[] | null>(null); // codes de secours (une fois)
-  const [disabling, setDisabling] = useState(false);
-  const [disableCode, setDisableCode] = useState('');
 
   const { data: status } = useQuery<{ enabled: boolean }>({
     queryKey: ['mfa-status'], queryFn: () => api('/auth/mfa/status'),
@@ -1406,24 +1404,22 @@ function TabSecurite() {
     onSuccess: (d) => { setRecovery(d.recoveryCodes); setSetup(null); setCode(''); setErr(null); qc.invalidateQueries({ queryKey: ['mfa-status'] }); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Code invalide.'),
   });
-  const disable = useMutation({
-    mutationFn: () => api('/auth/mfa/disable', { method: 'POST', body: { code: disableCode } }),
-    onSuccess: () => { setDisabling(false); setDisableCode(''); setErr(null); qc.invalidateQueries({ queryKey: ['mfa-status'] }); },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Code invalide.'),
-  });
 
   return (
     <Card title="Double authentification (2FA)">
       <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
         Un second facteur au moment de la connexion : un code à 6 chiffres généré par une
         application d’authentification (Google Authenticator, Authy, Microsoft Authenticator…).
+        La 2FA est <strong>obligatoire</strong> pour toutes les entreprises et ne peut pas être
+        désactivée. Vous pouvez en revanche la <strong>reconfigurer</strong> si vous changez de
+        téléphone.
       </p>
       {err && <div className="error" style={{ marginBottom: 10 }}>{err}</div>}
 
       {/* Codes de secours fraîchement générés — affichés une seule fois. */}
       {recovery && (
         <div style={{ border: '1px solid var(--success)', borderRadius: 8, padding: 14, marginBottom: 12, background: '#f0fdf4' }}>
-          <strong style={{ color: 'var(--success)' }}>✓ Double authentification activée</strong>
+          <strong style={{ color: 'var(--success)' }}>✓ Double authentification configurée</strong>
           <p style={{ fontSize: 12, margin: '6px 0' }}>
             Conservez ces <strong>codes de secours</strong> en lieu sûr : ils permettent de vous
             reconnecter si vous perdez votre téléphone. Chacun ne sert qu’une fois.
@@ -1435,31 +1431,25 @@ function TabSecurite() {
         </div>
       )}
 
-      {!recovery && status?.enabled && !disabling && (
+      {!recovery && status?.enabled && !setup && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span className="badge success">Activée</span>
-          <button className="btn-secondary btn" onClick={() => { setErr(null); setDisabling(true); }}>Désactiver</button>
-        </div>
-      )}
-
-      {!recovery && status?.enabled && disabling && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Code (application ou code de secours)</label>
-            <input value={disableCode} onChange={(e) => setDisableCode(e.target.value)} placeholder="123456" inputMode="numeric" />
-          </div>
-          <button className="btn-danger btn" disabled={!disableCode || disable.isPending} onClick={() => disable.mutate()}>Confirmer la désactivation</button>
-          <button className="link" type="button" onClick={() => { setDisabling(false); setErr(null); }}>Annuler</button>
+          <span className="badge success">Activée · obligatoire</span>
+          <button className="btn-secondary btn" disabled={start.isPending} onClick={() => { setErr(null); start.mutate(); }}>
+            {start.isPending ? '…' : 'Changer d’appareil'}
+          </button>
         </div>
       )}
 
       {!recovery && !status?.enabled && !setup && (
-        <button className="btn" disabled={start.isPending} onClick={() => start.mutate()}>
-          {start.isPending ? '…' : 'Activer la double authentification'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span className="badge" style={{ background: '#fef2f2', color: 'var(--danger, #dc2626)' }}>Requise — non configurée</span>
+          <button className="btn" disabled={start.isPending} onClick={() => start.mutate()}>
+            {start.isPending ? '…' : 'Configurer maintenant'}
+          </button>
+        </div>
       )}
 
-      {!recovery && !status?.enabled && setup && (
+      {!recovery && setup && (
         <div>
           <p style={{ fontSize: 12, margin: '0 0 8px' }}>
             <strong>1.</strong> Scannez ce QR code avec votre application d’authentification :
@@ -1476,7 +1466,11 @@ function TabSecurite() {
               <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" inputMode="numeric" autoFocus />
             </div>
             <button className="btn" disabled={!code || confirm.isPending} onClick={() => confirm.mutate()}>Vérifier et activer</button>
-            <button className="link" type="button" onClick={() => { setSetup(null); setErr(null); }}>Annuler</button>
+            {/* Annuler n'est proposé que pour une re-configuration (déjà activée) : on ne peut pas
+                renoncer à une première configuration puisque la 2FA est obligatoire. */}
+            {status?.enabled && (
+              <button className="link" type="button" onClick={() => { setSetup(null); setErr(null); }}>Annuler</button>
+            )}
           </div>
         </div>
       )}
