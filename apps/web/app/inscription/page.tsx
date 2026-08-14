@@ -46,7 +46,8 @@ export default function InscriptionPage() {
   const [afterMfa, setAfterMfa] = useState('/');
 
   const [companyName, setCompanyName] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -141,7 +142,8 @@ export default function InscriptionPage() {
 
   function validAccount(): string | null {
     if (!companyName.trim()) return 'Le nom de la société est requis';
-    if (!fullName.trim()) return 'Votre nom est requis';
+    if (!firstName.trim()) return 'Votre prénom est requis';
+    if (!lastName.trim()) return 'Votre nom est requis';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return 'E-mail invalide';
     if (password.length < 8) return 'Le mot de passe doit faire au moins 8 caractères';
     return null;
@@ -153,10 +155,11 @@ export default function InscriptionPage() {
     try {
       const body =
         door === 'trial'
-          ? { companyName, fullName, email, password, mode: 'trial' as const }
+          ? { companyName, firstName, lastName, email, password, mode: 'trial' as const }
           : {
               companyName,
-              fullName,
+              firstName,
+              lastName,
               email,
               password,
               mode: 'direct' as const,
@@ -259,9 +262,15 @@ export default function InscriptionPage() {
               <label>Société</label>
               <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Ma société BTP" autoFocus />
             </div>
-            <div className="field">
-              <label>Votre nom</label>
-              <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Prénom Nom" />
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label>Prénom</label>
+                <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Marie" />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label>Nom</label>
+                <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Durand" />
+              </div>
             </div>
             <div className="field">
               <label>E-mail</label>

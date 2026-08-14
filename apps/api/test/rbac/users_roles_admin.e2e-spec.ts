@@ -104,6 +104,29 @@ describe('Console utilisateurs & rôles (cahier §3.2)', () => {
     expect(marie.roles).toEqual(['viewer']);
   });
 
+  it('sépare le prénom et le nom, et recompose le nom complet pour l’affichage', async () => {
+    const { tenantId, adminId } = await seedAdmin('NomPrenom');
+
+    const created = await post('/admin/users', as(tenantId, adminId), {
+      email: 'amelie@nomprenom.test',
+      firstName: 'Amélie',
+      lastName: 'Lefebvre-Martin',
+      password: 'motdepasse1',
+    }).expect(201);
+    expect(created.body.firstName).toBe('Amélie');
+    expect(created.body.lastName).toBe('Lefebvre-Martin');
+    expect(created.body.fullName).toBe('Amélie Lefebvre-Martin');
+
+    // La liste renvoie les trois champs, cohérents entre eux.
+    const list = await get('/admin/users', as(tenantId, adminId)).expect(200);
+    const u = list.body.find((x: { email: string }) => x.email === 'amelie@nomprenom.test');
+    expect(u).toMatchObject({
+      firstName: 'Amélie',
+      lastName: 'Lefebvre-Martin',
+      fullName: 'Amélie Lefebvre-Martin',
+    });
+  });
+
   it('refuse un e-mail en doublon (409)', async () => {
     const { tenantId, adminId } = await seedAdmin('RolesDup');
     const body = { email: 'dup@rolesdup.test', fullName: 'Dup', password: 'motdepasse1' };

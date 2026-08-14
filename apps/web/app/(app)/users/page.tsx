@@ -9,7 +9,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 
 /* ─────────── types ─────────── */
 interface Role { code: string; label: string; isSystem: boolean; permissions: string[] }
-interface UserWithRoles { id: string; email: string; fullName: string | null; roles: string[] }
+interface UserWithRoles { id: string; email: string; firstName: string | null; lastName: string | null; fullName: string | null; roles: string[] }
 interface Seat { id: string; moduleCode: string; userId: string; email: string; fullName: string | null }
 
 const MODULE_LABELS: Record<string, string> = {
@@ -213,7 +213,8 @@ function RolesLegend({ roles }: { roles: Role[] }) {
 /* ─────────── création d'utilisateur ─────────── */
 function CreateUser({ roles, token, onCreated }: { roles: Role[]; token: string | null; onCreated: () => void }) {
   const [email, setEmail] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [roleCode, setRoleCode] = useState('estimator');
   const [err, setErr] = useState<string | null>(null);
@@ -223,18 +224,26 @@ function CreateUser({ roles, token, onCreated }: { roles: Role[]; token: string 
     mutationFn: () =>
       apiFetch('/admin/users', {
         method: 'POST', token,
-        body: { email: email.trim(), fullName: fullName.trim(), password, roleCode: roleCode || null },
+        body: {
+          email: email.trim(),
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          password,
+          roleCode: roleCode || null,
+        },
       }),
     onSuccess: () => {
       setErr(null); setOk(true);
-      setEmail(''); setFullName(''); setPassword('');
+      setEmail(''); setFirstName(''); setLastName(''); setPassword('');
       onCreated();
       setTimeout(() => setOk(false), 3000);
     },
     onError: (e) => { setOk(false); setErr(e instanceof ApiError ? e.message : 'Erreur'); },
   });
 
-  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && fullName.trim() !== '' && password.length >= 8;
+  const valid =
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) &&
+    firstName.trim() !== '' && lastName.trim() !== '' && password.length >= 8;
 
   return (
     <div className="card" style={{ marginTop: 16, maxWidth: 720 }}>
@@ -247,8 +256,12 @@ function CreateUser({ roles, token, onCreated }: { roles: Role[]; token: string 
       {ok && <div className="badge success" style={{ marginBottom: 8 }}>Utilisateur créé</div>}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div className="field" style={{ marginBottom: 0 }}>
-          <label>Nom complet</label>
-          <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Marie Deviseur" />
+          <label>Prénom</label>
+          <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Marie" />
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Nom</label>
+          <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Deviseur" />
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
           <label>E-mail</label>

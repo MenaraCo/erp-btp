@@ -12,6 +12,7 @@ import { RbacService } from '../rbac/rbac.service';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { AuthService } from './auth.service';
 import { AuthTokenService } from './auth-token.service';
+import { splitName } from './person-name.util';
 import { PricingService } from '../pricing/pricing.service';
 import { PromoCodeService } from '../promo/promo-code.service';
 import type { BillingInterval, BillingTerm } from '../pricing/pricing.calc';
@@ -20,7 +21,10 @@ export type RegisterMode = 'trial' | 'direct';
 
 export interface RegisterInput {
   companyName: string;
-  fullName: string;
+  /** Prénom et nom, saisis séparément. `fullName` reste accepté (rétro-compat) et recomposé. */
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
   email: string;
   password: string;
   mode: RegisterMode;
@@ -74,13 +78,13 @@ export class RegistrationService {
 
   async register(input: RegisterInput): Promise<RegisterResult> {
     const companyName = (input.companyName ?? '').trim();
-    const fullName = (input.fullName ?? '').trim();
+    const { firstName, lastName, fullName } = splitName(input);
     const email = (input.email ?? '').trim().toLowerCase();
     const password = input.password ?? '';
     const mode: RegisterMode = input.mode === 'direct' ? 'direct' : 'trial';
 
     if (!companyName) throw new BadRequestException('companyName is required');
-    if (!fullName) throw new BadRequestException('fullName is required');
+    if (!fullName) throw new BadRequestException('Le prénom et le nom sont requis.');
     if (!EMAIL_RE.test(email)) throw new BadRequestException('A valid email is required');
     if (password.length < 8) {
       throw new BadRequestException('Password must be at least 8 characters');
@@ -133,8 +137,9 @@ export class RegistrationService {
       const uid: string = (
         await runInTenant(this.dataSource, tenantId, (em) =>
           em.query(
-            `INSERT INTO user_account (tenant_id, email, full_name) VALUES ($1, $2, $3) RETURNING id`,
-            [tenantId, email, fullName],
+            `INSERT INTO user_account (tenant_id, email, full_name, first_name, last_name)
+             VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+            [tenantId, email, fullName, firstName, lastName],
           ),
         )
       )[0].id;

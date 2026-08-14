@@ -35,8 +35,9 @@ export class UsersController {
   @Post('admin/users')
   @RequiresPermission('rbac.user_role.assign')
   create(@Body() body: CreateUserInput) {
-    if (!body?.email || !body?.password || !body?.fullName) {
-      throw new BadRequestException('email, fullName and password are required');
+    const aName = Boolean(body?.fullName?.trim() || body?.firstName?.trim() || body?.lastName?.trim());
+    if (!body?.email || !body?.password || !aName) {
+      throw new BadRequestException('email, nom/prénom et mot de passe sont requis');
     }
     return this.users.createUser(this.context.requireTenantId(), body);
   }
