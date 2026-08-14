@@ -11,3 +11,4 @@ allowBuilds:
   '@embedded-postgres/linux-arm64': true
   '@nestjs/core': true
   unrs-resolver: false
+  sharp: true
