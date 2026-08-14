@@ -60,6 +60,7 @@ interface PromoCodeRow {
   label: string | null;
   discountType: 'percent' | 'fixed';
   discountValue: number;
+  appliesTo: 'monthly' | 'annual' | 'both';
   active: boolean;
   validFrom: string | null;
   validUntil: string | null;
@@ -524,6 +525,7 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
   const [label, setLabel] = useState('');
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent');
   const [discountValue, setDiscountValue] = useState('10');
+  const [appliesTo, setAppliesTo] = useState<'monthly' | 'annual' | 'both'>('both');
   const [validUntil, setValidUntil] = useState('');
   const [maxRedemptions, setMaxRedemptions] = useState('');
 
@@ -557,11 +559,12 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
           label: label || null,
           discountType,
           discountValue: Number(discountValue.replace(',', '.')),
+          appliesTo,
           validUntil: validUntil || null,
           maxRedemptions: maxRedemptions === '' ? null : Number(maxRedemptions),
         },
       });
-      setCode(''); setLabel(''); setValidUntil(''); setMaxRedemptions('');
+      setCode(''); setLabel(''); setValidUntil(''); setMaxRedemptions(''); setAppliesTo('both');
     });
 
   const toggle = (p: PromoCodeRow) =>
@@ -603,6 +606,13 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
         <FieldSm label="Remise">
           <input value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} style={{ ...darkInput, width: 70, textAlign: 'right' }} />
         </FieldSm>
+        <FieldSm label="S’applique à">
+          <select value={appliesTo} onChange={(e) => setAppliesTo(e.target.value as 'monthly' | 'annual' | 'both')} style={{ ...darkInput, width: 130 }}>
+            <option value="both">Mensuel + annuel</option>
+            <option value="monthly">Mensuel seul</option>
+            <option value="annual">Annuel seul</option>
+          </select>
+        </FieldSm>
         <FieldSm label="Valide jusqu’au">
           <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} style={{ ...darkInput, width: 140 }} />
         </FieldSm>
@@ -624,6 +634,7 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
             <tr>
               <Th>Code</Th>
               <Th>Remise</Th>
+              <Th>Portée</Th>
               <Th>Validité</Th>
               <Th right>Utilisations</Th>
               <Th right>État</Th>
@@ -638,6 +649,11 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
                   {p.label && <div style={{ color: '#64748b', fontSize: 11 }}>{p.label}</div>}
                 </Td>
                 <Td><span style={{ color: '#fff' }}>{fmtDiscount(p)}</span></Td>
+                <Td>
+                  <span style={{ color: '#94a3b8', fontSize: 11 }}>
+                    {p.appliesTo === 'monthly' ? 'Mensuel' : p.appliesTo === 'annual' ? 'Annuel' : 'Mensuel + annuel'}
+                  </span>
+                </Td>
                 <Td>
                   <span style={{ color: '#94a3b8', fontSize: 11 }}>
                     {p.validUntil ? `jusqu’au ${new Date(p.validUntil).toLocaleDateString('fr-FR')}` : 'sans limite'}

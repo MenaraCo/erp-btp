@@ -50,6 +50,7 @@ export class PublicCatalogController {
       usable: true,
       discountType: promo.discountType,
       discountValue: promo.discountValue,
+      appliesTo: promo.appliesTo,
     };
   }
 }

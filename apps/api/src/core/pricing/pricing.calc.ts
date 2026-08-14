@@ -17,9 +17,21 @@
 export type BillingTerm = 'monthly' | 'annual';
 export type BillingInterval = 'monthly' | 'yearly';
 
+export type PromoAppliesTo = 'monthly' | 'annual' | 'both';
+
 export interface PromoDiscount {
   discountType: 'percent' | 'fixed';
   discountValue: number;
+  /** Portée : `monthly` (sans engagement), `annual` (engagement), `both`/absent (les deux). */
+  appliesTo?: PromoAppliesTo;
+}
+
+/** Le code promo s'applique-t-il à la formule d'engagement choisie ? */
+export function promoAppliesToTerm(promo: PromoDiscount | null | undefined, term: BillingTerm): boolean {
+  if (!promo) return false;
+  const scope = promo.appliesTo ?? 'both';
+  if (scope === 'both') return true;
+  return scope === term;
 }
 
 export interface PricingInput {
@@ -89,7 +101,9 @@ export function computePricing(input: PricingInput): PricingResult {
   const termDiscountPct = billingTerm === 'annual' ? pct : 0;
 
   const monthlyAfterTerm = round2(monthlyBase * (1 - termDiscountPct / 100));
-  const monthlyNet = applyPromoDiscount(monthlyAfterTerm, input.promo);
+  // Le code promo ne joue que s'il couvre la formule choisie (mensuel / annuel / les deux).
+  const activePromo = promoAppliesToTerm(input.promo, billingTerm) ? input.promo : null;
+  const monthlyNet = applyPromoDiscount(monthlyAfterTerm, activePromo);
 
   return {
     monthlyBase,

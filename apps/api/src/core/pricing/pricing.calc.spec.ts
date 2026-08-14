@@ -72,6 +72,31 @@ describe('Tarification — engagement, rythme de facturation et cascade de remis
     expect(p.monthlyNet).toBe(85.6); // 107 − 20 %
   });
 
+  it('code_promo_reserve_a_l_annuel_ne_joue_pas_sur_le_mensuel', () => {
+    // Portée « annual » mais formule mensuelle : le promo est ignoré, prix catalogue plein.
+    const p = base({ promo: { discountType: 'percent', discountValue: 20, appliesTo: 'annual' } });
+    expect(p.monthlyNet).toBe(107);
+  });
+
+  it('code_promo_reserve_a_l_annuel_joue_sur_l_annuel', () => {
+    // 107 → 96,30 (annuel −10 %) → 77,04 (promo −20 % réservé à l'annuel, applicable ici)
+    const p = base({
+      billingTerm: 'annual',
+      billingInterval: 'yearly',
+      promo: { discountType: 'percent', discountValue: 20, appliesTo: 'annual' },
+    });
+    expect(p.monthlyNet).toBe(77.04);
+  });
+
+  it('code_promo_reserve_au_mensuel_ne_joue_pas_sur_l_annuel', () => {
+    const p = base({
+      billingTerm: 'annual',
+      billingInterval: 'yearly',
+      promo: { discountType: 'percent', discountValue: 20, appliesTo: 'monthly' },
+    });
+    expect(p.monthlyNet).toBe(96.3); // seulement la remise d'engagement, pas le promo
+  });
+
   it('taux_de_remise_annuelle_est_parametrable', () => {
     const a15 = base({ billingTerm: 'annual', billingInterval: 'yearly', annualDiscountPct: 15 });
     expect(a15.monthlyAfterTerm).toBe(90.95); // 107 × 0,85
