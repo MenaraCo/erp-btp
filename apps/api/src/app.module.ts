@@ -78,6 +78,7 @@ export class AppModule implements NestModule {
         'public/catalog/modules',
         'public/catalog/packs',
         'public/catalog/pricing',
+        'public/catalog/promo/:code',
         'public/company-search',
       )
       .forRoutes('*');

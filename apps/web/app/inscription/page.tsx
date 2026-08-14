@@ -63,6 +63,9 @@ export default function InscriptionPage() {
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'yearly'>('monthly');
   const [promoCode, setPromoCode] = useState('');
   const [annualDiscountPct, setAnnualDiscountPct] = useState(10);
+  // Remise du code promo validée par le serveur, pour afficher le montant réellement dû.
+  const [promo, setPromo] = useState<{ discountType: 'percent' | 'fixed'; discountValue: number } | null>(null);
+  const [promoStatus, setPromoStatus] = useState<'idle' | 'checking' | 'ok' | 'invalid'>('idle');
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -83,6 +86,32 @@ export default function InscriptionPage() {
       .then((p) => setAnnualDiscountPct(p.annualDiscountPct))
       .catch(() => undefined);
   }, []);
+
+  // Validation du code promo côté serveur : on montre au client la remise avant paiement, sans
+  // jamais laisser le navigateur dicter le prix (le serveur recalcule au paiement, source de vérité).
+  useEffect(() => {
+    const code = promoCode.trim();
+    if (!code) { setPromo(null); setPromoStatus('idle'); return; }
+    setPromoStatus('checking');
+    const handle = setTimeout(async () => {
+      try {
+        const r = await apiFetch<{ usable: boolean; discountType?: 'percent' | 'fixed'; discountValue?: number }>(
+          `/public/catalog/promo/${encodeURIComponent(code)}`,
+        );
+        if (r.usable && r.discountType && typeof r.discountValue === 'number') {
+          setPromo({ discountType: r.discountType, discountValue: r.discountValue });
+          setPromoStatus('ok');
+        } else {
+          setPromo(null);
+          setPromoStatus('invalid');
+        }
+      } catch {
+        setPromo(null);
+        setPromoStatus('invalid');
+      }
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [promoCode]);
 
   /** Options du catalogue (add-ons), avec leur palier minimum. */
   const addonCatalogue = useMemo(() => modules.filter((m) => m.isAddon), [modules]);
@@ -118,20 +147,30 @@ export default function InscriptionPage() {
     return Math.round((pack + addons) * 100) / 100;
   }, [selectedPack, packSeats, selectedAddons, addonSeats]);
 
-  /** Mensuel après remise d'engagement (le code promo est validé/appliqué côté serveur). */
+  /** Mensuel après remise d'engagement, avant code promo. */
   const monthlyAfterTerm = useMemo(() => {
     const pct = billingTerm === 'annual' ? annualDiscountPct : 0;
     return Math.round(monthlyTotal * (1 - pct / 100) * 100) / 100;
   }, [monthlyTotal, billingTerm, annualDiscountPct]);
 
+  /** Mensuel réellement facturé, après cascade engagement puis code promo (miroir du serveur). */
+  const monthlyNet = useMemo(() => {
+    if (!promo || monthlyAfterTerm <= 0) return monthlyAfterTerm;
+    const reduced =
+      promo.discountType === 'percent'
+        ? monthlyAfterTerm * (1 - promo.discountValue / 100)
+        : monthlyAfterTerm - promo.discountValue;
+    return Math.max(0, Math.round(reduced * 100) / 100);
+  }, [monthlyAfterTerm, promo]);
+
   const amountPerInvoice = useMemo(
-    () => (billingInterval === 'yearly' ? Math.round(monthlyAfterTerm * 12 * 100) / 100 : monthlyAfterTerm),
-    [monthlyAfterTerm, billingInterval],
+    () => (billingInterval === 'yearly' ? Math.round(monthlyNet * 12 * 100) / 100 : monthlyNet),
+    [monthlyNet, billingInterval],
   );
 
   const annualSavings = useMemo(
-    () => Math.round((monthlyTotal - monthlyAfterTerm) * 12 * 100) / 100,
-    [monthlyTotal, monthlyAfterTerm],
+    () => Math.round((monthlyTotal - monthlyNet) * 12 * 100) / 100,
+    [monthlyTotal, monthlyNet],
   );
 
   function chooseDoor(d: Door) {
@@ -417,6 +456,21 @@ export default function InscriptionPage() {
                     placeholder="CODE"
                     style={{ width: 160 }}
                   />
+                  {promoStatus === 'checking' && (
+                    <span className="muted" style={{ fontSize: 11 }}>Vérification…</span>
+                  )}
+                  {promoStatus === 'ok' && promo && (
+                    <span style={{ fontSize: 11, color: 'var(--success)' }}>
+                      ✓ Remise appliquée{promo.discountType === 'percent'
+                        ? ` : −${promo.discountValue} %`
+                        : ` : −${euro(promo.discountValue)}/mois`}
+                    </span>
+                  )}
+                  {promoStatus === 'invalid' && (
+                    <span style={{ fontSize: 11, color: 'var(--danger, #dc2626)' }}>
+                      Code inconnu ou expiré.
+                    </span>
+                  )}
                 </div>
               </div>
             )}
@@ -469,11 +523,22 @@ export default function InscriptionPage() {
                     </td>
                   </tr>
                 )}
-                {promoCode.trim() && (
+                {promo && monthlyAfterTerm - monthlyNet > 0 && (
+                  <tr>
+                    <td>
+                      Code promo « {promoCode.trim()} »
+                      {promo.discountType === 'percent' ? ` (${promo.discountValue} %)` : ''}
+                    </td>
+                    <td style={{ textAlign: 'right', color: 'var(--accent)' }}>
+                      −{euro(Math.round((monthlyAfterTerm - monthlyNet) * 100) / 100)} /mois
+                    </td>
+                  </tr>
+                )}
+                {promoCode.trim() && !promo && (
                   <tr>
                     <td className="muted">Code promo « {promoCode.trim()} »</td>
                     <td className="muted" style={{ textAlign: 'right', fontSize: 12 }}>
-                      validé au paiement
+                      {promoStatus === 'checking' ? 'vérification…' : 'code inconnu ou expiré'}
                     </td>
                   </tr>
                 )}
