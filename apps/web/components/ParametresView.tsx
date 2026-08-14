@@ -81,11 +81,11 @@ interface Preferences { id: string; taux_fg_default: string; taux_ben_default: s
 
 /* ─────────── tabs ─────────── */
 
-const TABS = ['Entreprise', 'Numérotation', 'Listes de valeurs', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Doublons', 'Préférences'] as const;
+const TABS = ['Entreprise', 'Numérotation', 'Listes de valeurs', 'Sécurité', 'Types de déboursé', 'Familles', 'Codes analytiques', 'Lots', 'Unités', 'Doublons', 'Préférences'] as const;
 type Tab = typeof TABS[number];
 
 /** Onglets propres à la société : ce qui ne dépend d'aucun module métier. */
-export const ONGLETS_SOCIETE: Tab[] = ['Entreprise', 'Numérotation', 'Listes de valeurs', 'Préférences'];
+export const ONGLETS_SOCIETE: Tab[] = ['Entreprise', 'Numérotation', 'Listes de valeurs', 'Sécurité', 'Préférences'];
 
 /** Onglets propres au chiffrage : ce qui n'intéresse que l'étude de prix. */
 export const ONGLETS_ETUDE: Tab[] = ['Types de déboursé'];
@@ -148,6 +148,7 @@ export function ParametresView({
       {token && tab === 'Entreprise' && <TabEntreprise token={token} />}
       {token && tab === 'Numérotation' && <TabNumerotation />}
       {token && tab === 'Listes de valeurs' && <TabListes />}
+      {token && tab === 'Sécurité' && <TabSecurite />}
       {token && tab === 'Types de déboursé' && <TabDebourseTypes token={token} />}
       {token && tab === 'Familles' && <TabFamilles token={token} />}
       {token && tab === 'Codes analytiques' && <TabCodes token={token} />}
@@ -1376,6 +1377,112 @@ const THEMES: { value: AppTheme; label: string; desc: string; preview: string }[
     preview: 'radial-gradient(120% 80% at 50% -10%, #ffffff 0%, #eef1f7 60%, #e7ebf3 100%)',
   },
 ];
+
+/* ─────────── Sécurité : double authentification (2FA) ─────────── */
+
+interface MfaSetup { secret: string; otpauthUri: string; qrDataUri: string }
+
+function TabSecurite() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [setup, setSetup] = useState<MfaSetup | null>(null); // en cours d'activation
+  const [code, setCode] = useState('');
+  const [recovery, setRecovery] = useState<string[] | null>(null); // codes de secours (une fois)
+  const [disabling, setDisabling] = useState(false);
+  const [disableCode, setDisableCode] = useState('');
+
+  const { data: status } = useQuery<{ enabled: boolean }>({
+    queryKey: ['mfa-status'], queryFn: () => api('/auth/mfa/status'),
+  });
+
+  const start = useMutation({
+    mutationFn: () => api<MfaSetup>('/auth/mfa/setup', { method: 'POST' }),
+    onSuccess: (d) => { setSetup(d); setErr(null); setRecovery(null); setCode(''); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
+  });
+  const confirm = useMutation({
+    mutationFn: () => api<{ recoveryCodes: string[] }>('/auth/mfa/confirm', { method: 'POST', body: { code } }),
+    onSuccess: (d) => { setRecovery(d.recoveryCodes); setSetup(null); setCode(''); setErr(null); qc.invalidateQueries({ queryKey: ['mfa-status'] }); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Code invalide.'),
+  });
+  const disable = useMutation({
+    mutationFn: () => api('/auth/mfa/disable', { method: 'POST', body: { code: disableCode } }),
+    onSuccess: () => { setDisabling(false); setDisableCode(''); setErr(null); qc.invalidateQueries({ queryKey: ['mfa-status'] }); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Code invalide.'),
+  });
+
+  return (
+    <Card title="Double authentification (2FA)">
+      <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+        Un second facteur au moment de la connexion : un code à 6 chiffres généré par une
+        application d’authentification (Google Authenticator, Authy, Microsoft Authenticator…).
+      </p>
+      {err && <div className="error" style={{ marginBottom: 10 }}>{err}</div>}
+
+      {/* Codes de secours fraîchement générés — affichés une seule fois. */}
+      {recovery && (
+        <div style={{ border: '1px solid var(--success)', borderRadius: 8, padding: 14, marginBottom: 12, background: '#f0fdf4' }}>
+          <strong style={{ color: 'var(--success)' }}>✓ Double authentification activée</strong>
+          <p style={{ fontSize: 12, margin: '6px 0' }}>
+            Conservez ces <strong>codes de secours</strong> en lieu sûr : ils permettent de vous
+            reconnecter si vous perdez votre téléphone. Chacun ne sert qu’une fois.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, max-content)', gap: '4px 24px', fontFamily: 'monospace', fontSize: 13, margin: '8px 0' }}>
+            {recovery.map((c) => <span key={c}>{c}</span>)}
+          </div>
+          <button className="btn-secondary btn" style={{ fontSize: 11 }} onClick={() => setRecovery(null)}>J’ai noté mes codes</button>
+        </div>
+      )}
+
+      {!recovery && status?.enabled && !disabling && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className="badge success">Activée</span>
+          <button className="btn-secondary btn" onClick={() => { setErr(null); setDisabling(true); }}>Désactiver</button>
+        </div>
+      )}
+
+      {!recovery && status?.enabled && disabling && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Code (application ou code de secours)</label>
+            <input value={disableCode} onChange={(e) => setDisableCode(e.target.value)} placeholder="123456" inputMode="numeric" />
+          </div>
+          <button className="btn-danger btn" disabled={!disableCode || disable.isPending} onClick={() => disable.mutate()}>Confirmer la désactivation</button>
+          <button className="link" type="button" onClick={() => { setDisabling(false); setErr(null); }}>Annuler</button>
+        </div>
+      )}
+
+      {!recovery && !status?.enabled && !setup && (
+        <button className="btn" disabled={start.isPending} onClick={() => start.mutate()}>
+          {start.isPending ? '…' : 'Activer la double authentification'}
+        </button>
+      )}
+
+      {!recovery && !status?.enabled && setup && (
+        <div>
+          <p style={{ fontSize: 12, margin: '0 0 8px' }}>
+            <strong>1.</strong> Scannez ce QR code avec votre application d’authentification :
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={setup.qrDataUri} alt="QR code de configuration" width={200} height={200}
+            style={{ border: '1px solid var(--border)', borderRadius: 8 }} />
+          <p className="muted" style={{ fontSize: 11, margin: '8px 0' }}>
+            Ou saisissez la clé manuellement : <code style={{ userSelect: 'all' }}>{setup.secret}</code>
+          </p>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 8, flexWrap: 'wrap' }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>2. Entrez le code affiché par l’application</label>
+              <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" inputMode="numeric" autoFocus />
+            </div>
+            <button className="btn" disabled={!code || confirm.isPending} onClick={() => confirm.mutate()}>Vérifier et activer</button>
+            <button className="link" type="button" onClick={() => { setSetup(null); setErr(null); }}>Annuler</button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 /* ─────────── Numérotation automatique ─────────── */
 

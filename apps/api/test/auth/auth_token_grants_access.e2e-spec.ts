@@ -78,11 +78,12 @@ describe('Auth — le token vérifié porte le contexte tenant + user', () => {
     await activateModule(ds, tenant.id, 'estimating', 2);
     await entitlements.assignSeat(tenant.id, 'estimating', userId);
 
-    const { accessToken } = await auth.login(
+    // Sans 2FA, le login renvoie toujours un jeton (pas de défi MFA).
+    const { accessToken } = (await auth.login(
       tenant.id,
       'user@token.test',
       'S3cret!',
-    );
+    )) as { accessToken: string };
 
     const res = await request(app.getHttpServer())
       .get('/protected/estimate')

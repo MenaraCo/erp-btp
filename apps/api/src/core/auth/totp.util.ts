@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 
 /**
  * TOTP (RFC 6238, HMAC-SHA1, 6 digits, 30s step) — dependency-free MFA.
@@ -10,6 +10,43 @@ const DIGITS = 6;
 
 export function generateTotpSecret(): string {
   return base32Encode(randomBytes(20));
+}
+
+/**
+ * URI `otpauth://` standard, scannée en QR par Google Authenticator, Authy, etc.
+ * L'`issuer` et le libellé apparaissent dans l'appli ; les paramètres reflètent notre TOTP.
+ */
+export function buildOtpauthUri(secret: string, account: string, issuer = 'ERP BTP'): string {
+  const label = encodeURIComponent(`${issuer}:${account}`);
+  const params = new URLSearchParams({
+    secret,
+    issuer,
+    algorithm: 'SHA1',
+    digits: String(DIGITS),
+    period: String(STEP_SECONDS),
+  });
+  return `otpauth://totp/${label}?${params.toString()}`;
+}
+
+/** Normalise un code de secours saisi (sans tirets, minuscules) pour le comparer. */
+export function normalizeRecoveryCode(code: string): string {
+  return (code ?? '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+/**
+ * Codes de secours à usage unique (format « abcd-efgh », faciles à lire). Ils dépannent si l'appli
+ * d'authentification est perdue. On ne stocke que leur EMPREINTE (sha256) — la valeur en clair
+ * n'est montrée qu'une fois, à l'activation.
+ */
+export function generateRecoveryCodes(count = 10): string[] {
+  return Array.from({ length: count }, () => {
+    const raw = base32Encode(randomBytes(5)).toLowerCase().slice(0, 8);
+    return `${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
+  });
+}
+
+export function hashRecoveryCode(code: string): string {
+  return createHash('sha256').update(normalizeRecoveryCode(code)).digest('hex');
 }
 
 export function totp(secret: string, timeMs: number = Date.now()): string {

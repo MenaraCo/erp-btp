@@ -18,7 +18,13 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   isAuthenticated: boolean;
-  login: (tenantSlug: string, email: string, password: string) => Promise<void>;
+  /** Renvoie `{ mfaRequired: true }` si le mot de passe est bon mais qu'un code 2FA est attendu. */
+  login: (
+    tenantSlug: string,
+    email: string,
+    password: string,
+    totp?: string,
+  ) => Promise<{ mfaRequired: boolean }>;
   /** Establishes a session from an already-issued token (e.g. right after sign-up). */
   setSession: (token: string, email: string, tenantSlug: string) => void;
   logout: () => void;
@@ -40,13 +46,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const login = useCallback(
-    async (tenantSlug: string, email: string, password: string) => {
-      const { accessToken } = await apiFetch<{ accessToken: string }>('/auth/login', {
+    async (tenantSlug: string, email: string, password: string, totp?: string) => {
+      const res = await apiFetch<{ accessToken?: string; mfaRequired?: boolean }>('/auth/login', {
         method: 'POST',
         tenantSlug,
-        body: { email, password },
+        body: { email, password, ...(totp ? { totp } : {}) },
       });
-      setState({ token: accessToken, email, tenantSlug });
+      if (res.mfaRequired) return { mfaRequired: true };
+      setState({ token: res.accessToken as string, email, tenantSlug });
+      return { mfaRequired: false };
     },
     [],
   );

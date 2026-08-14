@@ -1,11 +1,14 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  Get,
   Post,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { toDataURL } from 'qrcode';
 import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { TenantContext } from '../tenancy/tenant-context';
 import { AuthService } from './auth.service';
@@ -85,14 +88,44 @@ export class AuthController {
     return this.auth.login(tenantId, body.email, body.password, body.totp);
   }
 
-  /** Enables MFA for the authenticated user (Bearer token sets the user in context). */
-  @Post('mfa/enable')
-  enableMfa() {
-    const tenantId = this.context.requireTenantId();
+  /** État de la 2FA du compte connecté (activée ou non). */
+  @Get('mfa/status')
+  mfaStatus() {
+    return this.auth.getMfaStatus(this.tenantId(), this.userId());
+  }
+
+  /**
+   * Étape 1 de l'activation : génère un secret (pas encore actif) et renvoie l'URI otpauth + un
+   * QR code (data-URI) prêt à scanner. Le QR est produit côté serveur — pas de dépendance au front.
+   */
+  @Post('mfa/setup')
+  async mfaSetup() {
+    const { secret, otpauthUri } = await this.auth.setupMfa(this.tenantId(), this.userId());
+    const qrDataUri = await toDataURL(otpauthUri, { margin: 1, width: 220 });
+    return { secret, otpauthUri, qrDataUri };
+  }
+
+  /** Étape 2 : confirme avec un code, active la 2FA et renvoie les codes de secours (une fois). */
+  @Post('mfa/confirm')
+  mfaConfirm(@Body() body: { code?: string }) {
+    if (!body?.code) throw new BadRequestException('Le code est requis.');
+    return this.auth.confirmMfa(this.tenantId(), this.userId(), body.code);
+  }
+
+  /** Désactive la 2FA après vérification d'un code (TOTP ou code de secours). */
+  @Post('mfa/disable')
+  mfaDisable(@Body() body: { code?: string }) {
+    if (!body?.code) throw new BadRequestException('Le code est requis.');
+    return this.auth.disableMfa(this.tenantId(), this.userId(), body.code);
+  }
+
+  private tenantId(): string {
+    return this.context.requireTenantId();
+  }
+
+  private userId(): string {
     const userId = this.context.getUserId();
-    if (!userId) {
-      throw new UnauthorizedException('Authentication required');
-    }
-    return this.auth.enableMfa(tenantId, userId);
+    if (!userId) throw new UnauthorizedException('Authentication required');
+    return userId;
   }
 }
