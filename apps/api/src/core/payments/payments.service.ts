@@ -7,6 +7,7 @@ import { TenantContext } from '../tenancy/tenant-context';
 import { runInTenant } from '../tenancy/tenant-transaction';
 import { PackSubscriptionService } from '../subscriptions/pack-subscription.service';
 import { PricingService } from '../pricing/pricing.service';
+import { PromoCodeService } from '../promo/promo-code.service';
 import type { BillingInterval, BillingTerm } from '../pricing/pricing.calc';
 import { EvenementPaiement, PaymentProvider, SessionPaiement } from './payment-provider';
 import { FakePaymentProvider } from './fake-payment.provider';
@@ -23,7 +24,11 @@ export interface DevisPaiement {
   /** Mensuel catalogue avant remise d'engagement. */
   mensuelBase: number;
   remisePct: number;
-  /** Mensuel réellement facturé (le MRR). */
+  /** Mensuel après remise d'engagement, AVANT code promo (pour ventiler les deux remises). */
+  mensuelApresEngagement: number;
+  /** Code promo appliqué à la souscription, le cas échéant — pour l'afficher côté client. */
+  promoCode: { code: string; discountType: 'percent' | 'fixed'; discountValue: number } | null;
+  /** Mensuel réellement facturé (le MRR), après cascade engagement puis promo. */
   mensuelNet: number;
 }
 
@@ -37,6 +42,7 @@ export class PaymentsService {
     private readonly context: TenantContext,
     private readonly packs: PackSubscriptionService,
     private readonly pricing: PricingService,
+    private readonly promos: PromoCodeService,
   ) {}
 
   /**
@@ -83,17 +89,23 @@ export class PaymentsService {
 
     const [abo] = await runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT billing_term, billing_interval FROM subscription WHERE tenant_id = $1`,
+        `SELECT billing_term, billing_interval, promo_code_id FROM subscription WHERE tenant_id = $1`,
         [tenantId],
       ),
     );
     const billingTerm = (abo?.billing_term ?? 'monthly') as BillingTerm;
     const billingInterval = (abo?.billing_interval ?? 'monthly') as BillingInterval;
+    // Le code promo enregistré sur la souscription DOIT peser sur ce que le client voit et paie,
+    // exactement comme dans le back-office éditeur — sinon le devis client affiche le tarif plein
+    // alors que le MRR de l'éditeur est déjà remisé. On lit le code stocké (findById), sans le
+    // re-valider : c'est l'éditeur qui décide de le retirer, pas l'expiration silencieuse.
+    const promo = abo?.promo_code_id ? await this.promos.findById(abo.promo_code_id) : null;
 
     const prix = await this.pricing.compute({
       lines: lignes.map((l) => ({ seats: l.jetons, unitPrice: l.prixUnitaire })),
       billingTerm,
       billingInterval,
+      promo,
     });
     const periode: 'month' | 'year' = billingInterval === 'yearly' ? 'year' : 'month';
     const jetonsTotal = lignes.reduce((n, l) => n + l.jetons, 0);
@@ -106,6 +118,10 @@ export class PaymentsService {
       lignes,
       mensuelBase: prix.monthlyBase,
       remisePct: prix.termDiscountPct,
+      mensuelApresEngagement: prix.monthlyAfterTerm,
+      promoCode: promo
+        ? { code: promo.code, discountType: promo.discountType, discountValue: promo.discountValue }
+        : null,
       mensuelNet: prix.monthlyNet,
     };
   }

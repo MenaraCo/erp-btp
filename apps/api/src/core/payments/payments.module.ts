@@ -3,6 +3,7 @@ import { loadAppConfig } from '../../config/env.config';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { PricingModule } from '../pricing/pricing.module';
+import { PromoModule } from '../promo/promo.module';
 import { PaymentProvider } from './payment-provider';
 import { FakePaymentProvider } from './fake-payment.provider';
 import { StripePaymentProvider } from './stripe-payment.provider';
@@ -20,7 +21,7 @@ import { PaymentsController } from './payments.controller';
 @Module({
   // Le prix ne se recopie pas ici : il se demande au moteur de tarification et à la souscription,
   // pour qu'un montant affiché, un montant facturé et un MRR ne puissent jamais diverger.
-  imports: [TenancyModule, SubscriptionsModule, PricingModule],
+  imports: [TenancyModule, SubscriptionsModule, PricingModule, PromoModule],
   providers: [
     {
       provide: PaymentProvider,

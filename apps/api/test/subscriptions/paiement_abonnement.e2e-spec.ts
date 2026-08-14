@@ -267,4 +267,44 @@ describe('Abonnement — paiement par redirection et webhook', () => {
         .toEqual(['evt_1', 'evt_2', 'evt_3', 'evt_4']);
     });
   });
+
+  // Le code promo enregistré sur la souscription doit peser sur le devis vu ET payé par le client,
+  // au même titre que dans le back-office éditeur. Régression : le devis client affichait le tarif
+  // plein alors que l'éditeur montrait déjà le prix remisé.
+  describe('code promo', () => {
+    const appel = (method: 'get' | 'post', path: string) =>
+      request(app.getHttpServer())[method](path)
+        .set('Host', 'localhost')
+        .set('X-Tenant-Id', tenantId)
+        .set('X-User-Id', userId);
+
+    it('applique la remise du code promo au devis client (117 € − 20 % = 93,60 €)', async () => {
+      // La souscription porte déjà le pack essentiel × 3 = 117 €/mois (test précédent).
+      const [pc] = await ds.query(
+        `INSERT INTO promo_code (code, discount_type, discount_value, active)
+         VALUES ('TEST20', 'percent', 20, true) RETURNING id`,
+      );
+      await runInTenant(ds, tenantId, (em) =>
+        em.query(`UPDATE subscription SET promo_code_id = $2 WHERE tenant_id = $1`, [tenantId, pc.id]),
+      );
+
+      const r = await appel('get', '/abonnement/paiement/devis').expect(200);
+      const d = r.body.devis;
+      expect(d.mensuelBase).toBe(117);
+      expect(d.promoCode).toEqual({ code: 'TEST20', discountType: 'percent', discountValue: 20 });
+      expect(d.mensuelApresEngagement).toBe(117); // pas d'engagement annuel ici
+      expect(d.mensuelNet).toBe(93.6);
+      expect(d.montantCentimes).toBe(9360);
+    });
+
+    it('retirer le code promo redonne le tarif plein', async () => {
+      await runInTenant(ds, tenantId, (em) =>
+        em.query(`UPDATE subscription SET promo_code_id = NULL WHERE tenant_id = $1`, [tenantId]),
+      );
+      const r = await appel('get', '/abonnement/paiement/devis').expect(200);
+      expect(r.body.devis.promoCode).toBeNull();
+      expect(r.body.devis.mensuelNet).toBe(117);
+      expect(r.body.devis.montantCentimes).toBe(11700);
+    });
+  });
 });

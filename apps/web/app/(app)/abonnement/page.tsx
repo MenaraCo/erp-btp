@@ -74,6 +74,8 @@ interface Devis {
   lignes: Array<{ libelle: string; jetons: number; prixUnitaire: number; total: number }>;
   mensuelBase: number;
   remisePct: number;
+  mensuelApresEngagement: number;
+  promoCode: { code: string; discountType: 'percent' | 'fixed'; discountValue: number } | null;
   mensuelNet: number;
 }
 interface EtatPaiement {
@@ -416,7 +418,20 @@ function CartePaiement() {
               {d.remisePct > 0 && (
                 <tr>
                   <td colSpan={2} className="muted">Remise engagement annuel ({d.remisePct} %)</td>
-                  <td style={{ textAlign: 'right' }}>−{euro(d.mensuelBase - d.mensuelNet)}</td>
+                  <td style={{ textAlign: 'right' }}>−{euro(d.mensuelBase - d.mensuelApresEngagement)}</td>
+                </tr>
+              )}
+              {d.promoCode && d.mensuelApresEngagement - d.mensuelNet > 0 && (
+                <tr>
+                  <td colSpan={2} className="muted">
+                    Code promo « {d.promoCode.code} »
+                    {d.promoCode.discountType === 'percent'
+                      ? ` (${d.promoCode.discountValue} %)`
+                      : ''}
+                  </td>
+                  <td style={{ textAlign: 'right', color: 'var(--accent)' }}>
+                    −{euro(d.mensuelApresEngagement - d.mensuelNet)}
+                  </td>
                 </tr>
               )}
               <tr>
