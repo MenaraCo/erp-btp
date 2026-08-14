@@ -9,7 +9,25 @@ import Decimal from 'decimal.js';
  */
 export const QTY_SCALE = 4;
 
-const parser = new Parser();
+/**
+ * Évaluateur RESTREINT à l'arithmétique pure (ex. « longueur * largeur + 2 »).
+ *
+ * expr-eval n'a pas de version corrigée publiée (dernière = 2.0.2), et ses failles connues
+ * (pollution de prototype, appels de fonctions non restreints) passent par l'AFFECTATION, les
+ * DÉFINITIONS DE FONCTION et l'accès membre. On les désactive : un métré n'a besoin que des quatre
+ * opérations, de la puissance et du modulo. La surface exploitable disparaît, et la validation des
+ * variables plus bas rejette déjà tout nom non fourni explicitement.
+ */
+const parser = new Parser({
+  operators: {
+    add: true, subtract: true, multiply: true, divide: true, power: true, remainder: true,
+    // Tout le reste coupé — notamment l'affectation et les définitions de fonction, vecteurs
+    // des CVE expr-eval (pollution de prototype / appels de fonctions non restreints).
+    assignment: false, fndef: false,
+    conditional: false, logical: false, comparison: false, in: false,
+    factorial: false, concatenate: false,
+  },
+});
 
 export class UnknownVariableError extends Error {
   constructor(public readonly name: string) {

@@ -1,6 +1,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+# Force la version corrigée de multer (DoS, GHSA) là où NestJS l'embarque en transitif.
+overrides:
+  multer@<2.1.0: ">=2.1.0"
 allowBuilds:
   '@embedded-postgres/darwin-arm64': true
   '@embedded-postgres/darwin-x64': true
