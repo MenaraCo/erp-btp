@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard, CalendarDays, FolderOpen, FileText, BookOpen,
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
   CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
   LayoutGrid, ArrowLeft, ArrowLeftRight,
 } from 'lucide-react';
-import { moduleForPath } from '@/lib/modules';
+import { contextualGroup, moduleForPath } from '@/lib/modules';
 
 const STORAGE_KEY = 'erp-sidebar-collapsed';
 
@@ -35,6 +35,20 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/params': Settings,
   '/users': UserCog,
   '/abonnement': CreditCard,
+};
+
+/** Icônes du sous-menu contextuel, repérées par le dernier segment de l'URL. */
+const CONTEXT_ICONS: Record<string, React.ElementType> = {
+  '': Building2,
+  structure: Layers,
+  pointages: Users,
+  achats: Truck,
+  avancement: Gauge,
+  mensuel: CalendarDays,
+  pilotage: LayoutDashboard,
+  situations: FileText,
+  avenants: ClipboardCheck,
+  dgd: Receipt,
 };
 
 /**
@@ -63,13 +77,14 @@ function isActive(href: string, pathname: string): boolean {
   if (href === '/estimating/bibliotheque') {
     return pathname === '/estimating/bibliotheque';
   }
-  // « Chantiers » est le parent d'URL de la bibliothèque du module : il ne doit pas s'allumer
-  // quand on la consulte.
+  // « Chantiers » désigne la LISTE. Dès qu'un chantier est ouvert, c'est le sous-menu
+  // « Chantier ouvert » qui porte la position : garder les deux allumés brouillerait la lecture.
   if (href === '/chantiers') {
-    return pathname === '/chantiers'
-      || (pathname.startsWith('/chantiers/')
-          && !pathname.startsWith('/chantiers/bibliotheque')
-          && !pathname.startsWith('/chantiers/parametres'));
+    return pathname === '/chantiers';
+  }
+  // Idem pour « Facturation » : la liste des marchés, pas le marché ouvert.
+  if (href === '/invoicing') {
+    return pathname === '/invoicing';
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -82,6 +97,8 @@ function isActive(href: string, pathname: string): boolean {
 export function Sidebar() {
   const pathname = usePathname();
   const courant = moduleForPath(pathname);
+  const contexte = contextualGroup(pathname);
+  const vueCourante = useSearchParams().get('vue');
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -133,6 +150,37 @@ export function Sidebar() {
                   style={f.level ? { paddingLeft: 22, fontSize: 10.5, color: active ? 'var(--primary)' : '#64748b' } : undefined}
                 >
                   {Icon && <Icon size={f.level ? 11 : 13} />}
+                  <span className="nav-label">{f.label}</span>
+                </Link>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* Sous-menu du chantier / marché ouvert : la navigation reste à gauche, jamais en haut
+          de la page — sinon on perd de vue où l'on est. */}
+      {contexte && (
+        <>
+          <div className="nav-section">{contexte.title}</div>
+          {contexte.features.map((f) => {
+            const [chemin, requete] = f.href.split('?');
+            const vue = requete ? new URLSearchParams(requete).get('vue') : null;
+            const dernier = vue ?? chemin.split('/').filter(Boolean).slice(2).join('/');
+            const Icon = CONTEXT_ICONS[dernier] ?? FileText;
+            // Une vue (?vue=) est active selon le paramètre ; « Situations » est la vue par défaut.
+            const active = vue
+              ? pathname === chemin && (vueCourante ?? 'situations') === vue
+              : pathname === chemin;
+            return (
+              <div key={f.href} className="nav-sub">
+                <Link
+                  href={f.href}
+                  className={active ? 'active' : ''}
+                  title={f.label}
+                  style={{ paddingLeft: 22, fontSize: 10.5 }}
+                >
+                  <Icon size={11} />
                   <span className="nav-label">{f.label}</span>
                 </Link>
               </div>

@@ -55,6 +55,55 @@ export function moduleLabel(code: string): string {
   return MODULE_LABELS[code] ?? code;
 }
 
+/**
+ * Sous-menu CONTEXTUEL : ce qui s'ouvre quand on travaille DANS un chantier ou un marché.
+ *
+ * Ces écrans étaient des boutons alignés en haut de la page — on ne voyait donc plus où l'on se
+ * trouvait, et il fallait revenir en arrière pour changer de vue. Ils descendent dans la barre
+ * latérale, à la manière d'Onaya : le menu de gauche porte la navigation, la page ne porte que le
+ * travail en cours.
+ */
+export interface ContextGroup {
+  /** Titre de la section dans la barre latérale. */
+  title: string;
+  features: ModuleFeature[];
+}
+
+export function contextualGroup(pathname: string): ContextGroup | null {
+  // Chantier ouvert : chaque entrée est un écran à part entière.
+  const chantier = /^\/chantiers\/([^/]+)/.exec(pathname);
+  if (chantier && !['bibliotheque', 'parametres'].includes(chantier[1])) {
+    const id = chantier[1];
+    return {
+      title: 'Chantier ouvert',
+      features: [
+        { href: `/chantiers/${id}`, label: 'Fiche chantier' },
+        { href: `/chantiers/${id}/structure`, label: 'Structure & budget' },
+        { href: `/chantiers/${id}/pointages`, label: 'Pointages' },
+        { href: `/chantiers/${id}/achats`, label: 'Achats' },
+        { href: `/chantiers/${id}/avancement`, label: 'Avancement' },
+        { href: `/chantiers/${id}/mensuel`, label: 'Gestion mensuelle' },
+        { href: `/chantiers/${id}/pilotage`, label: 'Pilotage' },
+      ],
+    };
+  }
+
+  // Marché ouvert : la fiche est une seule page ; les entrées mènent à ses sections.
+  const marche = /^\/invoicing\/([^/]+)/.exec(pathname);
+  if (marche) {
+    const id = marche[1];
+    return {
+      title: 'Marché ouvert',
+      features: [
+        { href: `/invoicing/${id}?vue=situations`, label: 'Situations' },
+        { href: `/invoicing/${id}?vue=avenants`, label: 'Avenants' },
+        { href: `/invoicing/${id}?vue=dgd`, label: 'DGD' },
+      ],
+    };
+  }
+  return null;
+}
+
 /** Capacités qui ouvrent l'acceptation de commande : facturer OU suivre des chantiers. */
 export const ACCEPTANCE_CAPABILITIES = ['invoicing.situations', 'site_tracking.budget'];
 

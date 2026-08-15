@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -99,7 +99,10 @@ function flattenMarcheTree(lines: MarcheLine[]): { flat: FlatLine[]; ouvrageDesc
 export default function MarcheDetailPage() {
   const { token } = useAuth();
   const marcheId = String(useParams().marcheId);
-  const [tab, setTab] = useState<Tab>('situations');
+  // La vue courante vient de l'URL, pas d'un état local : c'est la barre latérale qui navigue
+  // (sous « Marché ouvert »), et le retour arrière du navigateur retrouve la bonne vue.
+  const vue = useSearchParams().get('vue');
+  const tab: Tab = vue === 'avenants' || vue === 'dgd' ? vue : 'situations';
 
   const detail = useQuery({
     queryKey: ['marche', marcheId],
@@ -123,11 +126,6 @@ export default function MarcheDetailPage() {
             {m.marche.name} · Total marché (avenants inclus) <strong>{euro(m.marche.total_ht)}</strong>
           </p>
 
-          <div className="tabs" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', marginTop: 12 }}>
-            <TabButton active={tab === 'situations'} onClick={() => setTab('situations')}>Situations</TabButton>
-            <TabButton active={tab === 'avenants'} onClick={() => setTab('avenants')}>Avenants</TabButton>
-            <TabButton active={tab === 'dgd'} onClick={() => setTab('dgd')}>DGD</TabButton>
-          </div>
 
           {tab === 'situations' && <SituationsTab marcheId={marcheId} lines={m.lines} token={token} />}
           {tab === 'avenants' && <AvenantsTab marcheId={marcheId} token={token} />}
@@ -135,27 +133,6 @@ export default function MarcheDetailPage() {
         </>
       )}
     </div>
-  );
-}
-
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        border: 'none',
-        background: 'none',
-        padding: '8px 14px',
-        cursor: 'pointer',
-        fontWeight: active ? 600 : 400,
-        color: active ? 'var(--primary)' : 'var(--muted)',
-        borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
-        marginBottom: -1,
-      }}
-    >
-      {children}
-    </button>
   );
 }
 
