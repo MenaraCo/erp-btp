@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Param, Post } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query,
+} from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { TimesheetInput, TimesheetService } from './timesheet.service';
@@ -30,5 +32,40 @@ export class TimesheetController {
   @RequiresPermission('site_tracking.read')
   summary(@Param('chantierId') chantierId: string) {
     return this.timesheets.summary(chantierId);
+  }
+  /**
+   * Contrôle du pointage d'un mois : grille salarié × jour, totaux et anomalies.
+   * À relire AVANT d'imputer — après, les heures sont figées.
+   */
+  @Get('controle')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.read')
+  controle(@Param('chantierId') chantierId: string, @Query('mois') mois: string) {
+    return this.timesheets.controle(chantierId, mois);
+  }
+
+  /** Arrête les heures du mois : elles ne se modifient plus. */
+  @Post('imputation')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.write')
+  imputer(@Param('chantierId') chantierId: string, @Body() body: { mois?: string }) {
+    if (!body?.mois) throw new BadRequestException('Le mois à imputer est requis (AAAA-MM).');
+    return this.timesheets.imputer(chantierId, body.mois);
+  }
+
+  /** Corrige un pointage non imputé. */
+  @Patch(':timesheetId')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.write')
+  update(@Param('timesheetId') timesheetId: string, @Body() body: TimesheetInput) {
+    return this.timesheets.update(timesheetId, body ?? {});
+  }
+
+  /** Supprime un pointage non imputé (mauvais chantier, doublon…). */
+  @Delete(':timesheetId')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.write')
+  remove(@Param('timesheetId') timesheetId: string) {
+    return this.timesheets.remove(timesheetId);
   }
 }
