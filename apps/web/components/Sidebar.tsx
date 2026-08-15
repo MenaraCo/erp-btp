@@ -43,6 +43,7 @@ const CONTEXT_ICONS: Record<string, React.ElementType> = {
   '': Building2,
   structure: Layers,
   pointages: Users,
+  'controle-heures': ClipboardCheck,
   achats: Truck,
   avancement: Gauge,
   mensuel: CalendarDays,
