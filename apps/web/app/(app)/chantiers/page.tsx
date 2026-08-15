@@ -10,11 +10,14 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 import { IconBtn } from '@/components/IconBtn';
+import { teinteChantier } from '@/components/CalendrierMois';
 
 interface Chantier {
   id: string;
   code: string;
   name?: string | null;
+  /** Couleur du chantier, celle des calendriers — pour le reconnaître d'un coup d'œil. */
+  color?: string | null;
   budget_vente_ht: string | null;
 }
 
@@ -112,7 +115,14 @@ export default function ChantiersPage() {
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
                 >
-                  <td className="code-cell">{c.code}</td>
+                  <td className="code-cell">
+                    <span style={{
+                      display: 'inline-block', width: 9, height: 9, borderRadius: 2,
+                      marginRight: 7, verticalAlign: 0,
+                      background: teinteChantier(c.id, c.color),
+                    }} />
+                    {c.code}
+                  </td>
                   <td style={{ fontWeight: 500 }}>{c.name ?? '—'}</td>
                   <td style={{ fontVariantNumeric: 'tabular-nums' }}>{euro(c.budget_vente_ht)}</td>
                   <td style={{ textAlign: 'right', paddingRight: 8 }}>

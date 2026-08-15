@@ -19,7 +19,8 @@ export interface FiltrePersonnel {
 export interface OccupationJour {
   date: string;
   chantiers: Array<{
-    chantierId: string; code: string; nom: string; heures: string; prevu: boolean;
+    chantierId: string; code: string; nom: string; couleur: string | null;
+    heures: string; prevu: boolean;
     debut?: string | null; fin?: string | null;
   }>;
   totalHeures: string;
@@ -78,13 +79,15 @@ export class PersonnelService {
       const lignes: Array<{
         employee_id: string; label: string; contract_type: string; agency: string | null;
         code_analytique: string | null; chantier_id: string; chantier_code: string;
-        chantier_nom: string; work_date: string; heures: string; prevu: boolean;
+        chantier_nom: string; chantier_couleur: string | null;
+        work_date: string; heures: string; prevu: boolean;
         debut: string | null; fin: string | null;
       }> = await em.query(
         `SELECT e.id AS employee_id,
                 trim(coalesce(e.first_name, '') || ' ' || e.last_name) AS label,
                 e.contract_type, e.agency, a.code AS code_analytique,
                 c.id AS chantier_id, c.code AS chantier_code, c.name AS chantier_nom,
+                c.color AS chantier_couleur,
                 t.work_date::text AS work_date, SUM(t.hours)::text AS heures, false AS prevu,
                 to_char(MIN(t.start_time), 'HH24:MI') AS debut,
                 to_char(MAX(t.end_time), 'HH24:MI') AS fin
@@ -93,11 +96,12 @@ export class PersonnelService {
            JOIN chantier c ON c.id = t.chantier_id
            LEFT JOIN analytical_code a ON a.id = e.code_analytique_id
           WHERE t.work_date BETWEEN $1 AND $2 ${filtres}
-          GROUP BY e.id, label, e.contract_type, e.agency, a.code, c.id, c.code, c.name, t.work_date
+          GROUP BY e.id, label, e.contract_type, e.agency, a.code,
+                   c.id, c.code, c.name, c.color, t.work_date
          UNION ALL
          SELECT e.id, trim(coalesce(e.first_name, '') || ' ' || e.last_name),
                 e.contract_type, e.agency, a.code,
-                c.id, c.code, c.name, f.work_date::text, SUM(f.hours)::text, true,
+                c.id, c.code, c.name, c.color, f.work_date::text, SUM(f.hours)::text, true,
                 to_char(MIN(f.start_time), 'HH24:MI'), to_char(MAX(f.end_time), 'HH24:MI')
            FROM timesheet_forecast f
            JOIN employee e ON e.id = f.employee_id
@@ -105,7 +109,7 @@ export class PersonnelService {
            LEFT JOIN analytical_code a ON a.id = e.code_analytique_id
           WHERE f.work_date BETWEEN $1 AND $2 ${filtres}
           GROUP BY e.id, e.first_name, e.last_name, e.contract_type, e.agency, a.code,
-                   c.id, c.code, c.name, f.work_date`,
+                   c.id, c.code, c.name, c.color, f.work_date`,
         params,
       );
 
@@ -128,6 +132,7 @@ export class PersonnelService {
           chantierId: l.chantier_id,
           code: l.chantier_code,
           nom: l.chantier_nom,
+          couleur: l.chantier_couleur ?? null,
           heures: new Decimal(l.heures).toString(),
           prevu: l.prevu,
           debut: l.debut,
@@ -229,6 +234,7 @@ export class PersonnelService {
         `SELECT t.id, 'realise' AS kind, e.id AS employee_id,
                 trim(coalesce(e.first_name,'') || ' ' || e.last_name) AS label,
                 c.id AS chantier_id, c.code AS chantier_code, c.name AS chantier_nom,
+                c.color AS chantier_couleur,
                 t.work_date::text AS date, t.hours::text AS heures,
                 to_char(t.start_time,'HH24:MI') AS debut, to_char(t.end_time,'HH24:MI') AS fin,
                 (t.imputed_at IS NOT NULL) AS fige
@@ -239,7 +245,7 @@ export class PersonnelService {
          UNION ALL
          SELECT f.id, 'prevu', e.id,
                 trim(coalesce(e.first_name,'') || ' ' || e.last_name),
-                c.id, c.code, c.name,
+                c.id, c.code, c.name, c.color,
                 f.work_date::text, f.hours::text,
                 to_char(f.start_time,'HH24:MI'), to_char(f.end_time,'HH24:MI'), false
            FROM timesheet_forecast f
@@ -262,6 +268,7 @@ export class PersonnelService {
           chantierId: r.chantier_id as string,
           chantierCode: r.chantier_code as string,
           chantierNom: r.chantier_nom as string,
+          chantierCouleur: (r.chantier_couleur as string | null) ?? null,
           date: r.date as string,
           heures: new Decimal(r.heures as string).toString(),
           debut: (r.debut as string | null) ?? null,

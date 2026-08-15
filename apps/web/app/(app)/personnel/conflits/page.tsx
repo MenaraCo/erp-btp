@@ -6,13 +6,16 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { teinteChantier } from '@/components/CalendrierMois';
 
 interface Conflit {
   employeeId: string;
   label: string;
   date: string;
   totalHeures: string;
-  chantiers: Array<{ chantierId: string; code: string; nom: string; heures: string }>;
+  chantiers: Array<{
+    chantierId: string; code: string; nom: string; couleur: string | null; heures: string;
+  }>;
   motifs: string[];
 }
 interface Reponse { debut: string; fin: string; conflits: Conflit[]; total: number }
@@ -89,10 +92,16 @@ export default function ConflitsPage() {
                   <td>{c.label}</td>
                   <td>
                     {c.chantiers.map((ch) => (
-                      <div key={ch.chantierId} style={{ fontSize: 12 }}>
+                      <div key={ch.chantierId} style={{
+                        fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
+                      }}>
+                        <span style={{
+                          width: 9, height: 9, borderRadius: 2, flexShrink: 0,
+                          background: teinteChantier(ch.chantierId, ch.couleur),
+                        }} />
                         <Link href={`/chantiers/${ch.chantierId}/calendrier`} className="link">
                           {ch.code}
-                        </Link>{' '}
+                        </Link>
                         <span className="muted">{Number(ch.heures)} h</span>
                       </div>
                     ))}

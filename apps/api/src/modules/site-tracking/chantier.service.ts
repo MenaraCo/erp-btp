@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -34,6 +35,15 @@ interface OuvrageComp {
   quantity: string | null;
   rate: string | null;
 }
+
+/**
+ * Palette du calendrier : des teintes franches et distinguables entre elles, y compris pour un
+ * daltonien (on évite rouge/vert voisins). Le rouge vif reste réservé aux alertes.
+ */
+export const COULEURS_CHANTIER = [
+  '#1a3a5c', '#e8550a', '#0f766e', '#7c3aed',
+  '#b45309', '#0369a1', '#4d7c0f', '#9d174d',
+];
 
 @Injectable()
 export class ChantierService {
@@ -79,9 +89,11 @@ export class ChantierService {
       const chantierCode = await this.numbering.next(em, 'chantier');
       chantierId = (
         await em.query(
-          `INSERT INTO chantier (tenant_id, code, name, affaire_id, devis_version_id, budget_vente_ht)
-           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-          [tenantId, chantierCode, affaire.name, affaire.id, versionId, venteTotal],
+          `INSERT INTO chantier (tenant_id, code, name, affaire_id, devis_version_id,
+                                 budget_vente_ht, color)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [tenantId, chantierCode, affaire.name, affaire.id, versionId, venteTotal,
+           await this.prochaineCouleur(em)],
         )
       )[0].id;
     }
@@ -817,9 +829,9 @@ export class ChantierService {
       }
       return (
         await em.query(
-          `INSERT INTO chantier (tenant_id, code, name, budget_vente_ht, status)
-           VALUES ($1, $2, $3, 0, 'open') RETURNING *`,
-          [tenantId, code, input.name],
+          `INSERT INTO chantier (tenant_id, code, name, budget_vente_ht, status, color)
+           VALUES ($1, $2, $3, 0, 'open', $4) RETURNING *`,
+          [tenantId, code, input.name, await this.prochaineCouleur(em)],
         )
       )[0];
     });
@@ -1079,5 +1091,39 @@ export class ChantierService {
         [marcheId],
       ),
     );
+  }
+  /**
+   * Couleur suivante de la palette, en tournant.
+   *
+   * On compte les chantiers existants plutôt que de tirer au hasard : deux chantiers créés à la
+   * suite reçoivent ainsi des teintes différentes, ce qui est tout l'intérêt sur un calendrier.
+   */
+  private async prochaineCouleur(
+    em: { query: (sql: string, params?: unknown[]) => Promise<Array<Record<string, unknown>>> },
+  ): Promise<string> {
+    const [{ n }] = (await em.query(
+      `SELECT count(*)::int AS n FROM chantier WHERE deleted_at IS NULL`,
+    )) as Array<{ n: number }>;
+    return COULEURS_CHANTIER[Number(n) % COULEURS_CHANTIER.length];
+  }
+
+  /** Change la couleur d'un chantier — celle qui l'identifie dans les calendriers. */
+  setCouleur(chantierId: string, color: string | null) {
+    const tenantId = this.context.requireTenantId();
+    if (color !== null && !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      throw new BadRequestException('Couleur attendue au format #RRGGBB.');
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = returningRows<{ id: string; color: string | null }>(
+        await em.query(
+          `UPDATE chantier SET color = $2, updated_at = now()
+            WHERE id = $1 AND deleted_at IS NULL
+            RETURNING id, color`,
+          [chantierId, color],
+        ),
+      );
+      if (rows.length === 0) throw new NotFoundException('Chantier introuvable');
+      return rows[0];
+    });
   }
 }

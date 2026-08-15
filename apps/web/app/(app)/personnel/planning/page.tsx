@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarRange } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { teinteChantier } from '@/components/CalendrierMois';
+import { LegendeChantiers } from '@/components/LegendeChantiers';
 
 interface Creneau {
   id: string;
@@ -14,6 +16,7 @@ interface Creneau {
   chantierId: string;
   chantierCode: string;
   chantierNom: string;
+  chantierCouleur: string | null;
   date: string;
   heures: string;
   debut: string | null;
@@ -22,14 +25,11 @@ interface Creneau {
 }
 interface Reponse { debut: string; fin: string; jours: string[]; creneaux: Creneau[] }
 interface Employee { id: string; fullName: string }
-interface Chantier { id: string; code: string; name: string }
+interface Chantier { id: string; code: string; name: string; color: string | null }
 
-const TEINTES = ['#1a3a5c', '#e8550a', '#0f766e', '#7c3aed', '#b45309', '#be123c', '#0369a1'];
-function teinte(id: string): string {
-  let n = 0;
-  for (let i = 0; i < id.length; i += 1) n = (n + id.charCodeAt(i)) % TEINTES.length;
-  return TEINTES[n];
-}
+/** Journée type posée par glisser-déposer depuis la légende. */
+const HEURES_JOURNEE = 7;
+
 function iso(d: Date): string { return d.toISOString().slice(0, 10); }
 function lundiDe(d: Date): Date {
   const c = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -105,6 +105,48 @@ export default function PlanningPage() {
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Déplacement impossible'),
   });
 
+  const rafraichir = () => {
+    setErr(null);
+    qc.invalidateQueries({ queryKey: ['creneaux'] });
+    qc.invalidateQueries({ queryKey: ['occupation'] });
+    qc.invalidateQueries({ queryKey: ['calendrier'] });
+  };
+
+  const colorier = useMutation({
+    mutationFn: (v: { chantierId: string; color: string }) =>
+      apiFetch(`/chantiers/${v.chantierId}/couleur`, { method: 'PATCH', token, body: { color: v.color } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chantiers'] });
+      rafraichir();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Couleur non enregistrée'),
+  });
+
+  const planifier = useMutation({
+    mutationFn: (v: { chantierId: string; date: string }) =>
+      apiFetch(`/chantiers/${v.chantierId}/planning/previsionnel`, {
+        method: 'PUT', token,
+        body: { employeeId: salarie, date: v.date, hours: HEURES_JOURNEE },
+      }),
+    onSuccess: rafraichir,
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Planification impossible'),
+  });
+
+  /**
+   * Dépôt sur une colonne-jour : soit une intervention qu'on déplace, soit un chantier venu de la
+   * légende, qu'on pose comme journée prévue pour le salarié filtré.
+   */
+  const deposer = (charge: string, jour: string) => {
+    const [kind, id] = charge.split(':');
+    if (!kind || !id) return;
+    if (kind !== 'chantier') { deplacer.mutate({ kind, id, date: jour }); return; }
+    if (!salarie) {
+      setErr('Choisissez d’abord un salarié dans le filtre pour lui poser une journée.');
+      return;
+    }
+    planifier.mutate({ chantierId: id, date: jour });
+  };
+
   const decaler = (pas: number) => {
     const d = new Date(`${ancre}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() + 7 * pas);
@@ -123,9 +165,9 @@ export default function PlanningPage() {
         c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
       }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}`}
       style={{
-        background: c.kind === 'prevu' ? 'transparent' : teinte(c.chantierId),
-        border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinte(c.chantierId)}`,
-        color: c.kind === 'prevu' ? teinte(c.chantierId) : '#fff',
+        background: c.kind === 'prevu' ? 'transparent' : teinteChantier(c.chantierId, c.chantierCouleur),
+        border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinteChantier(c.chantierId, c.chantierCouleur)}`,
+        color: c.kind === 'prevu' ? teinteChantier(c.chantierId, c.chantierCouleur) : '#fff',
         borderRadius: 4, fontSize: 10, padding: '1px 4px', overflow: 'hidden',
         cursor: c.fige ? 'not-allowed' : 'grab', opacity: c.fige ? 0.55 : 1,
         ...style,
@@ -144,8 +186,9 @@ export default function PlanningPage() {
         <CalendarRange size={20} /> Planning de la semaine
       </h1>
       <p className="muted" style={{ marginTop: 0, maxWidth: 820 }}>
-        Chaque bloc est une intervention. Faites-le <strong>glisser sur un autre jour</strong> pour
-        le déplacer. Les traits pleins sont du réalisé, les pointillés du prévisionnel.
+        Chaque bloc est une intervention, à la couleur de son chantier. Faites-le{' '}
+        <strong>glisser sur un autre jour</strong> pour le déplacer, ou glissez un chantier de la
+        légende pour poser une journée. Traits pleins : réalisé ; pointillés : prévisionnel.
       </p>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
@@ -174,7 +217,8 @@ export default function PlanningPage() {
       {err && <div className="error" style={{ marginTop: 12 }}>{err}</div>}
 
       {r && (
-        <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'auto' }}>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'auto', flex: 1, minWidth: 0 }}>
           <div style={{ display: 'grid', gridTemplateColumns: `56px repeat(${r.jours.length}, minmax(110px, 1fr))` }}>
             {/* En-têtes */}
             <div style={{ borderBottom: '1px solid var(--border)' }} />
@@ -201,8 +245,7 @@ export default function PlanningPage() {
                   onDragLeave={() => setSurvole(null)}
                   onDrop={(e) => {
                     e.preventDefault(); setSurvole(null);
-                    const [kind, id] = e.dataTransfer.getData('text/plain').split(':');
-                    if (kind && id) deplacer.mutate({ kind, id, date: j });
+                    deposer(e.dataTransfer.getData('text/plain'), j);
                   }}
                   style={{
                     borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)',
@@ -232,8 +275,7 @@ export default function PlanningPage() {
                   onDragLeave={() => setSurvole(null)}
                   onDrop={(e) => {
                     e.preventDefault(); setSurvole(null);
-                    const [kind, id] = e.dataTransfer.getData('text/plain').split(':');
-                    if (kind && id) deplacer.mutate({ kind, id, date: j });
+                    deposer(e.dataTransfer.getData('text/plain'), j);
                   }}
                   style={{
                     position: 'relative', borderLeft: '1px solid var(--border)',
@@ -259,6 +301,16 @@ export default function PlanningPage() {
               );
             })}
           </div>
+        </div>
+        <LegendeChantiers
+          chantiers={chantiers.data ?? []}
+          actif={new Set(r.creneaux.map((c) => c.chantierId))}
+          glissable
+          aide={salarie
+            ? `Glissez un chantier sur un jour : ${HEURES_JOURNEE} h prévues pour le salarié filtré.`
+            : 'Choisissez un salarié pour poser des journées par glisser-déposer. Cliquez une pastille pour changer la couleur.'}
+          onChoisirCouleur={(chantierId, color) => colorier.mutate({ chantierId, color })}
+        />
         </div>
       )}
     </div>

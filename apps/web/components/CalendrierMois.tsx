@@ -10,6 +10,8 @@ export interface CreneauCalendrier {
   chantierId: string;
   chantierCode: string;
   chantierNom: string;
+  /** Couleur choisie pour ce chantier ; à défaut, une teinte déduite de son identifiant. */
+  chantierCouleur?: string | null;
   date: string;
   heures: string;
   debut: string | null;
@@ -18,7 +20,13 @@ export interface CreneauCalendrier {
 }
 
 const TEINTES = ['#1a3a5c', '#e8550a', '#0f766e', '#7c3aed', '#b45309', '#be123c', '#0369a1'];
-export function teinteChantier(id: string): string {
+
+/**
+ * Couleur d'un chantier : celle qu'on lui a choisie, sinon une teinte déduite de son identifiant.
+ * Le repli garde les calendriers lisibles pour les chantiers créés avant ce réglage.
+ */
+export function teinteChantier(id: string, couleur?: string | null): string {
+  if (couleur) return couleur;
   let n = 0;
   for (let i = 0; i < id.length; i += 1) n = (n + id.charCodeAt(i)) % TEINTES.length;
   return TEINTES[n];
@@ -62,6 +70,7 @@ export function CalendrierMois({
   creneaux,
   conflitsParJour,
   onDeplacer,
+  onDeposerChantier,
   hauteurCase = 112,
 }: {
   jours: string[];
@@ -69,9 +78,12 @@ export function CalendrierMois({
   creneaux: CreneauCalendrier[];
   conflitsParJour?: Map<string, string[]>;
   onDeplacer?: (kind: string, id: string, date: string) => void;
+  /** Dépôt d'un chantier venu de la légende : planifie une journée sur ce jour. */
+  onDeposerChantier?: (chantierId: string, date: string) => void;
   hauteurCase?: number;
 }) {
   const [survole, setSurvole] = useState<string | null>(null);
+  const accepteDepot = Boolean(onDeplacer || onDeposerChantier);
 
   const parJour = useMemo(() => {
     const m = new Map<string, CreneauCalendrier[]>();
@@ -105,13 +117,17 @@ export function CalendrierMois({
         return (
           <div
             key={jour}
-            onDragOver={onDeplacer ? (e) => { e.preventDefault(); setSurvole(jour); } : undefined}
-            onDragLeave={onDeplacer ? () => setSurvole(null) : undefined}
-            onDrop={onDeplacer ? (e) => {
+            onDragOver={accepteDepot ? (e) => { e.preventDefault(); setSurvole(jour); } : undefined}
+            onDragLeave={accepteDepot ? () => setSurvole(null) : undefined}
+            onDrop={accepteDepot ? (e) => {
               e.preventDefault();
               setSurvole(null);
               const [kind, id] = e.dataTransfer.getData('text/plain').split(':');
-              if (kind && id) onDeplacer(kind, id, jour);
+              if (!kind || !id) return;
+              // Deux sources de dépôt : une intervention qu'on déplace, ou un chantier de la
+              // légende qu'on pose sur un jour pour l'y planifier.
+              if (kind === 'chantier') onDeposerChantier?.(id, jour);
+              else onDeplacer?.(kind, id, jour);
             } : undefined}
             title={motifs.join('\n') || undefined}
             style={{
@@ -144,9 +160,9 @@ export function CalendrierMois({
                     c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
                   }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}`}
                   style={{
-                    background: c.kind === 'prevu' ? 'transparent' : teinteChantier(c.chantierId),
-                    border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinteChantier(c.chantierId)}`,
-                    color: c.kind === 'prevu' ? teinteChantier(c.chantierId) : '#fff',
+                    background: c.kind === 'prevu' ? 'transparent' : teinteChantier(c.chantierId, c.chantierCouleur),
+                    border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinteChantier(c.chantierId, c.chantierCouleur)}`,
+                    color: c.kind === 'prevu' ? teinteChantier(c.chantierId, c.chantierCouleur) : '#fff',
                     borderRadius: 4, fontSize: 10, lineHeight: 1.5, padding: '0 5px',
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                     cursor: !onDeplacer ? 'default' : c.fige ? 'not-allowed' : 'grab',

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
+import { teinteChantier } from '@/components/CalendrierMois';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro, percent } from '@/lib/format';
 
@@ -116,7 +117,11 @@ export default function ChantierDetailPage() {
   const chantier = useQuery({
     queryKey: ['chantier', chantierId],
     enabled: Boolean(token),
-    queryFn: () => apiFetch<{ code: string }>(`/chantiers/${chantierId}`, { token }),
+    queryFn: () =>
+      // La fiche arrive enveloppée : { chantier, lines, budgetByNature }.
+      apiFetch<{ chantier: { code: string; name: string | null; color: string | null } }>(
+        `/chantiers/${chantierId}`, { token },
+      ),
   });
   const results = useQuery({
     queryKey: ['chantier-results', chantierId],
@@ -151,7 +156,13 @@ export default function ChantierDetailPage() {
       </p>
       {/* Les écrans du chantier (structure, pointages, achats…) vivent dans la barre latérale,
           sous « Chantier ouvert » : la page ne porte plus que le travail en cours. */}
-      <h1 style={{ marginBottom: 4 }}>Chantier {chantier.data?.code ?? ''}</h1>
+      <h1 style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 9 }}>
+        <span style={{
+          width: 12, height: 12, borderRadius: 3, flexShrink: 0,
+          background: teinteChantier(chantierId, chantier.data?.chantier?.color),
+        }} />
+        Chantier {chantier.data?.chantier?.code ?? ''}
+      </h1>
 
       {results.data && (
         <div className="card-grid" style={{ marginTop: 12 }}>

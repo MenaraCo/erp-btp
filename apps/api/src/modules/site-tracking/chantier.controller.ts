@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put,
+} from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { ChantierService } from './chantier.service';
@@ -190,5 +192,23 @@ export class ChantierController {
       throw new BadRequestException('montantPrevisionnel is required');
     }
     return this.chantiers.setPrevisionnel(lineId, nature, body.montantPrevisionnel);
+  }
+  /**
+   * Couleur d'identification du chantier dans les calendriers.
+   *
+   * Le champ doit être présent : `null` remet la couleur automatique, mais un corps vide est une
+   * erreur d'appel — l'accepter effacerait en silence un repère que l'utilisateur avait choisi.
+   */
+  @Patch('chantiers/:chantierId/couleur')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  setCouleur(
+    @Param('chantierId') chantierId: string,
+    @Body() body: { color?: string | null },
+  ) {
+    if (!body || body.color === undefined) {
+      throw new BadRequestException('La couleur est requise (ou null pour revenir à l’automatique).');
+    }
+    return this.chantiers.setCouleur(chantierId, body.color);
   }
 }

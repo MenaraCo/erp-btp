@@ -7,6 +7,7 @@ import { CalendarDays, Copy, CornerDownRight } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { CalendrierMois, CreneauCalendrier, grilleDuMois } from '@/components/CalendrierMois';
+import { LegendeChantiers } from '@/components/LegendeChantiers';
 
 interface Cellule { realise: string; prevu: string; impute: boolean; multiple: boolean }
 interface LigneCalendrier {
@@ -100,6 +101,26 @@ export default function CalendrierPage() {
     queryKey: ['employees'],
     enabled: Boolean(token),
     queryFn: () => apiFetch<Employee[]>('/employees', { token }),
+  });
+  // La couleur du chantier se règle ici aussi : c'est là qu'on regarde son agenda.
+  const fiche = useQuery({
+    queryKey: ['chantier', chantierId],
+    enabled: Boolean(token),
+    queryFn: () =>
+      apiFetch<{ chantier: { id: string; code: string; name: string; color: string | null } }>(
+        `/chantiers/${chantierId}`, { token },
+      ),
+  });
+  const colorier = useMutation({
+    mutationFn: (v: { chantierId: string; color: string }) =>
+      apiFetch(`/chantiers/${v.chantierId}/couleur`, { method: 'PATCH', token, body: { color: v.color } }),
+    onSuccess: () => {
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ['chantier', chantierId] });
+      qc.invalidateQueries({ queryKey: ['chantiers'] });
+      rafraichir();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Couleur non enregistrée'),
   });
 
   const rafraichir = () => {
@@ -223,12 +244,23 @@ export default function CalendrierPage() {
       </div>
 
       {portee === 'mois' && (
-        <CalendrierMois
-          jours={joursDuMois}
-          mois={moisIndex}
-          creneaux={creneauxMois.data?.creneaux ?? []}
-          onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
-        />
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <CalendrierMois
+              jours={joursDuMois}
+              mois={moisIndex}
+              creneaux={creneauxMois.data?.creneaux ?? []}
+              onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
+            />
+          </div>
+          {fiche.data && (
+            <LegendeChantiers
+              chantiers={[fiche.data.chantier]}
+              aide="Cette couleur suit le chantier dans tous les calendriers de l’entreprise."
+              onChoisirCouleur={(id, color) => colorier.mutate({ chantierId: id, color })}
+            />
+          )}
+        </div>
       )}
 
       {portee === 'semaine' && c && (

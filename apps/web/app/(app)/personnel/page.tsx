@@ -6,6 +6,7 @@ import { AlertTriangle, CalendarDays } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { CalendrierMois, grilleDuMois, iso } from '@/components/CalendrierMois';
+import { LegendeChantiers } from '@/components/LegendeChantiers';
 
 interface Creneau {
   id: string;
@@ -15,6 +16,7 @@ interface Creneau {
   chantierId: string;
   chantierCode: string;
   chantierNom: string;
+  chantierCouleur: string | null;
   date: string;
   heures: string;
   debut: string | null;
@@ -25,7 +27,10 @@ interface Creneaux { debut: string; fin: string; jours: string[]; creneaux: Cren
 interface Conflit { employeeId: string; label: string; date: string; motifs: string[] }
 interface Conflits { conflits: Conflit[]; total: number }
 interface Employee { id: string; fullName: string }
-interface Chantier { id: string; code: string; name: string }
+interface Chantier { id: string; code: string; name: string; color: string | null }
+
+/** Journée type posée par glisser-déposer ; les heures se corrigent ensuite dans le planning. */
+const HEURES_JOURNEE = 7;
 
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août',
   'septembre', 'octobre', 'novembre', 'décembre'];
@@ -95,6 +100,45 @@ export default function OccupationPage() {
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Déplacement impossible'),
   });
 
+  const rafraichir = () => {
+    setErr(null);
+    qc.invalidateQueries({ queryKey: ['creneaux-mois'] });
+    qc.invalidateQueries({ queryKey: ['conflits-mois'] });
+    qc.invalidateQueries({ queryKey: ['occupation'] });
+  };
+
+  /** Couleur du chantier : elle vaut pour tous les calendriers, pas seulement celui-ci. */
+  const colorier = useMutation({
+    mutationFn: (v: { chantierId: string; color: string }) =>
+      apiFetch(`/chantiers/${v.chantierId}/couleur`, { method: 'PATCH', token, body: { color: v.color } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chantiers'] });
+      rafraichir();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Couleur non enregistrée'),
+  });
+
+  /** Chantier glissé depuis la légende sur un jour : une journée prévue pour le salarié filtré. */
+  const planifier = useMutation({
+    mutationFn: (v: { chantierId: string; date: string }) =>
+      apiFetch(`/chantiers/${v.chantierId}/planning/previsionnel`, {
+        method: 'PUT', token,
+        body: { employeeId: salarie, date: v.date, hours: HEURES_JOURNEE },
+      }),
+    onSuccess: rafraichir,
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Planification impossible'),
+  });
+
+  const deposerChantier = (chantierId: string, date: string) => {
+    // Sans salarié choisi, on ne saurait pas QUI envoyer sur ce chantier : on le dit plutôt que
+    // de deviner ou d'ignorer le geste en silence.
+    if (!salarie) {
+      setErr('Choisissez d’abord un salarié dans le filtre pour lui poser une journée.');
+      return;
+    }
+    planifier.mutate({ chantierId, date });
+  };
+
   const decaler = (pas: number) => {
     const d = new Date(`${ancre}T00:00:00Z`);
     d.setUTCMonth(d.getUTCMonth() + pas, 1);
@@ -109,6 +153,12 @@ export default function OccupationPage() {
     return m;
   }, [conflits.data]);
 
+  /** Chantiers réellement présents sur le mois : la légende estompe les autres. */
+  const chantiersDuMois = useMemo(
+    () => new Set((donnees.data?.creneaux ?? []).map((c) => c.chantierId)),
+    [donnees.data],
+  );
+
 
   return (
     <div>
@@ -116,8 +166,9 @@ export default function OccupationPage() {
         <CalendarDays size={20} /> Occupation du personnel
       </h1>
       <p className="muted" style={{ marginTop: 0, maxWidth: 820 }}>
-        Qui travaille où, tous chantiers confondus. Glissez une intervention sur un autre jour pour
-        la déplacer ; les journées teintées demandent une vérification.
+        Qui travaille où, tous chantiers confondus. Chaque chantier a sa couleur (voir la légende).
+        Glissez une intervention sur un autre jour pour la déplacer, ou un chantier de la légende
+        sur un jour pour y poser une journée ; les journées teintées demandent une vérification.
       </p>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
@@ -163,13 +214,27 @@ export default function OccupationPage() {
         </div>
       )}
 
-      <CalendrierMois
-        jours={jours}
-        mois={mois}
-        creneaux={donnees.data?.creneaux ?? []}
-        conflitsParJour={conflitsParJour}
-        onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
-      />
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <CalendrierMois
+            jours={jours}
+            mois={mois}
+            creneaux={donnees.data?.creneaux ?? []}
+            conflitsParJour={conflitsParJour}
+            onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
+            onDeposerChantier={deposerChantier}
+          />
+        </div>
+        <LegendeChantiers
+          chantiers={chantiers.data ?? []}
+          actif={chantiersDuMois}
+          glissable
+          aide={salarie
+            ? `Glissez un chantier sur un jour : ${HEURES_JOURNEE} h prévues pour le salarié filtré.`
+            : 'Choisissez un salarié pour poser des journées par glisser-déposer. Cliquez une pastille pour changer la couleur.'}
+          onChoisirCouleur={(chantierId, color) => colorier.mutate({ chantierId, color })}
+        />
+      </div>
     </div>
   );
 }
