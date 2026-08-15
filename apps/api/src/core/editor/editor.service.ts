@@ -558,11 +558,26 @@ export class EditorService {
     return this.catalog.getCatalogPacks();
   }
 
-  /** Ajuste le prix (ou le libellé / l'activation) d'un palier. */
+  /** Ajuste le prix, le libellé, l'activation ou les jetons par siège d'un palier. */
   async updatePack(
     code: string,
-    patch: { priceMonthly?: number | null; label?: string; active?: boolean },
+    patch: {
+      priceMonthly?: number | null;
+      label?: string;
+      active?: boolean;
+      seatTokens?: number | null;
+    },
   ) {
+    // Jetons par siège : entier ≥ 1, ou `null` pour revenir au défaut (un jeton par module).
+    if (patch.seatTokens !== undefined && patch.seatTokens !== null) {
+      const n = Math.trunc(Number(patch.seatTokens));
+      if (!Number.isFinite(n) || n < 1) {
+        throw new BadRequestException(
+          'Le nombre de jetons par siège doit être un entier ≥ 1 (ou vide pour le défaut)',
+        );
+      }
+      patch.seatTokens = n;
+    }
     if (patch.priceMonthly !== undefined && patch.priceMonthly !== null) {
       const v = Number(patch.priceMonthly);
       if (!Number.isFinite(v) || v < 0) {

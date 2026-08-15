@@ -27,6 +27,8 @@ export interface CatalogPack {
   /** Prix €HT par siège et par mois (base de données — éditable par l'éditeur). */
   priceMonthly: number | null;
   discountPct: number;
+  /** Jetons ouverts par siège (réglable par l'éditeur ; défaut = nombre de modules du palier). */
+  seatTokens: number;
   modules: string[];
   description: string | null;
 }
@@ -122,7 +124,12 @@ export class CatalogService {
    */
   async updatePack(
     code: string,
-    patch: { priceMonthly?: number | null; label?: string; active?: boolean },
+    patch: {
+      priceMonthly?: number | null;
+      label?: string;
+      active?: boolean;
+      seatTokens?: number | null;
+    },
   ): Promise<CatalogPack | null> {
     const pack = await this.packs.findOne({ where: { code } });
     if (!pack) {
@@ -136,6 +143,9 @@ export class CatalogService {
     }
     if (patch.active !== undefined) {
       pack.active = patch.active;
+    }
+    if (patch.seatTokens !== undefined) {
+      pack.seatTokens = patch.seatTokens;
     }
     await this.packs.save(pack);
     const all = await this.getCatalogPacks();
@@ -153,15 +163,16 @@ export class CatalogService {
       tier_level: number;
       price_monthly: string | null;
       discount_pct: string;
+      seat_tokens: number | null;
       modules: string[];
     }> = await this.packs.query(
-      `SELECT p.code, p.label, p.tier_level, p.price_monthly, p.discount_pct,
+      `SELECT p.code, p.label, p.tier_level, p.price_monthly, p.discount_pct, p.seat_tokens,
               COALESCE(array_agg(m.code ORDER BY m.code) FILTER (WHERE m.code IS NOT NULL), '{}') AS modules
          FROM pack p
          LEFT JOIN pack_module pm ON pm.pack_id = p.id
          LEFT JOIN module m ON m.id = pm.module_id
         WHERE p.active = true
-        GROUP BY p.code, p.label, p.tier_level, p.price_monthly, p.discount_pct
+        GROUP BY p.code, p.label, p.tier_level, p.price_monthly, p.discount_pct, p.seat_tokens
         ORDER BY p.tier_level`,
     );
     const byCode = new Map(PACKS.map((p) => [p.code, p]));
@@ -172,6 +183,8 @@ export class CatalogService {
       priceMonthly: r.price_monthly === null ? null : Number(r.price_monthly),
       discountPct: Number(r.discount_pct),
       modules: r.modules,
+      // Sans réglage, un siège ouvre un jeton par module du palier.
+      seatTokens: r.seat_tokens === null ? r.modules.length : Number(r.seat_tokens),
       description: byCode.get(r.code)?.description ?? null,
     }));
   }

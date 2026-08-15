@@ -135,6 +135,13 @@ export default function UsersPage() {
                                 <option key={r.code} value={r.code}>{r.label}</option>
                               ))}
                             </select>
+                            {/* Comptes hérités du temps où les rôles se cumulaient : la liste n'en
+                                montre qu'un. On le dit, car choisir un profil retirera les autres. */}
+                            {u.roles.length > 1 && (
+                              <div style={{ fontSize: 11, marginTop: 4, color: 'var(--accent)' }}>
+                                Cumule {u.roles.length} rôles ; choisir un profil ne gardera que celui-ci.
+                              </div>
+                            )}
                             {/* Ce que le profil autorise, en clair, sous la liste : le choix se
                                 fait sur des mots métier, pas sur des clés techniques. */}
                             <div className="muted" style={{ fontSize: 11, marginTop: 4, maxWidth: 320 }}>

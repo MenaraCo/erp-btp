@@ -52,6 +52,8 @@ interface PackRow {
   label: string;
   tierLevel: number;
   priceMonthly: number | null;
+  /** Jetons ouverts par siège (défaut renvoyé par l'API = nombre de modules du palier). */
+  seatTokens: number;
   modules: string[];
 }
 interface PromoCodeRow {
@@ -306,16 +308,11 @@ function PackEditor({ token, onChanged }: { token: string; onChanged: () => void
   });
   const labels = new Map((catalog.data ?? []).map((m) => [m.code, m.label]));
 
-  async function savePrice(code: string, raw: string) {
+  async function savePack(code: string, patch: { priceMonthly?: number | null; seatTokens?: number | null }) {
     setErr(null);
     setSaving(code);
     try {
-      const t = raw.trim().replace(',', '.');
-      const priceMonthly = t === '' ? null : Number(t);
-      if (priceMonthly !== null && (!Number.isFinite(priceMonthly) || priceMonthly < 0)) {
-        throw new ApiError(400, 'Prix invalide');
-      }
-      await apiFetch(`/editor/packs/${code}`, { method: 'POST', body: { priceMonthly }, token });
+      await apiFetch(`/editor/packs/${code}`, { method: 'POST', body: patch, token });
       await qc.invalidateQueries({ queryKey: ['editor-packs'] });
       onChanged();
     } catch (e) {
@@ -325,13 +322,34 @@ function PackEditor({ token, onChanged }: { token: string; onChanged: () => void
     }
   }
 
+  function savePrice(code: string, raw: string) {
+    const t = raw.trim().replace(',', '.');
+    const priceMonthly = t === '' ? null : Number(t);
+    if (priceMonthly !== null && (!Number.isFinite(priceMonthly) || priceMonthly < 0)) {
+      setErr('Prix invalide');
+      return;
+    }
+    void savePack(code, { priceMonthly });
+  }
+
+  function saveTokens(code: string, raw: string) {
+    const t = raw.trim();
+    const seatTokens = t === '' ? null : Math.trunc(Number(t));
+    if (seatTokens !== null && (!Number.isFinite(seatTokens) || seatTokens < 1)) {
+      setErr('Le nombre de jetons par siège doit être un entier ≥ 1 (ou vide pour le défaut)');
+      return;
+    }
+    void savePack(code, { seatTokens });
+  }
+
   return (
     <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, marginTop: 20 }}>
       <div style={{ padding: '14px 16px', borderBottom: '1px solid #334155' }}>
         <div style={{ color: '#fff', fontWeight: 600 }}>Paliers & prix</div>
         <div style={{ color: '#64748b', fontSize: 11 }}>
-          Prix €HT par siège et par mois de chaque palier. Effet immédiat sur l’inscription,
-          les abonnements et le MRR — sans redéploiement.
+          Prix €HT par siège et par mois, et nombre de jetons qu’ouvre un siège. Un client répartit
+          ensuite ces jetons librement entre ses collaborateurs et ses modules. Effet immédiat sur
+          l’inscription, les abonnements et le MRR — sans redéploiement.
         </div>
       </div>
       {err && <div className="error" style={{ margin: 12 }}>{err}</div>}
@@ -342,6 +360,7 @@ function PackEditor({ token, onChanged }: { token: string; onChanged: () => void
             <tr>
               <Th>Palier</Th>
               <Th>Contenu</Th>
+              <Th right>Jetons /siège</Th>
               <Th right>Prix /siège/mois</Th>
             </tr>
           </thead>
@@ -353,6 +372,7 @@ function PackEditor({ token, onChanged }: { token: string; onChanged: () => void
                 labels={labels}
                 saving={saving === p.code}
                 onSave={(v) => savePrice(p.code, v)}
+                onSaveTokens={(v) => saveTokens(p.code, v)}
               />
             ))}
           </tbody>
@@ -363,14 +383,22 @@ function PackEditor({ token, onChanged }: { token: string; onChanged: () => void
 }
 
 function PackRowEditor({
-  pack, labels, saving, onSave,
+  pack, labels, saving, onSave, onSaveTokens,
 }: {
-  pack: PackRow; labels: Map<string, string>; saving: boolean; onSave: (raw: string) => void;
+  pack: PackRow;
+  labels: Map<string, string>;
+  saving: boolean;
+  onSave: (raw: string) => void;
+  onSaveTokens: (raw: string) => void;
 }) {
   const initial = pack.priceMonthly === null ? '' : String(pack.priceMonthly);
   const [val, setVal] = useState(initial);
   const dirty = val.trim().replace(',', '.') !== initial;
   const included = pack.modules.filter((c) => c !== 'core');
+  // Le défaut (un jeton par module) est ce que l'API renvoie déjà : on l'affiche tel quel.
+  const tokensInitial = String(pack.seatTokens);
+  const [tokens, setTokens] = useState(tokensInitial);
+  const tokensDirty = tokens.trim() !== tokensInitial;
 
   return (
     <tr style={{ borderTop: '1px solid #334155' }}>
@@ -383,6 +411,22 @@ function PackRowEditor({
           Socle{included.length ? ' + ' : ''}
           {included.map((c) => labels.get(c) ?? c).join(' + ')}
         </span>
+      </Td>
+      <Td right>
+        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          <input
+            value={tokens}
+            onChange={(e) => setTokens(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && tokensDirty) onSaveTokens(tokens); }}
+            aria-label={`Jetons par siège ${pack.label}`}
+            title="Nombre de jetons qu’ouvre un siège. Par défaut : un jeton par module du palier."
+            style={{ ...darkInput, width: 60, textAlign: 'right', padding: '5px 8px' }}
+          />
+          <ActionBtn accent={tokensDirty} title="Enregistrer les jetons par siège"
+            disabled={saving || !tokensDirty} onClick={() => onSaveTokens(tokens)}>
+            {saving ? '…' : 'OK'}
+          </ActionBtn>
+        </div>
       </Td>
       <Td right>
         <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>

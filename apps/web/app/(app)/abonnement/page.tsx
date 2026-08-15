@@ -30,6 +30,8 @@ interface PackRow {
   label: string;
   tierLevel: number;
   priceMonthly: number | null;
+  /** Jetons ouverts par siège, réglés par l'éditeur. */
+  seatTokens: number;
   modules: string[];
 }
 interface PackState {
@@ -218,6 +220,10 @@ function TabEtat() {
     queryKey: ['subscription-modules'],
     queryFn: () => api<SubscribedModule[]>('/subscription/modules'),
   });
+  const pool = useQuery({
+    queryKey: ['seats-pool'],
+    queryFn: () => api<SeatPool>('/seats/pool'),
+  });
 
   const cancel = useMutation({
     mutationFn: (cancelFlag: boolean) =>
@@ -302,16 +308,32 @@ function TabEtat() {
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Modules actifs ({activeModules.length})</h2>
+        {/* La contrainte est la réserve commune, pas un quota par module : afficher « 4/5 » en face
+            de chaque module laisserait croire à une limite qui n'existe plus. */}
+        {pool.data && pool.data.total > 0 && (
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+            Réserve de jetons : <strong>{pool.data.remaining}</strong> disponible
+            {pool.data.remaining > 1 ? 's' : ''} sur {pool.data.total}.
+          </p>
+        )}
         {activeModules.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>Aucun module actif.</p>
         ) : (
           <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {activeModules.map((m) => (
-              <li key={m.moduleCode} style={{ marginBottom: 4 }}>
-                <strong>{moduleLabel(m.moduleCode)}</strong> — {m.seatsAssigned}/{m.seatsPurchased} jetons affectés
-                {m.readOnly && <span className="badge warning" style={{ marginLeft: 8 }}>lecture seule</span>}
-              </li>
-            ))}
+            {activeModules.map((m) => {
+              const option = !(pool.data?.packModules.includes(m.moduleCode) ?? false);
+              return (
+                <li key={m.moduleCode} style={{ marginBottom: 4 }}>
+                  <strong>{moduleLabel(m.moduleCode)}</strong>{' '}
+                  <span className="muted">
+                    {option
+                      ? `— option, ${m.seatsAssigned}/${m.seatsPurchased} jetons affectés`
+                      : `— ${m.seatsAssigned} utilisateur${m.seatsAssigned > 1 ? 's' : ''}`}
+                  </span>
+                  {m.readOnly && <span className="badge warning" style={{ marginLeft: 8 }}>lecture seule</span>}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -607,6 +629,9 @@ function TabModules() {
 
   const st = state.data;
   const currentTier = st?.tierLevel ?? 0;
+  // Jetons ouverts par siège pour le palier souscrit : c'est ce qui multiplie les sièges.
+  const packModuleCount =
+    (packs.data ?? []).find((p) => p.code === st?.packCode)?.seatTokens ?? 0;
   const seats = seatDraft !== '' ? seatDraft : String(st?.packSeats || 1);
 
   return (
@@ -619,7 +644,10 @@ function TabModules() {
         {st?.packCode ? (
           <p style={{ marginTop: 0 }}>
             <strong>{st.packLabel}</strong>{' '}
-            <span className="muted">· {st.packSeats} jeton{st.packSeats > 1 ? 's' : ''}</span>
+            <span className="muted">
+              · {st.packSeats} siège{st.packSeats > 1 ? 's' : ''}
+              {packModuleCount > 0 && ` × ${packModuleCount} jetons = ${st.packSeats * packModuleCount} jetons`}
+            </span>
           </p>
         ) : (
           <p className="muted" style={{ marginTop: 0 }}>
@@ -660,13 +688,22 @@ function TabModules() {
         </div>
 
         <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
-          <label>Nombre de jetons du palier</label>
+          <label>Nombre de sièges</label>
           <input
             type="number" min={1} value={seats}
-            aria-label="Jetons du palier"
+            aria-label="Sièges du palier"
             onChange={(e) => setSeatDraft(e.target.value)}
             style={{ width: 90, textAlign: 'right' }}
           />
+          {/* Le prix est au siège, mais un siège ouvre autant de jetons que le palier a de
+              modules : sans cette phrase, « 5 » se lit « 5 accès » alors qu'il en donne 5 × M. */}
+          {packModuleCount > 0 && (
+            <span className="muted" style={{ fontSize: 11 }}>
+              Chaque siège ouvre {packModuleCount} jetons, à répartir librement entre vos
+              collaborateurs et vos modules — soit{' '}
+              {Math.max(1, Number(seats) || 1) * packModuleCount} jetons au total.
+            </span>
+          )}
         </div>
       </div>
 

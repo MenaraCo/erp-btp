@@ -11,8 +11,10 @@ import { CatalogService } from '../catalog/catalog.service';
 
 /** État du pool de jetons d'une société : ce qui est acheté, posé, et ce qu'il reste. */
 export interface SeatPool {
-  /** Jetons du palier = sièges achetés × nombre de modules du palier (Socle compris). */
+  /** Jetons du palier = sièges achetés × jetons par siège. */
   total: number;
+  /** Jetons ouverts par siège : réglé par l'éditeur, à défaut le nombre de modules du palier. */
+  tokensPerSeat: number;
   /** Jetons déjà posés sur les modules du palier, tous modules confondus. */
   used: number;
   remaining: number;
@@ -208,10 +210,10 @@ export class EntitlementsService {
     )[0] as { pack_code: string | null; pack_seats: number | null } | undefined;
 
     if (!sub?.pack_code) {
-      return { total: 0, used: 0, remaining: 0, packModules: [] };
+      return { total: 0, tokensPerSeat: 0, used: 0, remaining: 0, packModules: [] };
     }
     const rows = await em.query(
-      `SELECT m.code FROM pack p
+      `SELECT m.code, p.seat_tokens FROM pack p
          JOIN pack_module pm ON pm.pack_id = p.id
          JOIN module m ON m.id = pm.module_id
         WHERE p.code = $1`,
@@ -219,7 +221,12 @@ export class EntitlementsService {
     );
     const packModules = rows.map((r) => r.code as string);
     const seats = Number(sub.pack_seats ?? 0);
-    const total = seats * packModules.length;
+    // L'éditeur peut fixer les jetons par siège ; sans réglage, un siège ouvre un jeton par
+    // module du palier — la valeur qui préserve exactement la valeur vendue.
+    const configured = rows[0]?.seat_tokens as number | null | undefined;
+    const tokensPerSeat =
+      configured === null || configured === undefined ? packModules.length : Number(configured);
+    const total = seats * tokensPerSeat;
 
     const used = packModules.length
       ? Number(
@@ -232,7 +239,7 @@ export class EntitlementsService {
         )
       : 0;
 
-    return { total, used, remaining: Math.max(0, total - used), packModules };
+    return { total, tokensPerSeat, used, remaining: Math.max(0, total - used), packModules };
   }
 
   /** État du pool de jetons de la société — ce que l'écran d'abonnement affiche. */

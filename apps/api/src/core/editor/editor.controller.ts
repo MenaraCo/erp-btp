@@ -38,6 +38,8 @@ interface CatalogPackInput {
   priceMonthly?: number | null;
   label?: string;
   active?: boolean;
+  /** Jetons ouverts par siège ; `null` = défaut (un jeton par module du palier). */
+  seatTokens?: number | null;
 }
 interface TenantPromoInput {
   code?: string | null;

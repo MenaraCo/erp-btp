@@ -24,6 +24,8 @@ interface CatalogPack {
   label: string;
   tierLevel: number;
   priceMonthly: number | null;
+  /** Jetons ouverts par siège, réglés par l'éditeur. */
+  seatTokens: number;
   modules: string[];
   description: string | null;
 }
@@ -392,15 +394,24 @@ export default function InscriptionPage() {
                 </div>
 
                 <div className="field" style={{ marginTop: 10, marginBottom: 0 }}>
-                  <label>Nombre d’utilisateurs (jetons)</label>
+                  <label>Nombre de sièges</label>
                   <input
                     type="number"
                     min={1}
                     value={packSeats}
-                    aria-label="Jetons du palier"
+                    aria-label="Sièges du palier"
                     onChange={(e) => setPackSeats(Math.max(1, Number(e.target.value) || 1))}
                     style={{ width: 80, textAlign: 'right' }}
                   />
+                  {/* Un siège ouvre un jeton par module du palier : on l'annonce à l'achat, pas
+                      après. Le client sait ainsi combien d'accès il achète réellement. */}
+                  {selectedPack && selectedPack.seatTokens > 0 && (
+                    <span className="muted" style={{ fontSize: 11 }}>
+                      Chaque siège ouvre {selectedPack.seatTokens} jetons, à répartir librement
+                      entre vos collaborateurs et vos modules — soit{' '}
+                      {packSeats * selectedPack.seatTokens} jetons au total.
+                    </span>
+                  )}
                 </div>
 
                 {/* Options à la carte, conditionnées au palier choisi */}

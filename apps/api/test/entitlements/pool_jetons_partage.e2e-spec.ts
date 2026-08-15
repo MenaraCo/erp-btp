@@ -123,6 +123,23 @@ describe('Jetons — pool partagé entre tous les modules du palier', () => {
     expect(pool.total).toBe(15);
   });
 
+  it('l’éditeur peut régler les jetons par siège d’un palier', async () => {
+    // Levier commercial : rendre un palier plus généreux sans toucher au code.
+    const t = await createTenant(ds, 'PoolReglable');
+    await souscrirePalier(t.id, 'essentiel', 2); // 2 modules → 4 jetons par défaut
+    expect((await service.getSeatPool(t.id)).total).toBe(4);
+    expect((await service.getSeatPool(t.id)).tokensPerSeat).toBe(2);
+
+    await ds.query(`UPDATE pack SET seat_tokens = 5 WHERE code = 'essentiel'`);
+    const regle = await service.getSeatPool(t.id);
+    expect(regle.tokensPerSeat).toBe(5);
+    expect(regle.total).toBe(10); // 2 sièges × 5
+
+    // Vider le réglage revient au défaut (un jeton par module).
+    await ds.query(`UPDATE pack SET seat_tokens = NULL WHERE code = 'essentiel'`);
+    expect((await service.getSeatPool(t.id)).total).toBe(4);
+  });
+
   it('une option (add-on) garde ses propres jetons, hors du pool du palier', async () => {
     const t = await createTenant(ds, 'PoolAddon');
     await souscrirePalier(t.id, 'pro_chantier', 1); // pool de 4
