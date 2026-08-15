@@ -76,6 +76,8 @@ export default function InscriptionPage() {
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'yearly'>('monthly');
   const [promoCode, setPromoCode] = useState('');
   const [annualDiscountPct, setAnnualDiscountPct] = useState(10);
+  // Durée d'essai réglée par l'éditeur : la page l'annonce, au lieu d'un « 30 jours » figé.
+  const [trialDays, setTrialDays] = useState(30);
   // Remise du code promo validée par le serveur, pour afficher le montant réellement dû.
   const [promo, setPromo] = useState<
     {
@@ -102,8 +104,11 @@ export default function InscriptionPage() {
         setPackCode((cur) => cur || p[0]?.code || '');
       })
       .catch(() => setPacks([]));
-    apiFetch<{ annualDiscountPct: number }>('/public/catalog/pricing')
-      .then((p) => setAnnualDiscountPct(p.annualDiscountPct))
+    apiFetch<{ annualDiscountPct: number; trialDays: number }>('/public/catalog/pricing')
+      .then((p) => {
+        setAnnualDiscountPct(p.annualDiscountPct);
+        if (p.trialDays > 0) setTrialDays(p.trialDays);
+      })
       .catch(() => undefined);
   }, []);
 
@@ -329,7 +334,7 @@ export default function InscriptionPage() {
             <DoorCard
               icon={<Gift size={22} />}
               title="Essayer gratuitement"
-              subtitle="30 jours"
+              subtitle={`${trialDays} jours`}
               points={[
                 'Accès à TOUS les modules',
                 'Aucun engagement',
@@ -364,7 +369,7 @@ export default function InscriptionPage() {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
               {door === 'trial'
-                ? <span className="badge info">Essai gratuit 30 j</span>
+                ? <span className="badge info">Essai gratuit {trialDays} j</span>
                 : <span className="badge success">Abonnement direct</span>}
             </div>
 

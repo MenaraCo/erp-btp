@@ -5,10 +5,10 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
+import { PricingService } from '../pricing/pricing.service';
 import { runInTenant } from '../tenancy/tenant-transaction';
 import { returningRows } from '../database/returning.util';
 import {
-  TRIAL_DAYS,
   TRIAL_QUOTAS,
   TRIAL_SEATS_PER_MODULE,
   SubscriptionStatus,
@@ -38,7 +38,10 @@ export interface SubscribedModuleRow {
  */
 @Injectable()
 export class SubscriptionService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly pricing: PricingService,
+  ) {}
 
   getSubscription(tenantId: string): Promise<SubscriptionRow | null> {
     return runInTenant(this.dataSource, tenantId, async (em) => {
@@ -138,8 +141,13 @@ export class SubscriptionService {
     });
   }
 
-  /** Starts the 30-day trial: subscription `trialing`, all modules active with bounded seats. */
-  startTrial(tenantId: string): Promise<void> {
+  /**
+   * Démarre l'essai gratuit : souscription `trialing`, tous les modules ouverts avec un nombre de
+   * jetons borné. La DURÉE est un réglage de l'éditeur (30 jours par défaut) : on la lit à chaque
+   * démarrage, pour qu'une campagne plus généreuse s'applique sans redéploiement.
+   */
+  async startTrial(tenantId: string): Promise<void> {
+    const trialDays = await this.pricing.getTrialDays();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const existing = await em.query(
         `SELECT id FROM subscription WHERE tenant_id = $1`,
@@ -153,7 +161,7 @@ export class SubscriptionService {
         `INSERT INTO subscription (tenant_id, status, trial_ends_at)
          VALUES ($1, 'trialing', now() + ($2 || ' days')::interval)
          RETURNING id`,
-        [tenantId, String(TRIAL_DAYS)],
+        [tenantId, String(trialDays)],
       );
       const subscriptionId = sub[0].id;
 

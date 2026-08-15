@@ -215,4 +215,10 @@ export class EditorController {
   setPricingSettings(@Body() body: AnnualDiscountInput) {
     return this.editor.setAnnualDiscountPct(Number(body?.annualDiscountPct));
   }
+
+  /** Durée de l'essai gratuit (jours) — s'applique aux inscriptions suivantes. */
+  @Post('trial-settings')
+  setTrialSettings(@Body() body: { trialDays?: number }) {
+    return this.editor.setTrialDays(Number(body?.trialDays));
+  }
 }

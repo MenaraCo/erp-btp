@@ -30,7 +30,11 @@ export class PublicCatalogController {
   /** Conditions tarifaires publiques (remise d'engagement annuel), pour la page d'inscription. */
   @Get('pricing')
   async pricing_() {
-    return { annualDiscountPct: await this.pricing.getAnnualDiscountPct() };
+    return {
+      annualDiscountPct: await this.pricing.getAnnualDiscountPct(),
+      // La page d'inscription annonce la durée réelle, et non un « 30 jours » figé dans le code.
+      trialDays: await this.pricing.getTrialDays(),
+    };
   }
 
   /**

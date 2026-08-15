@@ -263,6 +263,7 @@ function EditorConsole({ token, onLogout }: { token: string; onLogout: () => voi
             </div>
             <PackEditor token={token} onChanged={refresh} />
             <CatalogEditor token={token} onChanged={refresh} />
+            <ReglagesCommerciaux token={token} onChanged={refresh} />
             <PromoCodesEditor token={token} onChanged={refresh} />
           </>
         ) : (
@@ -558,6 +559,85 @@ function CatalogRow({
         <span className={`badge ${m.active ? 'success' : 'warning'}`}>{m.active ? 'oui' : 'non'}</span>
       </Td>
     </tr>
+  );
+}
+
+/* ─────────── réglages commerciaux (essai, remise d'engagement) ─────────── */
+function ReglagesCommerciaux({ token, onChanged }: { token: string; onChanged: () => void }) {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [jours, setJours] = useState('');
+  const [remise, setRemise] = useState('');
+
+  const reglages = useQuery({
+    queryKey: ['editor-pricing-settings'],
+    queryFn: () => apiFetch<{ annualDiscountPct: number; trialDays: number }>(
+      '/editor/pricing-settings', { token },
+    ),
+    retry: false,
+  });
+
+  // Valeurs servies par l'API tant que l'éditeur n'a rien tapé.
+  const joursAff = jours !== '' ? jours : String(reglages.data?.trialDays ?? '');
+  const remiseAff = remise !== '' ? remise : String(reglages.data?.annualDiscountPct ?? '');
+
+  async function enregistrer(chemin: string, body: Record<string, number>) {
+    setErr(null);
+    setBusy(true);
+    try {
+      await apiFetch(`/editor/${chemin}`, { method: 'POST', token, body });
+      await qc.invalidateQueries({ queryKey: ['editor-pricing-settings'] });
+      setJours(''); setRemise('');
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Enregistrement impossible');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, marginTop: 20 }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #334155' }}>
+        <div style={{ color: '#fff', fontWeight: 600 }}>Réglages commerciaux</div>
+        <div style={{ color: '#64748b', fontSize: 11 }}>
+          Durée de l’essai gratuit et remise d’engagement annuel. La durée s’applique aux
+          inscriptions SUIVANTES : les essais déjà ouverts gardent leur échéance.
+        </div>
+      </div>
+      {err && <div className="error" style={{ margin: 12 }}>{err}</div>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end', padding: 12 }}>
+        <FieldSm label="Essai gratuit (jours)">
+          <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            <input
+              value={joursAff}
+              onChange={(e) => setJours(e.target.value)}
+              aria-label="Durée de l’essai gratuit en jours"
+              style={{ ...darkInput, width: 70, textAlign: 'right' }}
+            />
+            <ActionBtn accent title="Enregistrer la durée d’essai" disabled={busy || jours === ''}
+              onClick={() => enregistrer('trial-settings', { trialDays: Number(jours) })}>
+              {busy ? '…' : 'OK'}
+            </ActionBtn>
+          </div>
+        </FieldSm>
+        <FieldSm label="Remise engagement annuel (%)">
+          <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            <input
+              value={remiseAff}
+              onChange={(e) => setRemise(e.target.value)}
+              aria-label="Remise d’engagement annuel en pourcentage"
+              style={{ ...darkInput, width: 70, textAlign: 'right' }}
+            />
+            <ActionBtn accent title="Enregistrer la remise" disabled={busy || remise === ''}
+              onClick={() => enregistrer('pricing-settings', { annualDiscountPct: Number(remise) })}>
+              {busy ? '…' : 'OK'}
+            </ActionBtn>
+          </div>
+        </FieldSm>
+      </div>
+    </div>
   );
 }
 

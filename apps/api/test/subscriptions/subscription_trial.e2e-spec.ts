@@ -10,6 +10,7 @@ import { EntitlementsService } from '../../src/core/entitlements/entitlements.se
 import { SubscriptionsModule } from '../../src/core/subscriptions/subscriptions.module';
 import { SubscriptionService } from '../../src/core/subscriptions/subscription.service';
 import { MODULES } from '../../src/core/catalog/catalog.config';
+import { PricingService } from '../../src/core/pricing/pricing.service';
 import { createTestDataSource, createTenant } from '../support/datasource';
 
 describe('Souscription — essai 30 jours, tous les modules', () => {
@@ -54,6 +55,29 @@ describe('Souscription — essai 30 jours, tous les modules', () => {
 
     const active = await entitlements.getActiveModuleCodes(tenant.id);
     expect(active.sort()).toEqual(MODULES.map((m) => m.code).sort());
+  });
+
+  it('la durée de l’essai suit le réglage de l’éditeur', async () => {
+    // Levier commercial : allonger l'essai pour une campagne, sans redéploiement.
+    const pricing = app.get(PricingService);
+    await pricing.setTrialDays(45);
+    try {
+      const tenant = await createTenant(ds, 'TrialRegle');
+      await subscriptions.startTrial(tenant.id);
+      const sub = await subscriptions.getSubscription(tenant.id);
+      const days = (new Date(sub!.trialEndsAt!).getTime() - Date.now()) / 86_400_000;
+      expect(days).toBeGreaterThan(44);
+      expect(days).toBeLessThan(46);
+    } finally {
+      // On rend la valeur par défaut aux autres tests.
+      await pricing.setTrialDays(30);
+    }
+  });
+
+  it('refuse une durée d’essai aberrante', async () => {
+    const pricing = app.get(PricingService);
+    await expect(pricing.setTrialDays(0)).rejects.toThrow(/1 et 365/);
+    await expect(pricing.setTrialDays(400)).rejects.toThrow(/1 et 365/);
   });
 
   it('démarrer l’essai deux fois est refusé', async () => {

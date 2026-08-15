@@ -12,8 +12,9 @@ import {
   type PricingResult,
 } from './pricing.calc';
 
-/** Valeur de repli si le réglage n'a pas encore été écrit en base. */
+/** Valeurs de repli si le réglage n'a pas encore été écrit en base. */
 const DEFAULT_ANNUAL_DISCOUNT_PCT = 10;
+const DEFAULT_TRIAL_DAYS = 30;
 
 export interface PlatformSetting {
   key: string;
@@ -38,6 +39,35 @@ export class PricingService {
     );
     const v = Number(rows[0]?.value);
     return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : DEFAULT_ANNUAL_DISCOUNT_PCT;
+  }
+
+  /**
+   * Durée de l'essai gratuit, en jours — réglable par l'éditeur.
+   *
+   * Vit ici parce que `platform_setting` est la table des réglages globaux de l'éditeur, dont ce
+   * service est l'unique accesseur. C'est un levier commercial : allonger l'essai pour une
+   * campagne ne doit pas demander un déploiement.
+   */
+  async getTrialDays(): Promise<number> {
+    const rows: Array<{ value: string }> = await this.dataSource.query(
+      `SELECT value FROM platform_setting WHERE key = 'trial_days'`,
+    );
+    const v = Math.trunc(Number(rows[0]?.value));
+    return Number.isFinite(v) && v >= 1 ? Math.min(365, v) : DEFAULT_TRIAL_DAYS;
+  }
+
+  async setTrialDays(days: number): Promise<number> {
+    const v = Math.trunc(Number(days));
+    if (!Number.isFinite(v) || v < 1 || v > 365) {
+      throw new BadRequestException('La durée d’essai doit être comprise entre 1 et 365 jours');
+    }
+    await this.dataSource.query(
+      `INSERT INTO platform_setting (key, value, label)
+       VALUES ('trial_days', $1, 'Durée de l''essai gratuit (jours)')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [String(v)],
+    );
+    return v;
   }
 
   async setAnnualDiscountPct(pct: number): Promise<number> {

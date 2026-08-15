@@ -666,9 +666,17 @@ export class EditorService {
     return this.readTenantRow(base);
   }
 
-  /** Réglages tarifaires globaux (dont la remise d'engagement annuel). */
-  async getPricingSettings(): Promise<{ annualDiscountPct: number }> {
-    return { annualDiscountPct: await this.pricing.getAnnualDiscountPct() };
+  /** Réglages commerciaux globaux : remise d'engagement annuel et durée de l'essai gratuit. */
+  async getPricingSettings(): Promise<{ annualDiscountPct: number; trialDays: number }> {
+    return {
+      annualDiscountPct: await this.pricing.getAnnualDiscountPct(),
+      trialDays: await this.pricing.getTrialDays(),
+    };
+  }
+
+  /** Durée de l'essai gratuit, en jours — levier commercial de l'éditeur. */
+  async setTrialDays(days: number): Promise<{ trialDays: number }> {
+    return { trialDays: await this.pricing.setTrialDays(days) };
   }
 
   async setAnnualDiscountPct(pct: number): Promise<{ annualDiscountPct: number }> {
