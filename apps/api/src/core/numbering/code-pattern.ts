@@ -16,7 +16,8 @@ export type NumberedEntity =
   | 'supplier'
   | 'affaire'
   | 'chantier'
-  | 'marche';
+  | 'marche'
+  | 'employee';
 
 export const NUMBERED_ENTITIES: NumberedEntity[] = [
   'client',
@@ -24,6 +25,7 @@ export const NUMBERED_ENTITIES: NumberedEntity[] = [
   'affaire',
   'chantier',
   'marche',
+  'employee',
 ];
 
 /** Motif par défaut + libellé lisible, appliqués à toute société sans réglage propre. */
@@ -33,6 +35,7 @@ export const NUMBERING_DEFAULTS: Record<NumberedEntity, { label: string; pattern
   affaire: { label: 'Affaire', pattern: 'AFF-{YYYY}-{SEQ:4}' },
   chantier: { label: 'Chantier', pattern: 'CH-{YYYY}-{SEQ:4}' },
   marche: { label: 'Marché', pattern: 'MAR-{YYYY}-{SEQ:4}' },
+  employee: { label: 'Salarié', pattern: 'SAL-{SEQ:4}' },
 };
 
 const SEQ_TOKEN = /\{SEQ(?::(\d+))?\}/;

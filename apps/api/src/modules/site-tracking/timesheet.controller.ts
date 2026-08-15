@@ -11,8 +11,9 @@ export class TimesheetController {
   @RequiresCapability('site_tracking.timesheet')
   @RequiresPermission('site_tracking.write')
   create(@Param('chantierId') chantierId: string, @Body() body: TimesheetInput) {
-    if (!body?.employee || !body?.date || body?.hours == null) {
-      throw new BadRequestException('employee, date and hours are required');
+    // Un salarié du fichier OU un nom saisi : l'un des deux suffit, mais pas aucun.
+    if ((!body?.employeeId && !body?.employee) || !body?.date || body?.hours == null) {
+      throw new BadRequestException('Le salarié, la date et les heures sont requis.');
     }
     return this.timesheets.create(chantierId, body);
   }

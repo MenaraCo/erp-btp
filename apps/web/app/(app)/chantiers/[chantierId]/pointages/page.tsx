@@ -16,6 +16,13 @@ interface TimesheetEntry {
   hourly_cost: string;
   cost: string;
 }
+interface Employee {
+  id: string;
+  code: string;
+  fullName: string;
+  jobTitle: string | null;
+  hourlyCost: string;
+}
 interface TimesheetSummary {
   totalCost: string;
   totalHours: string;
@@ -27,6 +34,9 @@ export default function PointagesPage() {
   const qc = useQueryClient();
   const chantierId = String(useParams().chantierId);
 
+  // Salarié choisi dans le fichier : son coût horaire est repris, mais reste forçable
+  // (heure de nuit, intérim facturé autrement).
+  const [employeeId, setEmployeeId] = useState('');
   const [employee, setEmployee] = useState('');
   const [date, setDate] = useState('');
   const [hours, setHours] = useState('');
@@ -37,6 +47,12 @@ export default function PointagesPage() {
     queryKey: ['chantier', chantierId],
     enabled: Boolean(token),
     queryFn: () => apiFetch<{ code: string }>(`/chantiers/${chantierId}`, { token }),
+  });
+  // Fichier des salariés : la saisie s'appuie dessus plutôt que sur un nom retapé chaque fois.
+  const salaries = useQuery({
+    queryKey: ['employees'],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<Employee[]>('/employees', { token }),
   });
   const list = useQuery({
     queryKey: ['timesheets', chantierId],
@@ -56,7 +72,9 @@ export default function PointagesPage() {
       apiFetch(`/chantiers/${chantierId}/timesheets`, {
         method: 'POST',
         token,
-        body: { employee, date, hours, hourlyCost },
+        body: employeeId
+          ? { employeeId, date, hours, hourlyCost: hourlyCost || undefined }
+          : { employee, date, hours, hourlyCost },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['timesheets', chantierId] });
@@ -94,7 +112,7 @@ export default function PointagesPage() {
           onSubmit={(e) => {
             e.preventDefault();
             setErr(null);
-            if (!employee.trim() || !date || !hours || !hourlyCost) {
+            if ((!employeeId && !employee.trim()) || !date || !hours || (!employeeId && !hourlyCost)) {
               setErr('Renseignez le salarié/équipe, la date, les heures et le coût horaire.');
               return;
             }
@@ -103,7 +121,28 @@ export default function PointagesPage() {
         >
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>Salarié / équipe</label>
+              <label>Salarié</label>
+              <select
+                value={employeeId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setEmployeeId(id);
+                  // Le coût horaire de la fiche s'affiche d'emblée : on voit ce qui sera compté.
+                  const emp = (salaries.data ?? []).find((x) => x.id === id);
+                  if (emp) setHourlyCost(String(Number(emp.hourlyCost)));
+                }}
+                style={{ width: 200 }}
+              >
+                <option value="">— Nom libre (intérim de passage) —</option>
+                {(salaries.data ?? []).map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.fullName}{e.jobTitle ? ` · ${e.jobTitle}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 0, display: employeeId ? 'none' : undefined }}>
+              <label>Nom saisi</label>
               <input value={employee} onChange={(e) => setEmployee(e.target.value)} placeholder="Équipe maçonnerie" style={{ width: 200 }} />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>

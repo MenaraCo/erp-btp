@@ -28,6 +28,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/acceptation': ClipboardCheck,
   '/direction': Gauge,
   '/chantiers': Building2,
+  '/chantiers/salaries': Users,
   '/chantiers/bibliotheque': BookOpen,
   '/invoicing': Receipt,
   '/estimating/parametres': Settings,

@@ -72,7 +72,7 @@ export interface ContextGroup {
 export function contextualGroup(pathname: string): ContextGroup | null {
   // Chantier ouvert : chaque entrée est un écran à part entière.
   const chantier = /^\/chantiers\/([^/]+)/.exec(pathname);
-  if (chantier && !['bibliotheque', 'parametres'].includes(chantier[1])) {
+  if (chantier && !['bibliotheque', 'parametres', 'salaries'].includes(chantier[1])) {
     const id = chantier[1];
     return {
       title: 'Chantier ouvert',
@@ -146,6 +146,7 @@ export const MODULES: AppModule[] = [
     capabilities: ['site_tracking.budget', 'site_tracking.timesheet'],
     features: [
       { href: '/chantiers', label: 'Chantiers' },
+      { href: '/chantiers/salaries', label: 'Salariés' },
       { href: '/chantiers/bibliotheque', label: 'Bibliothèque chantier' },
       { href: '/chantiers/parametres', label: 'Paramètres' },
     ],
