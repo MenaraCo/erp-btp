@@ -62,6 +62,9 @@ export class TimesheetService {
       // Salarié du fichier : son nom et son coût horaire viennent de la fiche, pour qu'une heure
       // pointée coûte le même prix partout. Le coût reste forçable ligne à ligne (heure de nuit,
       // intérim facturé autrement) — sinon on empêcherait de saisir la réalité.
+      // Poste analytique : celui de la ligne s'il est donné, sinon celui de la fiche salarié.
+      // Sans ce report, les heures tombaient hors analytique et les résultats par code étaient faux.
+      let codeAnalytiqueId = input.codeAnalytiqueId ?? null;
       let libelle = (input.employee ?? '').trim();
       let coutHoraire = input.hourlyCost === undefined || input.hourlyCost === null
         ? null
@@ -69,7 +72,7 @@ export class TimesheetService {
       if (input.employeeId) {
         const fiche = (
           await em.query(
-            `SELECT first_name, last_name, hourly_cost FROM employee
+            `SELECT first_name, last_name, hourly_cost, code_analytique_id FROM employee
               WHERE id = $1 AND deleted_at IS NULL`,
             [input.employeeId],
           )
@@ -77,6 +80,7 @@ export class TimesheetService {
         if (!fiche) throw new NotFoundException('Salarié introuvable');
         libelle = [fiche.first_name, fiche.last_name].filter(Boolean).join(' ');
         if (coutHoraire === null) coutHoraire = new Decimal(fiche.hourly_cost);
+        if (!codeAnalytiqueId) codeAnalytiqueId = fiche.code_analytique_id ?? null;
       }
       if (!libelle) {
         throw new BadRequestException('Choisissez un salarié, ou saisissez un nom.');
@@ -103,7 +107,7 @@ export class TimesheetService {
             hours.toString(),
             hourlyCost.toString(),
             cost.toString(),
-            input.codeAnalytiqueId ?? null,
+            codeAnalytiqueId,
           ],
         )
       )[0];

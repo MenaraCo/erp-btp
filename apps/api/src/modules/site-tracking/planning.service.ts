@@ -251,7 +251,7 @@ export class PlanningService {
       for (const p of prevus) {
         const fiche = (
           await em.query(
-            `SELECT first_name, last_name, hourly_cost FROM employee WHERE id = $1`,
+            `SELECT first_name, last_name, hourly_cost, code_analytique_id FROM employee WHERE id = $1`,
             [p.employee_id],
           )
         )[0];
@@ -260,8 +260,9 @@ export class PlanningService {
         const cout = heures.times(fiche.hourly_cost).toDecimalPlaces(2);
         await em.query(
           `INSERT INTO timesheet
-             (tenant_id, chantier_id, employee_id, employee_label, work_date, hours, hourly_cost, cost)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+             (tenant_id, chantier_id, employee_id, employee_label, work_date, hours, hourly_cost,
+              cost, code_analytique_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [
             tenantId,
             chantierId,
@@ -271,6 +272,7 @@ export class PlanningService {
             heures.toString(),
             String(fiche.hourly_cost),
             cout.toString(),
+            fiche.code_analytique_id ?? null,
           ],
         );
         crees += 1;
@@ -332,9 +334,13 @@ export class PlanningService {
       }
       await em.query(
         `INSERT INTO timesheet
-           (tenant_id, chantier_id, employee_id, employee_label, work_date, hours, hourly_cost, cost)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [tenantId, chantierId, employeeId, libelle, date, h.toString(), String(fiche.hourly_cost), cout.toString()],
+           (tenant_id, chantier_id, employee_id, employee_label, work_date, hours, hourly_cost,
+            cost, code_analytique_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          tenantId, chantierId, employeeId, libelle, date, h.toString(),
+          String(fiche.hourly_cost), cout.toString(), fiche.code_analytique_id ?? null,
+        ],
       );
       return { employeeId, date, hours: h.toString() };
     });
@@ -346,11 +352,14 @@ export class PlanningService {
   ) {
     const fiche = (
       await em.query(
-        `SELECT first_name, last_name, hourly_cost FROM employee
+        `SELECT first_name, last_name, hourly_cost, code_analytique_id FROM employee
           WHERE id = $1 AND deleted_at IS NULL`,
         [employeeId],
       )
-    )[0] as { first_name: string | null; last_name: string; hourly_cost: string } | undefined;
+    )[0] as {
+      first_name: string | null; last_name: string; hourly_cost: string;
+      code_analytique_id: string | null;
+    } | undefined;
     if (!fiche) throw new NotFoundException('Salarié introuvable');
     return fiche;
   }

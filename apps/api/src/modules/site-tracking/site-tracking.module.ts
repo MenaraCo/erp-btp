@@ -6,6 +6,8 @@ import { ChantierService } from './chantier.service';
 import { ChantierController } from './chantier.controller';
 import { EmployeeService } from './employee.service';
 import { PlanningService } from './planning.service';
+import { PersonnelService } from './personnel.service';
+import { PersonnelController } from './personnel.controller';
 import { PlanningController } from './planning.controller';
 import { EmployeeController } from './employee.controller';
 import { TimesheetService } from './timesheet.service';
@@ -25,18 +27,21 @@ import { AnalyticsController } from './analytics.controller';
   imports: [TenancyModule, NumberingModule, EstimatingModule],
   providers: [ChantierService, TimesheetService,
     EmployeeService,
-    PlanningService, PurchasingService, AnalyticsService, LibraryTransferService],
+    PlanningService,
+    PersonnelService, PurchasingService, AnalyticsService, LibraryTransferService],
   controllers: [
     ChantierController,
     TimesheetController,
     EmployeeController,
     PlanningController,
+    PersonnelController,
     PurchasingController,
     AnalyticsController,
     LibraryTransferController,
   ],
   exports: [ChantierService, TimesheetService,
     EmployeeService,
-    PlanningService, PurchasingService, AnalyticsService],
+    PlanningService,
+    PersonnelService, PurchasingService, AnalyticsService],
 })
 export class SiteTrackingModule {}
