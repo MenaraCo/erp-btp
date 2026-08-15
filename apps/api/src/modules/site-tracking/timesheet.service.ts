@@ -17,6 +17,9 @@ export interface TimesheetInput {
   employeeId?: string | null;
   /** Nom saisi à la main — accepté quand aucune fiche n'existe encore (intérim de passage). */
   employee?: string;
+  /** Créneau facultatif « HH:MM ». Fourni, il rend le chevauchement détectable à l'heure près. */
+  startTime?: string | null;
+  endTime?: string | null;
   date: string;
   hours: string | number;
   hourlyCost: string | number;
@@ -33,7 +36,11 @@ export class TimesheetService {
 
   create(chantierId: string, input: TimesheetInput) {
     const tenantId = this.context.requireTenantId();
-    const hours = new Decimal(input.hours ?? 0);
+    const creneau = normaliserCreneau(input.startTime, input.endTime);
+    // Un créneau saisi vaut mieux qu'un nombre d'heures retapé : on en déduit la durée.
+    const hours = creneau && (input.hours === undefined || input.hours === null)
+      ? dureeDuCreneau(creneau)
+      : new Decimal(input.hours ?? 0);
     if (hours.isNegative()) {
       throw new BadRequestException('hours must be >= 0');
     }
@@ -95,8 +102,8 @@ export class TimesheetService {
         await em.query(
           `INSERT INTO timesheet
              (tenant_id, chantier_id, execution_line_id, employee_id, employee_label, work_date,
-              hours, hourly_cost, cost, code_analytique_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+              hours, hourly_cost, cost, code_analytique_id, start_time, end_time)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
           [
             tenantId,
             chantierId,
@@ -108,6 +115,8 @@ export class TimesheetService {
             hourlyCost.toString(),
             cost.toString(),
             codeAnalytiqueId,
+            creneau?.debut ?? null,
+            creneau?.fin ?? null,
           ],
         )
       )[0];
@@ -378,4 +387,32 @@ function bornesDuMois(mois: string): { debut: string; fin: string } {
   const [a, m] = mois.split('-').map(Number);
   const dernier = new Date(Date.UTC(a, m, 0)).getUTCDate();
   return { debut: `${mois}-01`, fin: `${mois}-${String(dernier).padStart(2, '0')}` };
+}
+
+const HEURE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** Valide un créneau « HH:MM ». Les deux bornes vont ensemble, ou aucune. */
+export function normaliserCreneau(
+  debut: string | null | undefined,
+  fin: string | null | undefined,
+): { debut: string; fin: string } | null {
+  const d = (debut ?? '').trim();
+  const f = (fin ?? '').trim();
+  if (!d && !f) return null;
+  if (!d || !f) {
+    throw new BadRequestException('Un créneau demande une heure de début ET une heure de fin.');
+  }
+  if (!HEURE.test(d) || !HEURE.test(f)) {
+    throw new BadRequestException('Heures attendues au format HH:MM.');
+  }
+  if (f <= d) {
+    throw new BadRequestException('L’heure de fin doit suivre l’heure de début.');
+  }
+  return { debut: d, fin: f };
+}
+
+/** Durée d'un créneau, en heures décimales (08:00–12:30 → 4,5). */
+export function dureeDuCreneau(creneau: { debut: string; fin: string }): Decimal {
+  const minutes = (h: string) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
+  return new Decimal(minutes(creneau.fin) - minutes(creneau.debut)).dividedBy(60).toDecimalPlaces(2);
 }

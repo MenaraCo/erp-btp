@@ -15,7 +15,10 @@ export interface FiltrePersonnel {
 
 export interface OccupationJour {
   date: string;
-  chantiers: Array<{ chantierId: string; code: string; nom: string; heures: string; prevu: boolean }>;
+  chantiers: Array<{
+    chantierId: string; code: string; nom: string; heures: string; prevu: boolean;
+    debut?: string | null; fin?: string | null;
+  }>;
   totalHeures: string;
   /** Journée à regarder : cumul anormal, ou présence sur plusieurs chantiers. */
   conflits: string[];
@@ -73,12 +76,15 @@ export class PersonnelService {
         employee_id: string; label: string; contract_type: string; agency: string | null;
         code_analytique: string | null; chantier_id: string; chantier_code: string;
         chantier_nom: string; work_date: string; heures: string; prevu: boolean;
+        debut: string | null; fin: string | null;
       }> = await em.query(
         `SELECT e.id AS employee_id,
                 trim(coalesce(e.first_name, '') || ' ' || e.last_name) AS label,
                 e.contract_type, e.agency, a.code AS code_analytique,
                 c.id AS chantier_id, c.code AS chantier_code, c.name AS chantier_nom,
-                t.work_date::text AS work_date, SUM(t.hours)::text AS heures, false AS prevu
+                t.work_date::text AS work_date, SUM(t.hours)::text AS heures, false AS prevu,
+                to_char(MIN(t.start_time), 'HH24:MI') AS debut,
+                to_char(MAX(t.end_time), 'HH24:MI') AS fin
            FROM timesheet t
            JOIN employee e ON e.id = t.employee_id
            JOIN chantier c ON c.id = t.chantier_id
@@ -88,7 +94,8 @@ export class PersonnelService {
          UNION ALL
          SELECT e.id, trim(coalesce(e.first_name, '') || ' ' || e.last_name),
                 e.contract_type, e.agency, a.code,
-                c.id, c.code, c.name, f.work_date::text, SUM(f.hours)::text, true
+                c.id, c.code, c.name, f.work_date::text, SUM(f.hours)::text, true,
+                to_char(MIN(f.start_time), 'HH24:MI'), to_char(MAX(f.end_time), 'HH24:MI')
            FROM timesheet_forecast f
            JOIN employee e ON e.id = f.employee_id
            JOIN chantier c ON c.id = f.chantier_id
@@ -120,6 +127,8 @@ export class PersonnelService {
           nom: l.chantier_nom,
           heures: new Decimal(l.heures).toString(),
           prevu: l.prevu,
+          debut: l.debut,
+          fin: l.fin,
         });
         if (l.prevu) {
           s.totalPrevu = new Decimal(s.totalPrevu).plus(l.heures).toString();
@@ -136,9 +145,24 @@ export class PersonnelService {
           const reels = jour.chantiers.filter((c) => !c.prevu);
           const chantiersDistincts = new Set(reels.map((c) => c.chantierId));
           if (chantiersDistincts.size > 1) {
-            jour.conflits.push(
-              `Pointé sur ${chantiersDistincts.size} chantiers le même jour : ${reels.map((c) => c.code).join(', ')}`,
+            // Quand les horaires sont connus, on ne crie que s'il y a VRAIMENT chevauchement :
+            // le matin sur un chantier et l'après-midi sur un autre est parfaitement normal.
+            const avecHoraire = reels.filter((c) => c.debut && c.fin);
+            const chevauchements = paires(avecHoraire).filter(
+              ([a, b]) => a.debut! < b.fin! && b.debut! < a.fin!,
             );
+            if (avecHoraire.length === reels.length && chevauchements.length === 0) {
+              // Journée partagée proprement : rien à signaler.
+            } else if (chevauchements.length > 0) {
+              const [a, b] = chevauchements[0];
+              jour.conflits.push(
+                `Présent au même moment sur ${a.code} (${a.debut}–${a.fin}) et ${b.code} (${b.debut}–${b.fin})`,
+              );
+            } else {
+              jour.conflits.push(
+                `Pointé sur ${chantiersDistincts.size} chantiers le même jour : ${reels.map((c) => c.code).join(', ')}`,
+              );
+            }
           }
           if (new Decimal(jour.totalHeures).greaterThan(SEUIL_JOURNEE)) {
             jour.conflits.push(`${jour.totalHeures} h cumulées — journée impossible`);
@@ -200,4 +224,13 @@ function bornes(debut: string, fin: string): { debut: string; fin: string } {
     throw new BadRequestException('Période trop longue : deux mois au maximum.');
   }
   return { debut, fin };
+}
+
+/** Toutes les paires distinctes d'une liste — pour comparer les créneaux deux à deux. */
+function paires<T>(liste: T[]): Array<[T, T]> {
+  const out: Array<[T, T]> = [];
+  for (let i = 0; i < liste.length; i += 1) {
+    for (let j = i + 1; j < liste.length; j += 1) out.push([liste[i], liste[j]]);
+  }
+  return out;
 }

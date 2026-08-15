@@ -69,41 +69,51 @@ export interface ContextGroup {
   features: ModuleFeature[];
 }
 
-export function contextualGroup(pathname: string): ContextGroup | null {
+export function contextualGroups(pathname: string): ContextGroup[] {
   // Chantier ouvert : chaque entrée est un écran à part entière.
   const chantier = /^\/chantiers\/([^/]+)/.exec(pathname);
   if (chantier && !['bibliotheque', 'parametres'].includes(chantier[1])) {
     const id = chantier[1];
-    return {
-      title: 'Chantier ouvert',
-      features: [
-        { href: `/chantiers/${id}`, label: 'Fiche chantier' },
-        { href: `/chantiers/${id}/structure`, label: 'Structure & budget' },
-        { href: `/chantiers/${id}/calendrier`, label: 'Calendrier des heures' },
-        { href: `/chantiers/${id}/pointages`, label: 'Pointages (détail)' },
-        { href: `/chantiers/${id}/controle-heures`, label: 'Contrôle des heures' },
-        { href: `/chantiers/${id}/achats`, label: 'Achats' },
-        { href: `/chantiers/${id}/avancement`, label: 'Avancement' },
-        { href: `/chantiers/${id}/mensuel`, label: 'Gestion mensuelle' },
-        { href: `/chantiers/${id}/pilotage`, label: 'Pilotage' },
-      ],
-    };
+    // Les heures forment un métier à part : on les regroupe plutôt que de les mêler au reste.
+    return [
+      {
+        title: 'Chantier ouvert',
+        features: [
+          { href: `/chantiers/${id}`, label: 'Fiche chantier' },
+          { href: `/chantiers/${id}/structure`, label: 'Structure & budget' },
+          { href: `/chantiers/${id}/achats`, label: 'Achats' },
+          { href: `/chantiers/${id}/avancement`, label: 'Avancement' },
+          { href: `/chantiers/${id}/mensuel`, label: 'Gestion mensuelle' },
+          { href: `/chantiers/${id}/pilotage`, label: 'Pilotage' },
+        ],
+      },
+      {
+        title: 'Main d’œuvre',
+        features: [
+          { href: `/chantiers/${id}/calendrier`, label: 'Calendrier des heures' },
+          { href: `/chantiers/${id}/pointages`, label: 'Pointages (détail)' },
+          { href: `/chantiers/${id}/controle-heures`, label: 'Contrôle des heures' },
+        ],
+      },
+    ];
   }
 
   // Marché ouvert : la fiche est une seule page ; les entrées mènent à ses sections.
   const marche = /^\/invoicing\/([^/]+)/.exec(pathname);
   if (marche) {
     const id = marche[1];
-    return {
-      title: 'Marché ouvert',
-      features: [
-        { href: `/invoicing/${id}?vue=situations`, label: 'Situations' },
-        { href: `/invoicing/${id}?vue=avenants`, label: 'Avenants' },
-        { href: `/invoicing/${id}?vue=dgd`, label: 'DGD' },
-      ],
-    };
+    return [
+      {
+        title: 'Marché ouvert',
+        features: [
+          { href: `/invoicing/${id}?vue=situations`, label: 'Situations' },
+          { href: `/invoicing/${id}?vue=avenants`, label: 'Avenants' },
+          { href: `/invoicing/${id}?vue=dgd`, label: 'DGD' },
+        ],
+      },
+    ];
   }
-  return null;
+  return [];
 }
 
 /** Capacités qui ouvrent l'acceptation de commande : facturer OU suivre des chantiers. */

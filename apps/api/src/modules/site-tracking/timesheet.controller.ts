@@ -13,9 +13,13 @@ export class TimesheetController {
   @RequiresCapability('site_tracking.timesheet')
   @RequiresPermission('site_tracking.write')
   create(@Param('chantierId') chantierId: string, @Body() body: TimesheetInput) {
-    // Un salarié du fichier OU un nom saisi : l'un des deux suffit, mais pas aucun.
-    if ((!body?.employeeId && !body?.employee) || !body?.date || body?.hours == null) {
-      throw new BadRequestException('Le salarié, la date et les heures sont requis.');
+    // Un salarié du fichier OU un nom saisi ; des heures OU un créneau horaire dont on déduira
+    // la durée. Exiger les deux obligerait à retaper une information déjà donnée.
+    const duree = body?.hours != null || (body?.startTime && body?.endTime);
+    if ((!body?.employeeId && !body?.employee) || !body?.date || !duree) {
+      throw new BadRequestException(
+        'Le salarié, la date et la durée (heures ou créneau) sont requis.',
+      );
     }
     return this.timesheets.create(chantierId, body);
   }

@@ -9,7 +9,7 @@ import {
   CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
   LayoutGrid, ArrowLeft, ArrowLeftRight,
 } from 'lucide-react';
-import { contextualGroup, moduleForPath } from '@/lib/modules';
+import { contextualGroups, moduleForPath } from '@/lib/modules';
 
 const STORAGE_KEY = 'erp-sidebar-collapsed';
 
@@ -102,7 +102,7 @@ function isActive(href: string, pathname: string): boolean {
 export function Sidebar() {
   const pathname = usePathname();
   const courant = moduleForPath(pathname);
-  const contexte = contextualGroup(pathname);
+  const contextes = contextualGroups(pathname);
   const vueCourante = useSearchParams().get('vue');
   const [collapsed, setCollapsed] = useState(false);
 
@@ -165,8 +165,8 @@ export function Sidebar() {
 
       {/* Sous-menu du chantier / marché ouvert : la navigation reste à gauche, jamais en haut
           de la page — sinon on perd de vue où l'on est. */}
-      {contexte && (
-        <>
+      {contextes.map((contexte) => (
+        <div key={contexte.title}>
           <div className="nav-section">{contexte.title}</div>
           {contexte.features.map((f) => {
             const [chemin, requete] = f.href.split('?');
@@ -191,8 +191,8 @@ export function Sidebar() {
               </div>
             );
           })}
-        </>
-      )}
+        </div>
+      ))}
 
       {/* Collapse toggle */}
       <button
