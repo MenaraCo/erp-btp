@@ -180,10 +180,18 @@ export class ChantierService {
       }
       const resById = new Map<
         string,
-        { code: string; label: string; unit: string; nature: string; unit_cost: string; code_analytique_id: string | null }
+        {
+          code: string; label: string; unit: string; nature: string; unit_cost: string;
+          code_analytique_id: string | null;
+          // Informations d'achat, copiées telles quelles dans la nomenclature du chantier.
+          supplier_id: string | null; ref_fournisseur: string | null;
+          unite_achat: string | null; coeff_conversion: string | null;
+        }
       >();
       for (const r of await em.query(
-        `SELECT id, code, label, unit, nature, unit_cost, code_analytique_id FROM resource`,
+        `SELECT id, code, label, unit, nature, unit_cost, code_analytique_id,
+                supplier_id, ref_fournisseur, unite_achat, coeff_conversion
+           FROM resource`,
       )) {
         resById.set(r.id, r);
       }
@@ -227,10 +235,15 @@ export class ChantierService {
           await em.query(
             `INSERT INTO nomenclature_resource
                (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
-                unit_cost_etude, unit_cost_objectif, code_analytique_id)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING id`,
+                unit_cost_etude, unit_cost_objectif, code_analytique_id,
+                supplier_id, ref_fournisseur, unite_achat, coeff_conversion)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12,$13,$14) RETURNING id`,
             [tenantId, chantier.id, marcheId, resourceId, freeCode(r.code), r.label, r.unit, r.nature,
-              r.unit_cost, r.code_analytique_id ?? null],
+              r.unit_cost, r.code_analytique_id ?? null,
+              // Informations d'achat copiées au transfert : le chantier commande sans jamais
+              // relire la bibliothèque d'étude (catalogues indépendants).
+              r.supplier_id ?? null, r.ref_fournisseur ?? null,
+              r.unite_achat ?? null, r.coeff_conversion ?? null],
           )
         )[0];
         nomencByResource.set(resourceId, row.id);
@@ -268,10 +281,13 @@ export class ChantierService {
           await em.query(
             `INSERT INTO nomenclature_resource
                (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
-                unit_cost_etude, unit_cost_objectif, code_analytique_id)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING id`,
+                unit_cost_etude, unit_cost_objectif, code_analytique_id,
+                supplier_id, ref_fournisseur, unite_achat, coeff_conversion)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12,$13,$14) RETURNING id`,
             [tenantId, chantier.id, marcheId, l.source_resource_id ?? null, freeCode(l.code), l.designation,
-              l.unit, nature, l.pu ?? '0', src?.code_analytique_id ?? null],
+              l.unit, nature, l.pu ?? '0', src?.code_analytique_id ?? null,
+              src?.supplier_id ?? null, src?.ref_fournisseur ?? null,
+              src?.unite_achat ?? null, src?.coeff_conversion ?? null],
           )
         )[0].id;
       };

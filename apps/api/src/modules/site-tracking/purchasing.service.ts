@@ -8,6 +8,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { NumberingService } from '../../core/numbering/numbering.service';
 import {
   assertTransition,
   InvalidPoTransitionError,
@@ -16,6 +17,8 @@ import {
 
 export interface OrderLineInput {
   executionLineId?: string | null;
+  /** Ressource du chantier approvisionnée — c'est elle qui donne le reste à commander. */
+  nomenclatureResourceId?: string | null;
   nature: string;
   designation: string;
   quantity: string | number;
@@ -40,36 +43,41 @@ export class PurchasingService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
+    // Les codes ne se tapent plus : ils viennent de la numérotation société, comme les affaires
+    // et les devis. Un numéro de commande saisi à la main finit toujours par se dupliquer.
+    private readonly numbering: NumberingService,
   ) {}
 
   // --- DDP (demande de prix) ---
 
-  createRequest(chantierId: string, input: { code: string; supplierId?: string | null }) {
+  createRequest(chantierId: string, input: { code?: string | null; supplierId?: string | null }) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertChantier(em, chantierId);
+      const code = input.code?.trim() || (await this.numbering.next(em, 'purchase_request'));
       return (
         await em.query(
           `INSERT INTO purchase_request (tenant_id, chantier_id, supplier_id, code)
            VALUES ($1,$2,$3,$4) RETURNING *`,
-          [tenantId, chantierId, input.supplierId ?? null, input.code],
+          [tenantId, chantierId, input.supplierId ?? null, code],
         )
       )[0];
     });
   }
 
-  convertRequest(requestId: string, code: string) {
+  convertRequest(requestId: string, code?: string | null) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const req = await em.query(`SELECT * FROM purchase_request WHERE id = $1`, [requestId]);
       if (req.length === 0) {
         throw new NotFoundException(`Unknown purchase request "${requestId}"`);
       }
+      const numero = code?.trim() || (await this.numbering.next(em, 'purchase_order'));
       const order = (
         await em.query(
           `INSERT INTO purchase_order (tenant_id, chantier_id, request_id, supplier_id, code)
            VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-          [tenantId, req[0].chantier_id, requestId, req[0].supplier_id, code],
+          [tenantId, req[0].chantier_id, requestId, req[0].supplier_id, numero],
         )
       )[0];
       await em.query(`UPDATE purchase_request SET status = 'converted', updated_at = now() WHERE id = $1`, [requestId]);
@@ -79,15 +87,16 @@ export class PurchasingService {
 
   // --- BC (bon de commande) ---
 
-  createOrder(chantierId: string, input: { code: string; supplierId?: string | null }) {
+  createOrder(chantierId: string, input: { code?: string | null; supplierId?: string | null }) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertChantier(em, chantierId);
+      const code = input.code?.trim() || (await this.numbering.next(em, 'purchase_order'));
       return (
         await em.query(
           `INSERT INTO purchase_order (tenant_id, chantier_id, supplier_id, code)
            VALUES ($1,$2,$3,$4) RETURNING *`,
-          [tenantId, chantierId, input.supplierId ?? null, input.code],
+          [tenantId, chantierId, input.supplierId ?? null, code],
         )
       )[0];
     });
@@ -116,10 +125,11 @@ export class PurchasingService {
         await em.query(
           `INSERT INTO purchase_order_line
              (tenant_id, order_id, execution_line_id, nature, designation, quantity, unit_price, amount_ht,
-              code_analytique_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+              code_analytique_id, nomenclature_resource_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
           [tenantId, orderId, input.executionLineId ?? null, input.nature, input.designation,
-            qty.toString(), price.toString(), amount.toString(), input.codeAnalytiqueId ?? null],
+            qty.toString(), price.toString(), amount.toString(), input.codeAnalytiqueId ?? null,
+            input.nomenclatureResourceId ?? null],
         )
       )[0];
       await em.query(
@@ -128,6 +138,26 @@ export class PurchasingService {
         [orderId],
       );
       return line;
+    });
+  }
+
+  /** Lignes d'une commande, avec ce à quoi elles sont imputées (ouvrage, code, ressource). */
+  listLines(orderId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const order = await em.query(`SELECT id FROM purchase_order WHERE id = $1`, [orderId]);
+      if (order.length === 0) throw new NotFoundException(`Unknown purchase order "${orderId}"`);
+      return em.query(
+        `SELECT l.*, el.designation AS ouvrage, ac.code AS code_analytique,
+                n.code AS ressource_code, n.label AS ressource_label, n.unite_achat
+           FROM purchase_order_line l
+           LEFT JOIN execution_line el ON el.id = l.execution_line_id
+           LEFT JOIN analytical_code ac ON ac.id = l.code_analytique_id
+           LEFT JOIN nomenclature_resource n ON n.id = l.nomenclature_resource_id
+          WHERE l.order_id = $1
+          ORDER BY l.created_at ASC`,
+        [orderId],
+      );
     });
   }
 
@@ -164,7 +194,7 @@ export class PurchasingService {
 
   // --- BL (bon de livraison) ---
 
-  receiveDelivery(orderId: string, code: string) {
+  receiveDelivery(orderId: string, code?: string | null) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const order = await em.query(`SELECT status FROM purchase_order WHERE id = $1`, [orderId]);
@@ -177,7 +207,7 @@ export class PurchasingService {
       return (
         await em.query(
           `INSERT INTO delivery_note (tenant_id, order_id, code) VALUES ($1,$2,$3) RETURNING *`,
-          [tenantId, orderId, code],
+          [tenantId, orderId, code?.trim() || (await this.numbering.next(em, 'delivery_note'))],
         )
       )[0];
     });

@@ -1,20 +1,23 @@
-import { BadRequestException, Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { OrderLineInput, PurchasingService } from './purchasing.service';
+import { ApprovisionnementService } from './approvisionnement.service';
 
 const NATURES = ['labor', 'material', 'equipment', 'subcontract', 'site_overhead'];
 
 @Controller()
 export class PurchasingController {
-  constructor(private readonly purchasing: PurchasingService) {}
+  constructor(
+    private readonly purchasing: PurchasingService,
+    private readonly appro: ApprovisionnementService,
+  ) {}
 
   // DDP
   @Post('chantiers/:chantierId/purchase-requests')
   @RequiresCapability('purchasing')
   @RequiresPermission('site_tracking.write')
   createRequest(@Param('chantierId') chantierId: string, @Body() body: { code?: string; supplierId?: string }) {
-    if (!body?.code) throw new BadRequestException('code is required');
     return this.purchasing.createRequest(chantierId, { code: body.code, supplierId: body.supplierId });
   }
 
@@ -22,7 +25,6 @@ export class PurchasingController {
   @RequiresCapability('purchasing')
   @RequiresPermission('site_tracking.write')
   convert(@Param('requestId') requestId: string, @Body() body: { code?: string }) {
-    if (!body?.code) throw new BadRequestException('code is required');
     return this.purchasing.convertRequest(requestId, body.code);
   }
 
@@ -31,7 +33,6 @@ export class PurchasingController {
   @RequiresCapability('purchasing')
   @RequiresPermission('site_tracking.write')
   createOrder(@Param('chantierId') chantierId: string, @Body() body: { code?: string; supplierId?: string }) {
-    if (!body?.code) throw new BadRequestException('code is required');
     return this.purchasing.createOrder(chantierId, { code: body.code, supplierId: body.supplierId });
   }
 
@@ -43,6 +44,58 @@ export class PurchasingController {
       throw new BadRequestException('nature (valid) and designation are required');
     }
     return this.purchasing.addLine(orderId, body);
+  }
+
+  /** Ce qu'il reste à approvisionner, ressource par ressource — la base d'une commande. */
+  @Get('chantiers/:chantierId/approvisionnement')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  approvisionnement(
+    @Param('chantierId') chantierId: string,
+    @Query('fournisseur') supplierId?: string,
+    @Query('lot') lotId?: string,
+    @Query('famille') familleId?: string,
+    @Query('code') codeAnalytiqueId?: string,
+    @Query('nature') nature?: string,
+    @Query('reste') reste?: string,
+  ) {
+    return this.appro.suggestions(chantierId, {
+      supplierId, lotId, familleId, codeAnalytiqueId, nature,
+      resteSeulement: reste === '1' || reste === 'true',
+    });
+  }
+
+  /** Fournisseurs, lots et familles présents sur le chantier — pour commander par paquets. */
+  @Get('chantiers/:chantierId/approvisionnement/regroupements')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  regroupements(@Param('chantierId') chantierId: string) {
+    return this.appro.regroupements(chantierId);
+  }
+
+  /** Insère les ressources choisies dans la commande, en unité d'achat. */
+  @Post('purchase-orders/:orderId/lines/nomenclature')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  insererDepuisNomenclature(
+    @Param('orderId') orderId: string,
+    @Body() body: {
+      resourceIds?: string[];
+      mode?: 'total' | 'avancement' | 'reste';
+      filtre?: {
+        supplierId?: string | null; lotId?: string | null; familleId?: string | null;
+        codeAnalytiqueId?: string | null; nature?: string | null; resteSeulement?: boolean;
+      };
+    },
+  ) {
+    return this.appro.insererDepuisNomenclature(orderId, body ?? {});
+  }
+
+  @Get('purchase-orders/:orderId/lines')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  lines(@Param('orderId') orderId: string) {
+    return this.purchasing.listLines(orderId);
   }
 
   @Post('purchase-orders/:orderId/validate')
@@ -64,8 +117,7 @@ export class PurchasingController {
   @RequiresCapability('purchasing')
   @RequiresPermission('site_tracking.write')
   receive(@Param('orderId') orderId: string, @Body() body: { code?: string }) {
-    if (!body?.code) throw new BadRequestException('code is required');
-    return this.purchasing.receiveDelivery(orderId, body.code);
+    return this.purchasing.receiveDelivery(orderId, body?.code);
   }
 
   // Facture fournisseur

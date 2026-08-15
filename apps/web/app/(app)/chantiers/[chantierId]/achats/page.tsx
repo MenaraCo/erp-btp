@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { ApproModal } from '@/components/ApproModal';
 
 /* ─────────── types ─────────── */
 interface OrderLine {
@@ -108,6 +109,18 @@ export default function AchatsPage() {
     queryFn: () => apiFetch<ExecTreeLite>(`/chantiers/${chantierId}/execution-tree`, { token }),
   });
   const ouvrages = ouvrageOptions(tree.data);
+  // Codes analytiques du plan société : une ligne de commande non ventilée fausse les résultats
+  // par code, alors même que l'engagé, lui, est bien compté.
+  const plan = useQuery({
+    queryKey: ['analytical-plan'],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<Array<{ lots: Array<{ familles: Array<{ codes: Array<{ id: string; code: string; label: string }> }> }> }>>(
+      '/analytical/plan', { token },
+    ),
+  });
+  const codesAnalytiques = (plan.data ?? []).flatMap((n) =>
+    n.lots.flatMap((l) => l.familles.flatMap((f) =>
+      f.codes.map((c) => ({ id: c.id, label: `${c.code} — ${c.label}` })))));
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['purchasing-chain', chantierId] });
@@ -158,7 +171,13 @@ export default function AchatsPage() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <div className="field" style={{ marginBottom: 0 }}>
             <label>Nouveau bon de commande</label>
-            <input value={newOrderCode} onChange={(e) => setNewOrderCode(e.target.value)} placeholder="Code (optionnel)" style={{ width: 180 }} />
+            <input
+              value={newOrderCode}
+              onChange={(e) => setNewOrderCode(e.target.value)}
+              placeholder="Numéro automatique"
+              title="Laissez vide : le numéro suit la numérotation société (Configuration → Numérotation)"
+              style={{ width: 180 }}
+            />
           </div>
           <button className="btn" disabled={createOrder.isPending} onClick={() => { setErr(null); createOrder.mutate(); }}>
             {createOrder.isPending ? 'Création…' : 'Créer un BC'}
@@ -170,7 +189,9 @@ export default function AchatsPage() {
         <OrderCard
           key={o.id}
           order={o}
+          chantierId={chantierId}
           ouvrages={ouvrages}
+          codes={codesAnalytiques}
           token={token}
           onError={onError}
           onChanged={refresh}
@@ -188,10 +209,12 @@ export default function AchatsPage() {
 
 /* ─────────── carte d'une commande ─────────── */
 function OrderCard({
-  order, ouvrages, token, onError, onChanged, onValidate, onCancel, busy,
+  order, chantierId, ouvrages, codes, token, onError, onChanged, onValidate, onCancel, busy,
 }: {
   order: Order;
+  chantierId: string;
   ouvrages: OuvrageOption[];
+  codes: Array<{ id: string; label: string }>;
   token: string | null;
   onError: (e: unknown) => void;
   onChanged: () => void;
@@ -210,16 +233,24 @@ function OrderCard({
   const [invAmount, setInvAmount] = useState('');
   const [invNature, setInvNature] = useState('material');
   const [invOuvrage, setInvOuvrage] = useState('');
+  const [lineCode, setLineCode] = useState('');
+  const [approOuvert, setApproOuvert] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
 
   const draft = order.status === 'draft';
 
   const addLine = useMutation({
     mutationFn: () =>
       apiFetch(`/purchase-orders/${order.id}/lines`, {
-        method: 'POST', token, body: { nature, designation, quantity, unitPrice, executionLineId: lineOuvrage || null },
+        method: 'POST', token,
+        body: {
+          nature, designation, quantity, unitPrice,
+          executionLineId: lineOuvrage || null,
+          codeAnalytiqueId: lineCode || null,
+        },
       }),
     onSuccess: () => {
-      setDesignation(''); setQuantity(''); setUnitPrice(''); setLineOuvrage('');
+      setDesignation(''); setQuantity(''); setUnitPrice(''); setLineOuvrage(''); setLineCode('');
       qc.invalidateQueries({ queryKey: ['purchasing-chain'] });
       qc.invalidateQueries({ queryKey: ['purchasing-summary'] });
       qc.invalidateQueries({ queryKey: ['execution-tree'] });
@@ -318,8 +349,41 @@ function OrderCard({
               {ouvrages.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
             </select>
           </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Code analytique</label>
+            <select value={lineCode} onChange={(e) => setLineCode(e.target.value)} style={{ width: 190 }}>
+              <option value="">— À ventiler —</option>
+              {codes.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </div>
           <button className="btn btn-secondary" type="submit" disabled={addLine.isPending}>Ajouter la ligne</button>
         </form>
+      )}
+
+      {draft && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+          <button className="btn" onClick={() => setApproOuvert(true)}>
+            Insérer depuis la bibliothèque chantier…
+          </button>
+          <span className="muted" style={{ fontSize: 11 }}>
+            Reprend les ressources budgétées, en unité d’achat, avec leur ouvrage et leur code
+            analytique — sans ressaisie.
+          </span>
+          {info && <span style={{ fontSize: 12, color: 'var(--success, #15803d)' }}>{info}</span>}
+        </div>
+      )}
+
+      {approOuvert && (
+        <ApproModal
+          chantierId={chantierId}
+          orderId={order.id}
+          onClose={() => setApproOuvert(false)}
+          onInsere={(n) => {
+            setApproOuvert(false);
+            setInfo(n > 0 ? `${n} ligne${n > 1 ? 's' : ''} insérée${n > 1 ? 's' : ''}.` : 'Rien à insérer : le besoin est déjà couvert.');
+            onChanged();
+          }}
+        />
       )}
 
       {/* Bons de livraison et factures */}

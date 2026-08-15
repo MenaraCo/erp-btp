@@ -8,6 +8,7 @@ import { EmployeeService } from './employee.service';
 import { PlanningService } from './planning.service';
 import { PersonnelService } from './personnel.service';
 import { AbsenceService } from './absence.service';
+import { ApprovisionnementService } from './approvisionnement.service';
 import { PersonnelController } from './personnel.controller';
 import { PlanningController } from './planning.controller';
 import { EmployeeController } from './employee.controller';
@@ -29,7 +30,8 @@ import { AnalyticsController } from './analytics.controller';
   providers: [ChantierService, TimesheetService,
     EmployeeService,
     PlanningService,
-    PersonnelService, AbsenceService, PurchasingService, AnalyticsService, LibraryTransferService],
+    PersonnelService, AbsenceService, PurchasingService, ApprovisionnementService,
+    AnalyticsService, LibraryTransferService],
   controllers: [
     ChantierController,
     TimesheetController,
@@ -43,6 +45,6 @@ import { AnalyticsController } from './analytics.controller';
   exports: [ChantierService, TimesheetService,
     EmployeeService,
     PlanningService,
-    PersonnelService, AbsenceService, PurchasingService, AnalyticsService],
+    PersonnelService, AbsenceService, PurchasingService, ApprovisionnementService, AnalyticsService],
 })
 export class SiteTrackingModule {}
