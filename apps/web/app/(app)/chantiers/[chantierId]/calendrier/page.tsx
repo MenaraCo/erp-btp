@@ -7,7 +7,12 @@ import { CalendarDays, Copy, CornerDownRight } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { CalendrierMois, CreneauCalendrier, grilleDuMois } from '@/components/CalendrierMois';
+import { CalendrierSemaine } from '@/components/CalendrierSemaine';
 import { LegendeChantiers } from '@/components/LegendeChantiers';
+import { MenuContextuel, EntreeMenu } from '@/components/MenuContextuel';
+import { CreneauModal } from '@/components/CreneauModal';
+import { AbsenceModal } from '@/components/AbsenceModal';
+import { libelleAbsence } from '@/lib/absences';
 
 interface Cellule { realise: string; prevu: string; impute: boolean; multiple: boolean }
 interface LigneCalendrier {
@@ -27,6 +32,16 @@ interface Calendrier {
 interface Employee { id: string; fullName: string; contractType: string; agency: string | null }
 
 const JOURS_COURTS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+/** Journée type proposée à la saisie. */
+const HEURES_JOURNEE = 7;
+
+type Menu =
+  | { type: 'jour'; jour: string; x: number; y: number }
+  | { type: 'creneau'; creneau: CreneauCalendrier & { employeeId: string }; x: number; y: number };
+
+type Fenetre =
+  | { type: 'creneau'; mode: 'creation' | 'edition'; initial: Parameters<typeof CreneauModal>[0]['initial'] }
+  | { type: 'absence'; mode: 'creation' | 'edition'; initial: Parameters<typeof AbsenceModal>[0]['initial'] };
 
 function iso(d: Date): string { return d.toISOString().slice(0, 10); }
 function lundiDe(d: Date): Date {
@@ -54,17 +69,21 @@ export default function CalendrierPage() {
   const qc = useQueryClient();
 
   const [ancre, setAncre] = useState(() => iso(new Date()));
-  const [portee, setPortee] = useState<'semaine' | 'mois'>('semaine');
+  // Trois portées : l'agenda (semaine, mois) comme en Gestion du personnel, plus la grille de
+  // saisie rapide — c'est encore le moyen le plus court de remplir une semaine d'équipe.
+  const [portee, setPortee] = useState<'semaine' | 'mois' | 'saisie'>('semaine');
   const [mode, setMode] = useState<'realise' | 'prevu'>('realise');
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const [fenetre, setFenetre] = useState<Fenetre | null>(null);
 
   const [dupSalarie, setDupSalarie] = useState('');
   const [dupHeures, setDupHeures] = useState('7');
 
   const { debut, fin, joursDuMois, moisIndex } = useMemo(() => {
     const d = new Date(`${ancre}T00:00:00Z`);
-    if (portee === 'semaine') {
+    if (portee !== 'mois') {
       const l = lundiDe(d);
       const f = new Date(l); f.setUTCDate(l.getUTCDate() + 6);
       return { debut: iso(l), fin: iso(f), joursDuMois: [] as string[], moisIndex: d.getUTCMonth() };
@@ -80,10 +99,10 @@ export default function CalendrierPage() {
     queryFn: () =>
       apiFetch<Calendrier>(`/chantiers/${chantierId}/planning?debut=${debut}&fin=${fin}`, { token }),
   });
-  // En vue mois, on affiche les interventions une par une, comme un agenda.
+  // Les deux vues d'agenda montrent les interventions une par une, comme en Gestion du personnel.
   const creneauxMois = useQuery({
     queryKey: ['creneaux-chantier', chantierId, debut, fin],
-    enabled: Boolean(token) && portee === 'mois',
+    enabled: Boolean(token) && portee !== 'saisie',
     queryFn: () =>
       apiFetch<{ creneaux: CreneauCalendrier[] }>(
         `/personnel/creneaux?debut=${debut}&fin=${fin}&chantier=${chantierId}`,
@@ -166,6 +185,89 @@ export default function CalendrierPage() {
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Report impossible'),
   });
 
+  const supprimer = useMutation({
+    mutationFn: (cr: CreneauCalendrier) =>
+      cr.kind === 'absence'
+        ? apiFetch(`/personnel/absences/${cr.id}`, { method: 'DELETE', token })
+        : apiFetch(`/personnel/creneaux/${cr.kind}/${cr.id}`, { method: 'DELETE', token }),
+    onSuccess: () => { setErr(null); rafraichir(); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Suppression impossible'),
+  });
+
+  /** Clic droit : les mêmes gestes qu'en Gestion du personnel, mais rivés à CE chantier. */
+  const entreesDuMenu = (m: Menu): EntreeMenu[] => {
+    if (m.type === 'jour') {
+      return [
+        {
+          label: 'Ajouter des heures…',
+          onClick: () => setFenetre({
+            type: 'creneau', mode: 'creation',
+            initial: {
+              kind: 'realise', employeeId: dupSalarie, chantierId, date: m.jour,
+              heures: String(HEURES_JOURNEE), debut: '08:00', fin: '12:00',
+            },
+          }),
+        },
+        {
+          label: 'Planifier une journée…',
+          onClick: () => setFenetre({
+            type: 'creneau', mode: 'creation',
+            initial: {
+              kind: 'prevu', employeeId: dupSalarie, chantierId, date: m.jour,
+              heures: String(HEURES_JOURNEE), debut: '', fin: '',
+            },
+          }),
+        },
+        {
+          label: 'Poser une absence…',
+          separateurAvant: true,
+          onClick: () => setFenetre({
+            type: 'absence', mode: 'creation',
+            initial: { employeeId: dupSalarie, debut: m.jour, fin: m.jour },
+          }),
+        },
+      ];
+    }
+    const cr = m.creneau;
+    if (cr.kind === 'absence') {
+      return [
+        {
+          label: "Retirer l'absence", danger: true,
+          onClick: () => supprimer.mutate(cr),
+        },
+      ];
+    }
+    return [
+      {
+        label: 'Modifier…',
+        disabled: cr.fige,
+        onClick: () => setFenetre({
+          type: 'creneau', mode: 'edition',
+          initial: {
+            id: cr.id, kind: cr.kind as 'realise' | 'prevu', employeeId: cr.employeeId,
+            chantierId, date: cr.date, heures: cr.heures, debut: cr.debut, fin: cr.fin,
+            executionLineId: cr.executionLineId ?? null, codeAnalytiqueId: cr.codeAnalytiqueId ?? null,
+          },
+        }),
+      },
+      {
+        label: 'Ajouter des heures ce jour…',
+        onClick: () => setFenetre({
+          type: 'creneau', mode: 'creation',
+          initial: {
+            kind: 'realise', employeeId: cr.employeeId, chantierId, date: cr.date,
+            heures: '4', debut: '13:00', fin: '17:00',
+          },
+        }),
+      },
+      {
+        label: cr.fige ? 'Arrêté : non supprimable' : 'Retirer du chantier',
+        danger: true, disabled: cr.fige, separateurAvant: true,
+        onClick: () => supprimer.mutate(cr),
+      },
+    ];
+  };
+
   const decaler = (pas: number) => {
     const d = new Date(`${ancre}T00:00:00Z`);
     if (portee === 'semaine') d.setUTCDate(d.getUTCDate() + 7 * pas);
@@ -180,11 +282,13 @@ export default function CalendrierPage() {
       <h1 style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
         <CalendarDays size={20} /> Calendrier des heures
       </h1>
-      <p className="muted" style={{ marginTop: 0, maxWidth: 780 }}>
-        En <strong>semaine</strong>, saisissez directement dans les cases. En <strong>mois</strong>,
-        l’agenda montre les interventions et se réorganise au glisser-déposer. Le
-        <strong> prévisionnel</strong> planifie les jours à venir — il ne coûte rien tant qu’il n’a
-        pas eu lieu ; le <strong>réalisé</strong> entre dans le résultat du chantier.
+      <p className="muted" style={{ marginTop: 0, maxWidth: 860 }}>
+        <strong>Semaine</strong> et <strong>mois</strong> sont l’agenda du chantier — le même que
+        celui de la Gestion du personnel, filtré ici sur ce chantier : glissez pour déplacer,{' '}
+        <strong>clic droit</strong> pour ajouter, corriger ou retirer. <strong>Saisie rapide</strong>{' '}
+        garde la grille salarié × jour pour remplir une semaine entière. Le
+        <strong> prévisionnel</strong> planifie les jours à venir et s’affiche en engagé ; le
+        <strong> réalisé</strong> entre dans le résultat, à l’ouvrage et au code analytique choisis.
       </p>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
@@ -196,9 +300,9 @@ export default function CalendrierPage() {
         <button className="btn btn-secondary" onClick={() => decaler(1)}>Suivant ›</button>
 
         <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
-          {(['semaine', 'mois'] as const).map((p) => (
+          {(['semaine', 'mois', 'saisie'] as const).map((p) => (
             <button key={p} className={portee === p ? 'btn' : 'btn btn-secondary'} onClick={() => setPortee(p)}>
-              {p === 'semaine' ? 'Semaine' : 'Mois'}
+              {p === 'semaine' ? 'Semaine' : p === 'mois' ? 'Mois' : 'Saisie rapide'}
             </button>
           ))}
         </div>
@@ -243,15 +347,33 @@ export default function CalendrierPage() {
         </button>
       </div>
 
-      {portee === 'mois' && (
+      {portee !== 'saisie' && (
         <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <CalendrierMois
-              jours={joursDuMois}
-              mois={moisIndex}
-              creneaux={creneauxMois.data?.creneaux ?? []}
-              onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
-            />
+          <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>
+            {portee === 'mois' ? (
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <CalendrierMois
+                  jours={joursDuMois}
+                  mois={moisIndex}
+                  creneaux={creneauxMois.data?.creneaux ?? []}
+                  onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
+                  onMenuJour={(jour, p) => setMenu({ type: 'jour', jour, ...p })}
+                  onMenuCreneau={(cr, p) => setMenu({
+                    type: 'creneau', creneau: cr as CreneauCalendrier & { employeeId: string }, ...p,
+                  })}
+                />
+              </div>
+            ) : (
+              <CalendrierSemaine
+                jours={cal.data?.jours ?? []}
+                creneaux={creneauxMois.data?.creneaux ?? []}
+                onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
+                onMenuJour={(jour, p) => setMenu({ type: 'jour', jour, ...p })}
+                onMenuCreneau={(cr, p) => setMenu({
+                  type: 'creneau', creneau: cr as CreneauCalendrier & { employeeId: string }, ...p,
+                })}
+              />
+            )}
           </div>
           {fiche.data && (
             <LegendeChantiers
@@ -263,7 +385,42 @@ export default function CalendrierPage() {
         </div>
       )}
 
-      {portee === 'semaine' && c && (
+      {menu && (
+        <MenuContextuel
+          x={menu.x}
+          y={menu.y}
+          titre={menu.type === 'jour'
+            ? new Date(`${menu.jour}T00:00:00Z`).toLocaleDateString('fr-FR', {
+              weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC',
+            })
+            : `${menu.creneau.label} · ${menu.creneau.kind === 'absence'
+              ? libelleAbsence(menu.creneau.motif ?? '') : menu.creneau.chantierCode}`}
+          entrees={entreesDuMenu(menu)}
+          onFermer={() => setMenu(null)}
+        />
+      )}
+
+      {fenetre?.type === 'creneau' && (
+        <CreneauModal
+          mode={fenetre.mode}
+          initial={fenetre.initial}
+          salaries={(salaries.data ?? []).map((s) => ({ id: s.id, label: s.fullName }))}
+          chantiers={[{ id: chantierId, label: fiche.data?.chantier.code ?? 'Ce chantier' }]}
+          onClose={() => setFenetre(null)}
+          onSaved={() => { setFenetre(null); rafraichir(); }}
+        />
+      )}
+      {fenetre?.type === 'absence' && (
+        <AbsenceModal
+          mode={fenetre.mode}
+          initial={fenetre.initial}
+          salaries={(salaries.data ?? []).map((s) => ({ id: s.id, label: s.fullName }))}
+          onClose={() => setFenetre(null)}
+          onSaved={() => { setFenetre(null); rafraichir(); }}
+        />
+      )}
+
+      {portee === 'saisie' && c && (
         <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
             <table className="grid" style={{ margin: 0 }}>

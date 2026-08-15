@@ -236,6 +236,7 @@ export default function OccupationPage() {
           initial: {
             id: c.id, kind: c.kind as 'realise' | 'prevu', employeeId: c.employeeId,
             chantierId: c.chantierId, date: c.date, heures: c.heures, debut: c.debut, fin: c.fin,
+            executionLineId: c.executionLineId ?? null, codeAnalytiqueId: c.codeAnalytiqueId ?? null,
           },
         }),
       },

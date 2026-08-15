@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
+import { engageMainOeuvreParCode } from '../site-tracking/labor-commitment';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { CalcComponent, CalcOuvrage } from '../estimating/ouvrage-calc';
 import { computeBucketBreakdownMap } from '../estimating/bucket-breakdown';
@@ -166,6 +167,11 @@ export class AnalyticalResultsService {
     );
     for (const r of engage) {
       this.dispatch(rows, siteOverhead, r.code_id, r.nature, 'engage', r.montant);
+    }
+    // Main d'œuvre engagée : journées planifiées non encore pointées, au code de la fiche salarié.
+    for (const r of await engageMainOeuvreParCode(em, chantierId)) {
+      if (new Decimal(r.montant ?? 0).isZero()) continue;
+      this.dispatch(rows, siteOverhead, r.code_id, 'labor', 'engage', r.montant);
     }
   }
 

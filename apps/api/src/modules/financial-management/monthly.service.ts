@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
+import { engageMainOeuvreFlux } from '../site-tracking/labor-commitment';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { returningRows } from '../../core/database/returning.util';
 import { FinancialForecastService } from './financial-forecast.service';
@@ -111,6 +112,8 @@ export class MonthlyService {
         [chantierId, start, nextStart, prevStart],
       );
 
+      // Main d'œuvre engagée du mois : journées planifiées non pointées, datées par le jour prévu.
+      const moEngage = await engageMainOeuvreFlux(em, chantierId, { start, nextStart, prevStart });
       const engMap = new Map(engage.map((r) => [r.nature, r]));
       const achMap = new Map(realiseAchats.map((r) => [r.nature, r]));
       const mo = realiseMo[0] ?? { m: '0', m1: '0', cumul: '0' };
@@ -127,10 +130,17 @@ export class MonthlyService {
                 cumul: add(ach?.cumul ?? '0', mo.cumul),
               }
             : { m: ach?.m ?? '0.00', m1: ach?.m1 ?? '0.00', cumul: ach?.cumul ?? '0.00' };
+        const engage: Triple = nature === 'labor'
+          ? {
+              m: add(e?.m ?? '0', moEngage.m),
+              m1: add(e?.m1 ?? '0', moEngage.m1),
+              cumul: add(e?.cumul ?? '0', moEngage.cumul),
+            }
+          : { m: e?.m ?? '0.00', m1: e?.m1 ?? '0.00', cumul: e?.cumul ?? '0.00' };
         return {
           nature,
           label: NATURE_LABELS[nature],
-          engage: { m: e?.m ?? '0.00', m1: e?.m1 ?? '0.00', cumul: e?.cumul ?? '0.00' },
+          engage,
           realise,
         };
       });

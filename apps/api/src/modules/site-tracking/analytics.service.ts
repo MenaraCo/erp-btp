@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
+import { engageMainOeuvre } from './labor-commitment';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { BUDGET_NATURES, BudgetNature } from './budget-nature';
 import { natureResult, NatureResult } from './analytics-calc';
@@ -58,6 +59,8 @@ export class AnalyticsService {
            FROM supplier_invoice WHERE chantier_id = $1 GROUP BY nature`,
         [chantierId],
       );
+      // Main d'œuvre engagée : les journées planifiées et pas encore pointées (§5.8).
+      const laborEngage = await engageMainOeuvre(em, chantierId);
       const laborTimesheets = (
         await em.query(
           `SELECT COALESCE(SUM(cost), 0)::numeric(16,2) AS total FROM timesheet WHERE chantier_id = $1`,
@@ -72,14 +75,16 @@ export class AnalyticsService {
 
       const results: NatureResult[] = BUDGET_NATURES.map((nature) => {
         let realise = new Decimal(supplierMap[nature] ?? 0);
+        let engageNature = new Decimal(engageMap[nature] ?? 0);
         if (nature === 'labor') {
           realise = realise.plus(new Decimal(laborTimesheets));
+          engageNature = engageNature.plus(new Decimal(laborEngage));
         }
         return natureResult({
           nature,
           budgetObjectif: budgetObj[nature] ?? 0,
           budgetPrevisionnel: budgetPrev[nature] ?? 0,
-          engage: engageMap[nature] ?? 0,
+          engage: engageNature.toString(),
           realise: realise.toString(),
         });
       });

@@ -5,12 +5,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarRange } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { teinteChantier } from '@/components/CalendrierMois';
 import { LegendeChantiers } from '@/components/LegendeChantiers';
+import { CalendrierSemaine } from '@/components/CalendrierSemaine';
 import { MenuContextuel, EntreeMenu } from '@/components/MenuContextuel';
 import { CreneauModal } from '@/components/CreneauModal';
 import { AbsenceModal } from '@/components/AbsenceModal';
-import { couleurAbsence, libelleAbsence } from '@/lib/absences';
+import { libelleAbsence } from '@/lib/absences';
 
 interface Creneau {
   id: string;
@@ -23,6 +23,10 @@ interface Creneau {
   chantierCouleur: string | null;
   motif?: string | null;
   commentaire?: string | null;
+  executionLineId?: string | null;
+  ouvrage?: string | null;
+  codeAnalytiqueId?: string | null;
+  codeAnalytique?: string | null;
   date: string;
   heures: string;
   debut: string | null;
@@ -51,15 +55,7 @@ type Fenetre =
   | { type: 'creneau'; mode: 'creation' | 'edition'; initial: Parameters<typeof CreneauModal>[0]['initial'] }
   | { type: 'absence'; mode: 'creation' | 'edition'; initial: Parameters<typeof AbsenceModal>[0]['initial'] };
 
-const JOURS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-/** Amplitude affichée : au-delà, la grille s'étire pour rien. */
-const HEURE_DEBUT = 6;
-const HEURE_FIN = 20;
-const HAUTEUR_HEURE = 34;
 
-function minutes(h: string): number {
-  return Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
-}
 
 /**
  * Planning hebdomadaire — vue par tranches horaires.
@@ -78,7 +74,6 @@ export default function PlanningPage() {
   const [salarie, setSalarie] = useState('');
   const [chantier, setChantier] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const [survole, setSurvole] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [fenetre, setFenetre] = useState<Fenetre | null>(null);
 
@@ -226,6 +221,7 @@ export default function PlanningPage() {
           initial: {
             id: c.id, kind: c.kind as 'realise' | 'prevu', employeeId: c.employeeId,
             chantierId: c.chantierId, date: c.date, heures: c.heures, debut: c.debut, fin: c.fin,
+            executionLineId: c.executionLineId ?? null, codeAnalytiqueId: c.codeAnalytiqueId ?? null,
           },
         }),
       },
@@ -265,45 +261,6 @@ export default function PlanningPage() {
   };
 
   const r = donnees.data;
-  const heures = Array.from({ length: HEURE_FIN - HEURE_DEBUT }, (_, i) => HEURE_DEBUT + i);
-
-  const bloc = (c: Creneau, style: React.CSSProperties) => {
-    const absence = c.kind === 'absence';
-    const teinte = absence ? couleurAbsence(c.motif ?? '') : teinteChantier(c.chantierId, c.chantierCouleur);
-    const plein = c.kind === 'realise';
-    return (
-      <div
-        key={c.id}
-        draggable={!c.fige && !absence}
-        onDragStart={(e) => e.dataTransfer.setData('text/plain', `${c.kind}:${c.id}`)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setMenu({ type: 'creneau', creneau: c, x: e.clientX, y: e.clientY });
-        }}
-        title={`${c.label} · ${absence ? libelleAbsence(c.motif ?? '') : `${c.chantierCode} — ${c.chantierNom}`}\n${
-          c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
-        }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}${
-          c.commentaire ? `\n${c.commentaire}` : ''}`}
-        style={{
-          background: plein ? teinte
-            : absence
-              ? `repeating-linear-gradient(135deg, ${teinte}22, ${teinte}22 4px, ${teinte}0d 4px, ${teinte}0d 8px)`
-              : 'transparent',
-          border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinte}`,
-          color: plein ? '#fff' : teinte,
-          borderRadius: 4, fontSize: 10, padding: '1px 4px', overflow: 'hidden',
-          cursor: c.fige || absence ? 'default' : 'grab', opacity: c.fige ? 0.55 : 1,
-          ...style,
-        }}
-      >
-        <div style={{ fontWeight: 600, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-          {absence ? libelleAbsence(c.motif ?? '') : c.chantierCode}
-        </div>
-        <div style={{ whiteSpace: 'nowrap', overflow: 'hidden' }}>{c.label}</div>
-      </div>
-    );
-  };
 
   return (
     <div>
@@ -343,107 +300,23 @@ export default function PlanningPage() {
 
       {r && (
         <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'auto', flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: `56px repeat(${r.jours.length}, minmax(110px, 1fr))` }}>
-            {/* En-têtes */}
-            <div style={{ borderBottom: '1px solid var(--border)' }} />
-            {r.jours.map((j) => (
-              <div key={j} style={{
-                borderBottom: '1px solid var(--border)', borderLeft: '1px solid var(--border)',
-                padding: '6px 8px', fontSize: 11, fontWeight: 600, textAlign: 'center',
-              }}>
-                {JOURS[new Date(`${j}T00:00:00Z`).getUTCDay()]}
-                <div className="muted" style={{ fontWeight: 400 }}>{j.slice(8)}/{j.slice(5, 7)}</div>
-              </div>
-            ))}
-
-            {/* Bandeau « journée » : les heures sans horaire précis, qui existent quand même. */}
-            <div style={{ fontSize: 10, padding: '4px 6px', color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-              journée
-            </div>
-            {r.jours.map((j) => {
-              const sansHoraire = r.creneaux.filter((c) => c.date === j && !c.debut);
-              return (
-                <div
-                  key={`allday-${j}`}
-                  onDragOver={(e) => { e.preventDefault(); setSurvole(j); }}
-                  onDragLeave={() => setSurvole(null)}
-                  onDrop={(e) => {
-                    e.preventDefault(); setSurvole(null);
-                    deposer(e.dataTransfer.getData('text/plain'), j);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setMenu({ type: 'jour', jour: j, x: e.clientX, y: e.clientY });
-                  }}
-                  style={{
-                    borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)',
-                    padding: 3, minHeight: 30, display: 'flex', flexDirection: 'column', gap: 2,
-                    background: survole === j ? 'var(--surface)' : undefined,
-                  }}
-                >
-                  {sansHoraire.map((c) => bloc(c, { position: 'relative' }))}
-                </div>
-              );
-            })}
-
-            {/* Grille horaire */}
-            <div>
-              {heures.map((h) => (
-                <div key={h} style={{ height: HAUTEUR_HEURE, fontSize: 10, color: 'var(--muted)', padding: '2px 6px' }}>
-                  {String(h).padStart(2, '0')}:00
-                </div>
-              ))}
-            </div>
-            {r.jours.map((j) => {
-              const horodates = r.creneaux.filter((c) => c.date === j && c.debut && c.fin);
-              return (
-                <div
-                  key={`col-${j}`}
-                  onDragOver={(e) => { e.preventDefault(); setSurvole(j); }}
-                  onDragLeave={() => setSurvole(null)}
-                  onDrop={(e) => {
-                    e.preventDefault(); setSurvole(null);
-                    deposer(e.dataTransfer.getData('text/plain'), j);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setMenu({ type: 'jour', jour: j, x: e.clientX, y: e.clientY });
-                  }}
-                  style={{
-                    position: 'relative', borderLeft: '1px solid var(--border)',
-                    height: heures.length * HAUTEUR_HEURE,
-                    background: survole === j ? 'var(--surface)' : undefined,
-                  }}
-                >
-                  {heures.map((h) => (
-                    <div key={h} style={{
-                      position: 'absolute', top: (h - HEURE_DEBUT) * HAUTEUR_HEURE, left: 0, right: 0,
-                      borderTop: '1px solid var(--border)', opacity: 0.5,
-                    }} />
-                  ))}
-                  {horodates.map((c) => {
-                    const haut = ((minutes(c.debut!) - HEURE_DEBUT * 60) / 60) * HAUTEUR_HEURE;
-                    const hauteur = ((minutes(c.fin!) - minutes(c.debut!)) / 60) * HAUTEUR_HEURE;
-                    return bloc(c, {
-                      position: 'absolute', top: Math.max(0, haut), height: Math.max(16, hauteur),
-                      left: 2, right: 2,
-                    });
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <LegendeChantiers
-          chantiers={chantiers.data ?? []}
-          actif={new Set(r.creneaux.map((c) => c.chantierId))}
-          glissable
-          aide={salarie
-            ? `Glissez un chantier sur un jour : ${HEURES_JOURNEE} h prévues pour le salarié filtré.`
-            : 'Choisissez un salarié pour poser des journées par glisser-déposer. Cliquez une pastille pour changer la couleur.'}
-          onChoisirCouleur={(chantierId, color) => colorier.mutate({ chantierId, color })}
-        />
+          <CalendrierSemaine
+            jours={r.jours}
+            creneaux={r.creneaux}
+            onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
+            onDeposerChantier={(chantierId, date) => deposer(`chantier:${chantierId}`, date)}
+            onMenuJour={(jour, p) => setMenu({ type: 'jour', jour, ...p })}
+            onMenuCreneau={(c, p) => setMenu({ type: 'creneau', creneau: c as Creneau, ...p })}
+          />
+          <LegendeChantiers
+            chantiers={chantiers.data ?? []}
+            actif={new Set(r.creneaux.map((c) => c.chantierId))}
+            glissable
+            aide={salarie
+              ? `Glissez un chantier sur un jour : ${HEURES_JOURNEE} h prévues pour le salarié filtré.`
+              : 'Choisissez un salarié pour poser des journées par glisser-déposer. Cliquez une pastille pour changer la couleur.'}
+            onChoisirCouleur={(chantierId, color) => colorier.mutate({ chantierId, color })}
+          />
         </div>
       )}
 

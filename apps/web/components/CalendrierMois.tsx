@@ -17,6 +17,11 @@ export interface CreneauCalendrier {
   /** Motif, pour les seules absences. */
   motif?: string | null;
   commentaire?: string | null;
+  /** Imputation des heures réalisées : ouvrage du chantier et poste analytique. */
+  executionLineId?: string | null;
+  ouvrage?: string | null;
+  codeAnalytiqueId?: string | null;
+  codeAnalytique?: string | null;
   date: string;
   heures: string;
   debut: string | null;
@@ -190,6 +195,8 @@ export function CalendrierMois({
                     title={`${c.label} · ${absence ? libelleAbsence(c.motif ?? '') : `${c.chantierCode} — ${c.chantierNom}`}\n${
                       c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
                     }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}${
+                      c.ouvrage ? `\nOuvrage : ${c.ouvrage}` : ''}${
+                      c.codeAnalytique ? `\nCode analytique : ${c.codeAnalytique}` : ''}${
                       c.commentaire ? `\n${c.commentaire}` : ''}`}
                     style={{
                       background: plein ? teinte : absence ? rayures(teinte) : 'transparent',

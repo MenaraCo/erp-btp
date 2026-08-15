@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
@@ -19,6 +19,26 @@ export interface CreneauEdite {
 }
 
 interface Option { id: string; label: string }
+
+interface LigneExecution {
+  id: string;
+  code: string | null;
+  designation: string;
+  vendable: boolean;
+  children?: LigneExecution[];
+}
+interface PlanCode { id: string; code: string; label: string }
+interface PlanFamille { codes: PlanCode[] }
+interface PlanLot { familles: PlanFamille[] }
+interface PlanNature { nature: string; label: string; lots: PlanLot[] }
+
+/** Aplatit l'arbre d'exécution : un sélecteur se lit mieux à plat, indenté par niveau. */
+function aplatir(lignes: LigneExecution[], niveau = 0): Array<{ id: string; label: string }> {
+  return lignes.flatMap((l) => [
+    { id: l.id, label: `${'— '.repeat(niveau)}${l.code ? `${l.code} · ` : ''}${l.designation}` },
+    ...aplatir(l.children ?? [], niveau + 1),
+  ]);
+}
 
 /** Découpages courants d'une journée de chantier — un clic plutôt que quatre champs. */
 const RACCOURCIS = [
@@ -53,6 +73,8 @@ export function CreneauModal({
     heures?: string;
     debut?: string | null;
     fin?: string | null;
+    executionLineId?: string | null;
+    codeAnalytiqueId?: string | null;
   };
   salaries: Option[];
   chantiers: Option[];
@@ -68,7 +90,28 @@ export function CreneauModal({
   const [debut, setDebut] = useState(initial.debut ?? '');
   const [fin, setFin] = useState(initial.fin ?? '');
   const [heures, setHeures] = useState(initial.heures ?? '7');
+  const [ouvrage, setOuvrage] = useState(initial.executionLineId ?? '');
+  const [codeAnalytique, setCodeAnalytique] = useState(initial.codeAnalytiqueId ?? '');
   const [err, setErr] = useState<string | null>(null);
+
+  // Ouvrages du chantier choisi : c'est là que se joue le coût réel d'une prestation. Sans cette
+  // imputation, on sait ce qu'a coûté le chantier, jamais ce qu'a coûté l'ouvrage.
+  const ouvrages = useQuery({
+    queryKey: ['execution-tree', chantierId],
+    enabled: Boolean(token && chantierId && kind === 'realise'),
+    retry: false,
+    queryFn: () => apiFetch<LigneExecution[]>(`/chantiers/${chantierId}/execution-tree`, { token }),
+  });
+  const plan = useQuery({
+    queryKey: ['analytical-plan'],
+    enabled: Boolean(token && kind === 'realise'),
+    queryFn: () => apiFetch<PlanNature[]>('/analytical/plan', { token }),
+  });
+
+  const optionsOuvrages = aplatir(ouvrages.data ?? []);
+  const optionsCodes = (plan.data ?? []).flatMap((n) =>
+    n.lots.flatMap((l) => l.familles.flatMap((f) =>
+      f.codes.map((c) => ({ id: c.id, label: `${c.code} — ${c.label}` })))));
 
   const horodate = Boolean(debut && fin);
 
@@ -81,6 +124,9 @@ export function CreneauModal({
         debut: debut || null,
         fin: fin || null,
         heures: horodate ? null : heures,
+        // Le prévisionnel ne s'impute pas : il n'a pas encore de coût à rattacher.
+        executionLineId: kind === 'realise' ? (ouvrage || null) : null,
+        codeAnalytiqueId: kind === 'realise' ? (codeAnalytique || null) : null,
       };
       if (mode === 'creation') {
         return apiFetch('/personnel/creneaux', { method: 'POST', token, body: { kind, ...corps } });
@@ -88,7 +134,13 @@ export function CreneauModal({
       return apiFetch(`/personnel/creneaux/${initial.kind}/${initial.id}`, {
         method: 'PATCH', token,
         // Le salarié ne se change pas ici : ce serait une autre intervention, pas une correction.
-        body: { chantierId, date, debut: debut || null, fin: fin || null, heures: horodate ? null : heures },
+        body: {
+          chantierId, date, debut: debut || null, fin: fin || null,
+          heures: horodate ? null : heures,
+          ...(initial.kind === 'realise'
+            ? { executionLineId: ouvrage || null, codeAnalytiqueId: codeAnalytique || null }
+            : {}),
+        },
       });
     },
     onSuccess: () => {
@@ -152,6 +204,29 @@ export function CreneauModal({
           </div>
         </div>
 
+        {kind === 'realise' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="field">
+              <label>Ouvrage</label>
+              <select
+                value={ouvrage}
+                disabled={!chantierId || optionsOuvrages.length === 0}
+                onChange={(e) => setOuvrage(e.target.value)}
+              >
+                <option value="">— Sans ouvrage —</option>
+                {optionsOuvrages.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Code analytique</label>
+              <select value={codeAnalytique} onChange={(e) => setCodeAnalytique(e.target.value)}>
+                <option value="">— Celui de la fiche salarié —</option>
+                {optionsCodes.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '4px 0 12px' }}>
           {RACCOURCIS.map((r) => (
             <button
@@ -190,6 +265,7 @@ export function CreneauModal({
         <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>
           Avec un créneau horaire, la durée est déduite et un chevauchement devient détectable.
           Sans horaire, seul le volume d’heures est enregistré.
+          {kind === 'realise' && ' L’ouvrage donne le coût réel de la prestation ; le code analytique, celui du poste.'}
         </p>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>

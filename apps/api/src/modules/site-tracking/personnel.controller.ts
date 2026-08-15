@@ -67,6 +67,7 @@ export class PersonnelController {
     @Body() body: {
       kind?: string; employeeId?: string; chantierId?: string; date?: string;
       heures?: string | number | null; debut?: string | null; fin?: string | null;
+      executionLineId?: string | null; codeAnalytiqueId?: string | null;
     },
   ) {
     return this.personnel.creer({
@@ -77,6 +78,8 @@ export class PersonnelController {
       heures: body?.heures ?? null,
       debut: body?.debut ?? null,
       fin: body?.fin ?? null,
+      executionLineId: body?.executionLineId ?? null,
+      codeAnalytiqueId: body?.codeAnalytiqueId ?? null,
     });
   }
 
@@ -93,6 +96,7 @@ export class PersonnelController {
     @Body() body: {
       date?: string; debut?: string | null; fin?: string | null;
       heures?: string | number | null; chantierId?: string | null;
+      executionLineId?: string | null; codeAnalytiqueId?: string | null;
     },
   ) {
     return this.personnel.deplacer(typeDeCreneau(kind), id, body ?? {});

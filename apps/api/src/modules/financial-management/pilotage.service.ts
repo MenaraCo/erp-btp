@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
+import { engageMainOeuvreParMois } from '../site-tracking/labor-commitment';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { FinancialForecastService } from './financial-forecast.service';
 
@@ -58,6 +59,8 @@ export class PilotageService {
           GROUP BY 1`,
         [chantierId],
       );
+      // Main d'œuvre engagée, datée par le jour de travail prévu.
+      const moEngageByMonth = await engageMainOeuvreParMois(em, chantierId);
       // Flux mensuels de réalisé (factures fournisseur + pointages).
       const realiseByMonth: Array<{ m: string; v: string }> = await em.query(
         `SELECT m, SUM(v)::numeric(16,2) AS v FROM (
@@ -78,6 +81,9 @@ export class PilotageService {
         );
 
       const engMap = new Map(engageByMonth.map((r) => [r.m, r.v]));
+      for (const r of moEngageByMonth) {
+        engMap.set(r.m, (Number(engMap.get(r.m) ?? 0) + Number(r.v)).toFixed(2));
+      }
       const realMap = new Map(realiseByMonth.map((r) => [r.m, r.v]));
       const closureMap = new Map(closures.map((r) => [r.m, r.snapshot?.indicators ?? {}]));
 

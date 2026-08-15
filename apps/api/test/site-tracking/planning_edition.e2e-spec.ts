@@ -150,6 +150,50 @@ describe('Gestion du personnel — édition du planning', () => {
     expect(conflits.total).toBe(0);
   });
 
+  it('compte_les_heures_planifiees_dans_lengage_et_les_retire_une_fois_pointees', async () => {
+    const resultat = async () => (await as('get', `/chantiers/${chantierB}/results`).expect(200)).body;
+
+    const avant = await resultat();
+    const engageAvant = Number(avant.byNature.find((n: { nature: string }) => n.nature === 'labor').engage);
+
+    // Deux journées planifiées à 30 €/h × 7 h = 420 € engagés.
+    await as('post', '/personnel/creneaux')
+      .send({ kind: 'prevu', employeeId: empId, chantierId: chantierB, date: '2027-01-11', heures: '7' })
+      .expect(201);
+    await as('post', '/personnel/creneaux')
+      .send({ kind: 'prevu', employeeId: empId, chantierId: chantierB, date: '2027-01-12', heures: '7' })
+      .expect(201);
+
+    const apres = await resultat();
+    const mo = apres.byNature.find((n: { nature: string }) => n.nature === 'labor');
+    expect(Number(mo.engage) - engageAvant).toBe(420);
+
+    // Le jour effectivement pointé quitte l'engagé pour le réalisé : jamais compté deux fois.
+    await as('post', '/personnel/creneaux')
+      .send({ kind: 'realise', employeeId: empId, chantierId: chantierB, date: '2027-01-11', heures: '7' })
+      .expect(201);
+
+    const final = await resultat();
+    const moFinal = final.byNature.find((n: { nature: string }) => n.nature === 'labor');
+    expect(Number(moFinal.engage) - engageAvant).toBe(210);
+    expect(Number(moFinal.realise) - Number(mo.realise)).toBe(210);
+  });
+
+  it('impute_les_heures_a_un_ouvrage_et_a_un_code_analytique', async () => {
+    const cree = (await as('post', '/personnel/creneaux')
+      .send({ kind: 'realise', employeeId: empId, chantierId: chantierA, date: '2027-02-01', heures: '7' })
+      .expect(201)).body;
+
+    const vue = (await as('get', '/personnel/creneaux?debut=2027-02-01&fin=2027-02-01').expect(200)).body;
+    const ligne = vue.creneaux.find((c: { id: string }) => c.id === cree.id);
+    expect(ligne.executionLineId).toBeNull();
+
+    // Un ouvrage d'un AUTRE chantier est refusé : les heures suivraient un budget étranger.
+    await as('patch', `/personnel/creneaux/realise/${cree.id}`)
+      .send({ executionLineId: '00000000-0000-0000-0000-000000000000' })
+      .expect(400);
+  });
+
   it('refuse_un_motif_dabsence_inconnu_et_une_periode_a_lenvers', async () => {
     await as('post', '/personnel/absences')
       .send({ employeeId: empId, kind: 'vacances_au_soleil', debut: '2026-12-21' })

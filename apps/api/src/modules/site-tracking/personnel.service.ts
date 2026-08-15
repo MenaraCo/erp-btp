@@ -325,17 +325,22 @@ export class PersonnelService {
                 c.color AS chantier_couleur,
                 t.work_date::text AS date, t.hours::text AS heures,
                 to_char(t.start_time,'HH24:MI') AS debut, to_char(t.end_time,'HH24:MI') AS fin,
-                (t.imputed_at IS NOT NULL) AS fige
+                (t.imputed_at IS NOT NULL) AS fige,
+                t.execution_line_id, el.designation AS ouvrage,
+                t.code_analytique_id, ac.code AS code_analytique
            FROM timesheet t
            JOIN employee e ON e.id = t.employee_id
            JOIN chantier c ON c.id = t.chantier_id
+           LEFT JOIN execution_line el ON el.id = t.execution_line_id
+           LEFT JOIN analytical_code ac ON ac.id = t.code_analytique_id
           WHERE t.work_date BETWEEN $1 AND $2 ${filtres}
          UNION ALL
          SELECT f.id, 'prevu', e.id,
                 trim(coalesce(e.first_name,'') || ' ' || e.last_name),
                 c.id, c.code, c.name, c.color,
                 f.work_date::text, f.hours::text,
-                to_char(f.start_time,'HH24:MI'), to_char(f.end_time,'HH24:MI'), false
+                to_char(f.start_time,'HH24:MI'), to_char(f.end_time,'HH24:MI'), false,
+                NULL, NULL, NULL, NULL
            FROM timesheet_forecast f
            JOIN employee e ON e.id = f.employee_id
            JOIN chantier c ON c.id = f.chantier_id
@@ -369,6 +374,10 @@ export class PersonnelService {
         chantierCouleur: null as string | null,
         motif: a.kind as string | null,
         commentaire: (a.comment as string | null) ?? null,
+        executionLineId: null as string | null,
+        ouvrage: null as string | null,
+        codeAnalytiqueId: null as string | null,
+        codeAnalytique: null as string | null,
         date: a.date as string,
         heures: new Decimal(a.heures as string).toString(),
         debut: (a.debut as string | null) ?? null,
@@ -393,6 +402,10 @@ export class PersonnelService {
           heures: new Decimal(r.heures as string).toString(),
           motif: null as string | null,
           commentaire: null as string | null,
+          executionLineId: (r.execution_line_id as string | null) ?? null,
+          ouvrage: (r.ouvrage as string | null) ?? null,
+          codeAnalytiqueId: (r.code_analytique_id as string | null) ?? null,
+          codeAnalytique: (r.code_analytique as string | null) ?? null,
           debut: (r.debut as string | null) ?? null,
           fin: (r.fin as string | null) ?? null,
           fige: Boolean(r.fige),
@@ -416,6 +429,10 @@ export class PersonnelService {
     heures?: string | number | null;
     debut?: string | null;
     fin?: string | null;
+    /** Ouvrage du chantier auquel imputer les heures — le coût réel d'un ouvrage en dépend. */
+    executionLineId?: string | null;
+    /** Poste analytique ; à défaut, celui de la fiche salarié. */
+    codeAnalytiqueId?: string | null;
   }) {
     const tenantId = this.context.requireTenantId();
     if (!input?.employeeId) throw new BadRequestException('Le salarié est requis.');
@@ -440,6 +457,8 @@ export class PersonnelService {
         hourlyCost: null as unknown as string,
         startTime: creneau?.debut ?? null,
         endTime: creneau?.fin ?? null,
+        executionLineId: input.executionLineId ?? null,
+        codeAnalytiqueId: input.codeAnalytiqueId ?? null,
       }).then((t: Record<string, unknown>) => ({
         id: t.id as string, kind: 'realise' as const, date: input.date, heures: heures.toString(),
       }));
@@ -509,6 +528,7 @@ export class PersonnelService {
     cible: {
       date?: string; debut?: string | null; fin?: string | null;
       heures?: string | number | null; chantierId?: string | null;
+      executionLineId?: string | null; codeAnalytiqueId?: string | null;
     },
   ) {
     const tenantId = this.context.requireTenantId();
@@ -580,15 +600,30 @@ export class PersonnelService {
         // Changer de chantier détache la ligne de l'ouvrage d'origine : il appartient à l'autre
         // chantier, et la garder pointerait des heures sur une prestation étrangère.
         const detacheOuvrage = chantierId !== ligne.chantier_id;
+        let ouvrageId = detacheOuvrage ? null : (ligne.execution_line_id as string | null);
+        if (cible.executionLineId !== undefined) {
+          ouvrageId = cible.executionLineId || null;
+          if (ouvrageId) {
+            const ouvrage = await em.query(
+              `SELECT id FROM execution_line WHERE id = $1 AND chantier_id = $2`,
+              [ouvrageId, chantierId],
+            );
+            if (ouvrage.length === 0) {
+              throw new BadRequestException('Cet ouvrage n’appartient pas au chantier choisi.');
+            }
+          }
+        }
+        const codeAnalytique = cible.codeAnalytiqueId === undefined
+          ? (ligne.code_analytique_id as string | null)
+          : (cible.codeAnalytiqueId || null);
         await em.query(
           `UPDATE timesheet
               SET work_date = $2, hours = $3, cost = $4, start_time = $5, end_time = $6,
-                  chantier_id = $7,
-                  execution_line_id = CASE WHEN $8 THEN NULL ELSE execution_line_id END,
+                  chantier_id = $7, execution_line_id = $8, code_analytique_id = $9,
                   updated_at = now()
             WHERE id = $1`,
           [id, date, heures.toString(), cout.toString(), creneau?.debut ?? null,
-            creneau?.fin ?? null, chantierId, detacheOuvrage],
+            creneau?.fin ?? null, chantierId, ouvrageId, codeAnalytique],
         );
       }
       return {
