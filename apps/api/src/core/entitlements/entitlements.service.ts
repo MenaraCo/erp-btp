@@ -9,6 +9,17 @@ import { DataSource } from 'typeorm';
 import { runInTenant } from '../tenancy/tenant-transaction';
 import { CatalogService } from '../catalog/catalog.service';
 
+/** État du pool de jetons d'une société : ce qui est acheté, posé, et ce qu'il reste. */
+export interface SeatPool {
+  /** Jetons du palier = sièges achetés × nombre de modules du palier (Socle compris). */
+  total: number;
+  /** Jetons déjà posés sur les modules du palier, tous modules confondus. */
+  used: number;
+  remaining: number;
+  /** Modules couverts par le palier — ceux qui puisent dans le pool. */
+  packModules: string[];
+}
+
 /**
  * Source of truth for "can this user use this capability". Combines:
  *  - the catalogue (capability -> modules that unlock it),
@@ -175,6 +186,60 @@ export class EntitlementsService {
   }
 
   /** Removes a seat assignment (frees a jeton). No-op if it does not exist. */
+  /**
+   * Lecture du pool de jetons dans une transaction déjà ouverte.
+   *
+   * Le palier vend des SIÈGES, et chaque siège ouvre autant de jetons que le palier compte de
+   * modules : « Pro » (Socle + Études de prix + Facturation) vaut 3 jetons par siège. Ces jetons
+   * sont ensuite librement répartis — un jeton posé sur un module en retire un au total commun,
+   * quel que soit le module.
+   *
+   * `lock` verrouille la souscription le temps d'une affectation : sans cela, deux affectations
+   * simultanées liraient le même « il en reste 1 » et dépasseraient le quota payé.
+   */
+  private async readPool(
+    em: { query: (sql: string, params?: unknown[]) => Promise<Array<Record<string, unknown>>> },
+    lock = false,
+  ): Promise<SeatPool> {
+    const sub = (
+      await em.query(
+        `SELECT pack_code, pack_seats FROM subscription${lock ? ' FOR UPDATE' : ''}`,
+      )
+    )[0] as { pack_code: string | null; pack_seats: number | null } | undefined;
+
+    if (!sub?.pack_code) {
+      return { total: 0, used: 0, remaining: 0, packModules: [] };
+    }
+    const rows = await em.query(
+      `SELECT m.code FROM pack p
+         JOIN pack_module pm ON pm.pack_id = p.id
+         JOIN module m ON m.id = pm.module_id
+        WHERE p.code = $1`,
+      [sub.pack_code],
+    );
+    const packModules = rows.map((r) => r.code as string);
+    const seats = Number(sub.pack_seats ?? 0);
+    const total = seats * packModules.length;
+
+    const used = packModules.length
+      ? Number(
+          (
+            (await em.query(
+              `SELECT count(*)::int AS n FROM seat_assignment WHERE module_code = ANY($1)`,
+              [packModules],
+            )) as Array<{ n: number }>
+          )[0].n,
+        )
+      : 0;
+
+    return { total, used, remaining: Math.max(0, total - used), packModules };
+  }
+
+  /** État du pool de jetons de la société — ce que l'écran d'abonnement affiche. */
+  getSeatPool(tenantId: string): Promise<SeatPool> {
+    return runInTenant(this.dataSource, tenantId, (em) => this.readPool(em));
+  }
+
   unassignSeat(tenantId: string, assignmentId: string): Promise<void> {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await em.query(`DELETE FROM seat_assignment WHERE id = $1`, [assignmentId]);
@@ -201,15 +266,28 @@ export class EntitlementsService {
           `Module "${moduleCode}" is not active for this tenant`,
         );
       }
-      const purchased = Number(tm[0].seats_purchased);
-      const used = await em.query(
-        `SELECT count(*)::int AS n FROM seat_assignment WHERE module_code = $1`,
-        [moduleCode],
-      );
-      if (Number(used[0].n) >= purchased) {
-        throw new ConflictException(
-          `No seats left for module "${moduleCode}" (purchased ${purchased})`,
+
+      // Les modules du palier puisent dans le POOL COMMUN de la société ; les options, achetées
+      // séparément au siège, gardent leur propre compteur.
+      const pool = await this.readPool(em, true);
+      if (pool.packModules.includes(moduleCode)) {
+        if (pool.remaining <= 0) {
+          throw new ConflictException(
+            `Plus de jeton disponible : ${pool.used}/${pool.total} déjà affectés. `
+            + `Retirez un jeton à un utilisateur, ou augmentez le nombre de jetons de votre formule.`,
+          );
+        }
+      } else {
+        const purchased = Number(tm[0].seats_purchased);
+        const used = await em.query(
+          `SELECT count(*)::int AS n FROM seat_assignment WHERE module_code = $1`,
+          [moduleCode],
         );
+        if (Number(used[0].n) >= purchased) {
+          throw new ConflictException(
+            `Plus de jeton disponible pour l’option « ${moduleCode} » (${purchased} acheté(s)).`,
+          );
+        }
       }
       await em.query(
         `INSERT INTO seat_assignment (tenant_id, module_code, user_id, assigned_by)

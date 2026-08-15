@@ -32,6 +32,29 @@ export interface AppModule {
   features: ModuleFeature[];
 }
 
+/**
+ * Libellés commerciaux des modules du CATALOGUE (ceux qui se souscrivent et portent des jetons).
+ * Distincts des tuiles de navigation ci-dessous : on ne montre jamais un code technique
+ * (`estimating`, `core`…) à un client — c'est du jargon de développeur, pas du français.
+ */
+export const MODULE_LABELS: Record<string, string> = {
+  core: 'Socle',
+  estimating: 'Études de prix',
+  invoicing: 'Facturation',
+  site_tracking: 'Suivi de chantiers',
+  financial_management: 'Gestion financière',
+  stock_equipment: 'Stocks & Parc matériel',
+  bim: 'BIM / IFC',
+  ai: 'Assistance IA',
+  api: 'API & connecteurs',
+  enterprise: 'Entreprise (multi-société, SSO)',
+};
+
+/** Libellé lisible d'un module ; à défaut le code, pour ne jamais afficher une case vide. */
+export function moduleLabel(code: string): string {
+  return MODULE_LABELS[code] ?? code;
+}
+
 /** Capacités qui ouvrent l'acceptation de commande : facturer OU suivre des chantiers. */
 export const ACCEPTANCE_CAPABILITIES = ['invoicing.situations', 'site_tracking.budget'];
 

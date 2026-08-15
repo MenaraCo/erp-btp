@@ -36,6 +36,16 @@ export class SeatController {
     return this.entitlements.listUsers(this.context.requireTenantId());
   }
 
+  /**
+   * État du pool de jetons : acheté / posé / restant. L'écran d'abonnement s'en sert pour montrer
+   * ce qu'il reste AVANT que l'utilisateur ne tente une affectation qui échouerait.
+   */
+  @Get('seats/pool')
+  @RequiresPermission('entitlements.seat.assign')
+  pool() {
+    return this.entitlements.getSeatPool(this.context.requireTenantId());
+  }
+
   /** Current jeton assignments, optionally filtered by module. */
   @Get('seats')
   @RequiresPermission('entitlements.seat.assign')

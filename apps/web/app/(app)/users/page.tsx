@@ -3,43 +3,17 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
+import { moduleLabel } from '@/lib/modules';
 
 /* ─────────── types ─────────── */
 interface Role { code: string; label: string; isSystem: boolean; permissions: string[] }
 interface UserWithRoles { id: string; email: string; firstName: string | null; lastName: string | null; fullName: string | null; roles: string[] }
 interface Seat { id: string; moduleCode: string; userId: string; email: string; fullName: string | null }
+interface Permission { key: string; label: string }
 
-const MODULE_LABELS: Record<string, string> = {
-  core: 'Socle',
-  estimating: 'Études de prix',
-  invoicing: 'Facturation',
-  site_tracking: 'Suivi de chantiers',
-  financial_management: 'Gestion financière',
-  stock_equipment: 'Stocks & Parc matériel',
-  bim: 'BIM / IFC',
-  ai: 'Assistance IA',
-  api: 'API & connecteurs',
-  enterprise: 'Entreprise (multi-société, SSO)',
-};
-const PERMISSION_LABELS: Record<string, string> = {
-  'rbac.role.manage': 'Gérer les rôles',
-  'rbac.user_role.assign': 'Affecter des rôles',
-  'entitlements.seat.assign': 'Affecter des jetons',
-  'subscription.manage': 'Gérer la souscription',
-  'directory.read': 'Consulter le référentiel',
-  'directory.write': 'Modifier le référentiel',
-  'estimating.devis.read': 'Consulter les devis',
-  'estimating.devis.write': 'Modifier les devis',
-  'invoicing.read': 'Consulter la facturation',
-  'invoicing.write': 'Gérer la facturation',
-  'site_tracking.read': 'Consulter le suivi de chantiers',
-  'site_tracking.write': 'Gérer le suivi de chantiers',
-  'financial.read': 'Consulter la gestion financière',
-  'financial.write': 'Paramétrer la gestion financière',
-};
 
 /**
  * Console Utilisateurs & rôles (cahier §3.2). Deux axes orthogonaux :
@@ -62,12 +36,25 @@ export default function UsersPage() {
     retry: false,
     queryFn: () => apiFetch<Role[]>('/roles', { token }),
   });
+  // Libellés servis par l'API : une permission ajoutée côté serveur s'affiche ici sans retouche,
+  // au lieu de sortir en clé technique.
+  const permissions = useQuery({
+    queryKey: ['permissions'],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<Permission[]>('/permissions', { token }),
+  });
   const seats = useQuery({
     queryKey: ['seats'],
     enabled: Boolean(token),
     retry: false,
     queryFn: () => apiFetch<Seat[]>('/seats', { token }),
   });
+
+  const permissionLabel = useMemo(() => {
+    const map = new Map((permissions.data ?? []).map((p) => [p.key, p.label]));
+    return (key: string) => map.get(key) ?? key;
+  }, [permissions.data]);
 
   const seatsByUser = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -79,11 +66,10 @@ export default function UsersPage() {
     return map;
   }, [seats.data]);
 
-  const toggleRole = useMutation({
-    mutationFn: ({ userId, roleCode, has }: { userId: string; roleCode: string; has: boolean }) =>
-      has
-        ? apiFetch(`/admin/users/${userId}/roles/${roleCode}`, { method: 'DELETE', token })
-        : apiFetch(`/admin/users/${userId}/roles`, { method: 'POST', token, body: { roleCode } }),
+  // Un profil À LA FOIS : le serveur remplace l'ancien dans la même transaction.
+  const setRole = useMutation({
+    mutationFn: ({ userId, roleCode }: { userId: string; roleCode: string | null }) =>
+      apiFetch(`/admin/users/${userId}/role`, { method: 'POST', token, body: { roleCode } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
   });
 
@@ -105,10 +91,10 @@ export default function UsersPage() {
     <div>
       <h1 style={{ marginBottom: 4 }}>Utilisateurs & rôles</h1>
       <p className="muted" style={{ marginTop: 0, maxWidth: 760 }}>
-        Deux droits distincts par utilisateur : les <strong>rôles</strong> déterminent ce qu'il a le droit de faire
-        (consulter, modifier, gérer) ; l'<strong>accès aux modules</strong> dépend des <strong>jetons</strong>, gérés
-        dans <Link href="/abonnement" className="link">Abonnement</Link>. Les deux doivent être accordés pour agir
-        dans un module.
+        Chaque personne a deux choses distinctes : un <strong>profil</strong>, qui dit ce qu'elle a le droit
+        de faire (consulter, modifier, gérer), et des <strong>jetons</strong>, qui disent à quels modules elle
+        accède — attribués dans <Link href="/abonnement" className="link">Abonnement</Link>. Il faut les deux
+        pour travailler dans un module.
       </p>
 
       <div className="card" style={{ marginTop: 12, padding: 0, overflow: 'hidden' }}>
@@ -119,7 +105,7 @@ export default function UsersPage() {
               <thead>
                 <tr>
                   <th>Utilisateur</th>
-                  <th>Rôles (droits d'action)</th>
+                  <th>Profil (droits d'action)</th>
                   <th>Accès modules (jetons)</th>
                 </tr>
               </thead>
@@ -131,29 +117,34 @@ export default function UsersPage() {
                       <div className="muted" style={{ fontSize: 12 }}>{u.email}</div>
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {(roles.data ?? []).map((r) => {
-                          const has = u.roles.includes(r.code);
-                          return (
-                            <button
-                              key={r.code}
-                              type="button"
-                              title={r.permissions.map((p) => PERMISSION_LABELS[p] ?? p).join(', ')}
-                              disabled={toggleRole.isPending}
-                              onClick={() => toggleRole.mutate({ userId: u.id, roleCode: r.code, has })}
-                              style={{
-                                display: 'inline-flex', alignItems: 'center', gap: 4,
-                                padding: '3px 10px', borderRadius: 14, cursor: 'pointer', fontSize: 12,
-                                border: has ? '1px solid var(--primary)' : '1px solid var(--border)',
-                                background: has ? 'var(--primary)' : 'transparent',
-                                color: has ? '#fff' : 'var(--muted)',
-                              }}
+                      {(() => {
+                        const courant = u.roles[0] ?? '';
+                        const role = (roles.data ?? []).find((r) => r.code === courant);
+                        return (
+                          <div>
+                            <select
+                              value={courant}
+                              disabled={setRole.isPending}
+                              onChange={(e) =>
+                                setRole.mutate({ userId: u.id, roleCode: e.target.value || null })
+                              }
+                              style={{ minWidth: 200 }}
                             >
-                              {has && <Check size={12} />} {r.label}
-                            </button>
-                          );
-                        })}
-                      </div>
+                              <option value="">— Aucun droit —</option>
+                              {(roles.data ?? []).map((r) => (
+                                <option key={r.code} value={r.code}>{r.label}</option>
+                              ))}
+                            </select>
+                            {/* Ce que le profil autorise, en clair, sous la liste : le choix se
+                                fait sur des mots métier, pas sur des clés techniques. */}
+                            <div className="muted" style={{ fontSize: 11, marginTop: 4, maxWidth: 320 }}>
+                              {role
+                                ? role.permissions.map(permissionLabel).join(' · ')
+                                : 'Cet utilisateur ne peut rien faire tant qu’aucun profil ne lui est attribué.'}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -162,7 +153,7 @@ export default function UsersPage() {
                         ) : (
                           (seatsByUser.get(u.id) ?? []).map((code) => (
                             <span key={code} className="badge" style={{ fontSize: 11 }}>
-                              {MODULE_LABELS[code] ?? code}
+                              {moduleLabel(code)}
                             </span>
                           ))
                         )}
@@ -176,11 +167,12 @@ export default function UsersPage() {
         )}
       </div>
       <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-        Cliquez un rôle pour l'accorder ou le retirer (les rôles se cumulent). Pour donner accès à un module,
-        affectez un jeton dans <Link href="/abonnement" className="link">Abonnement → Modules & jetons</Link>.
+        Choisissez un profil par personne : il décide de ce qu'elle a le droit de faire. Pour lui ouvrir
+        un module, affectez-lui un jeton dans{' '}
+        <Link href="/abonnement" className="link">Abonnement → Formule & Options</Link>.
       </p>
 
-      <RolesLegend roles={roles.data ?? []} />
+      <RolesLegend roles={roles.data ?? []} permissionLabel={permissionLabel} />
       <CreateUser roles={roles.data ?? []} token={token} onCreated={() => {
         qc.invalidateQueries({ queryKey: ['admin-users'] });
       }} />
@@ -189,7 +181,13 @@ export default function UsersPage() {
 }
 
 /* ─────────── légende des rôles ─────────── */
-function RolesLegend({ roles }: { roles: Role[] }) {
+function RolesLegend({
+  roles,
+  permissionLabel,
+}: {
+  roles: Role[];
+  permissionLabel: (key: string) => string;
+}) {
   if (roles.length === 0) return null;
   return (
     <div className="card" style={{ marginTop: 16 }}>
@@ -201,7 +199,7 @@ function RolesLegend({ roles }: { roles: Role[] }) {
           <div key={r.code} style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
             <strong style={{ minWidth: 120 }}>{r.label}</strong>
             <span className="muted" style={{ fontSize: 12 }}>
-              {r.permissions.map((p) => PERMISSION_LABELS[p] ?? p).join(' · ')}
+              {r.permissions.map(permissionLabel).join(' · ')}
             </span>
           </div>
         ))}

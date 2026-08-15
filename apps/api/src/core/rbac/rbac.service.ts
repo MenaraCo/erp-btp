@@ -105,6 +105,36 @@ export class RbacService {
   }
 
   /**
+   * Fixe le PROFIL d'un utilisateur : un seul rôle à la fois, l'ancien étant retiré.
+   *
+   * La console présente un profil métier unique par personne (« Deviseur », « Conducteur de
+   * travaux »…) : c'est ce qu'un non-informaticien sait choisir, là où un cumul de rôles se
+   * comprend mal. Le remplacement se fait dans UNE transaction — sinon un incident entre le
+   * retrait et l'ajout laisserait l'utilisateur sans aucun droit.
+   *
+   * `roleCode = null` retire tout profil (l'utilisateur garde son compte, mais aucun droit).
+   */
+  setSingleRole(tenantId: string, userId: string, roleCode: string | null): Promise<void> {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      let roleId: string | null = null;
+      if (roleCode) {
+        const roleRows = await em.query(`SELECT id FROM role WHERE code = $1`, [roleCode]);
+        if (roleRows.length === 0) {
+          throw new BadRequestException(`Unknown role "${roleCode}"`);
+        }
+        roleId = roleRows[0].id as string;
+      }
+      await em.query(`DELETE FROM user_role WHERE user_id = $1`, [userId]);
+      if (roleId) {
+        await em.query(
+          `INSERT INTO user_role (tenant_id, user_id, role_id) VALUES ($1, $2, $3)`,
+          [tenantId, userId, roleId],
+        );
+      }
+    });
+  }
+
+  /**
    * Toutes les permissions de l'utilisateur, tous rôles cumulés (dédoublonnées).
    *
    * Sert au miroir `/me/capabilities` : sans elle, l'écran ne connaît que les jetons et propose

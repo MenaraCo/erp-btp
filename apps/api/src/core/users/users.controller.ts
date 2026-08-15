@@ -3,6 +3,7 @@ import { RequiresPermission } from '../rbac/requires-permission.decorator';
 import { TenantContext } from '../tenancy/tenant-context';
 import { RbacService } from '../rbac/rbac.service';
 import { CreateUserInput, UsersService } from './users.service';
+import { PERMISSIONS } from '../rbac/rbac.config';
 
 /**
  * Console d'administration des utilisateurs et rôles d'une société (cahier §3.2). Gardée par la
@@ -42,6 +43,17 @@ export class UsersController {
     return this.users.createUser(this.context.requireTenantId(), body);
   }
 
+  /**
+   * Libellés des permissions, pour que l'écran n'ait pas à les recopier.
+   * Un libellé recopié côté web finit par diverger — et une permission oubliée s'affichait alors
+   * en clé technique (« directory.validate ») au nez de l'utilisateur.
+   */
+  @Get('permissions')
+  @RequiresPermission('rbac.user_role.assign')
+  permissions() {
+    return PERMISSIONS;
+  }
+
   /** Catalogue of tenant roles with their permissions. */
   @Get('roles')
   @RequiresPermission('rbac.user_role.assign')
@@ -65,6 +77,18 @@ export class UsersController {
     }
     const tenantId = this.context.requireTenantId();
     await this.rbac.assignRole(tenantId, userId, body.roleCode);
+    return this.rbac.listUserRoles(tenantId, userId);
+  }
+
+  /**
+   * Fixe le profil unique d'un utilisateur (liste déroulante de la console).
+   * `roleCode: null` retire tout profil.
+   */
+  @Post('admin/users/:userId/role')
+  @RequiresPermission('rbac.user_role.assign')
+  async setRole(@Param('userId') userId: string, @Body() body: { roleCode?: string | null }) {
+    const tenantId = this.context.requireTenantId();
+    await this.rbac.setSingleRole(tenantId, userId, body?.roleCode ?? null);
     return this.rbac.listUserRoles(tenantId, userId);
   }
 

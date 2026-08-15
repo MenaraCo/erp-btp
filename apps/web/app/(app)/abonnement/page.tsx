@@ -7,7 +7,7 @@ import { Lock, Plus, Trash2, Sparkles, CreditCard, FlaskConical } from 'lucide-r
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
-import { MODULES } from '@/lib/modules';
+import { MODULES, moduleLabel } from '@/lib/modules';
 
 /* ─────────── types ─────────── */
 interface Subscription {
@@ -85,6 +85,12 @@ interface Devis {
   promoLimitee: boolean;
   montantCentimesApresPromo: number;
   mensuelNet: number;
+}
+interface SeatPool {
+  total: number;
+  used: number;
+  remaining: number;
+  packModules: string[];
 }
 interface EtatPaiement {
   /** Prestataire de substitution : aucun euro ne circule, tout se teste par des boutons. */
@@ -302,7 +308,7 @@ function TabEtat() {
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {activeModules.map((m) => (
               <li key={m.moduleCode} style={{ marginBottom: 4 }}>
-                <strong>{m.moduleCode}</strong> — {m.seatsAssigned}/{m.seatsPurchased} jetons affectés
+                <strong>{moduleLabel(m.moduleCode)}</strong> — {m.seatsAssigned}/{m.seatsPurchased} jetons affectés
                 {m.readOnly && <span className="badge warning" style={{ marginLeft: 8 }}>lecture seule</span>}
               </li>
             ))}
@@ -750,12 +756,19 @@ function SeatAssignments() {
     queryKey: ['seats'],
     queryFn: () => api<SeatAssignment[]>('/seats'),
   });
+  // Les jetons du palier forment un POOL COMMUN : ce compteur est la vraie contrainte, pas le
+  // nombre de jetons posés module par module.
+  const pool = useQuery({
+    queryKey: ['seats-pool'],
+    queryFn: () => api<SeatPool>('/seats/pool'),
+  });
 
   const assign = useMutation({
     mutationFn: (v: { moduleCode: string; userId: string }) =>
       api('/seats', { method: 'POST', body: v }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['seats'] });
+      qc.invalidateQueries({ queryKey: ['seats-pool'] });
       qc.invalidateQueries({ queryKey: ['subscription-modules'] });
     },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
@@ -764,6 +777,7 @@ function SeatAssignments() {
     mutationFn: (id: string) => api(`/seats/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['seats'] });
+      qc.invalidateQueries({ queryKey: ['seats-pool'] });
       qc.invalidateQueries({ queryKey: ['subscription-modules'] });
     },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
@@ -786,9 +800,37 @@ function SeatAssignments() {
     <div className="card">
       <h2 style={{ marginTop: 0 }}>Affectation des jetons</h2>
       <p className="muted" style={{ marginTop: 0 }}>
-        Un utilisateur accède à un module uniquement si un jeton de ce module lui est affecté.
-        Les jetons affectés ne peuvent dépasser les jetons achetés.
+        Un utilisateur accède à un module uniquement si un jeton lui est affecté sur ce module.
+        Vos jetons forment une <strong>réserve commune</strong> : chaque jeton posé, quel que soit
+        le module, diminue d’autant ce qu’il vous reste.
       </p>
+
+      {pool.data && pool.data.total > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px',
+          marginBottom: 16, background: 'var(--surface)',
+        }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1 }}>
+              {pool.data.remaining}
+              <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}> / {pool.data.total}</span>
+            </div>
+            <div className="muted" style={{ fontSize: 11 }}>jetons disponibles</div>
+          </div>
+          {/* Jauge : d'un coup d'œil, ce qui est consommé. */}
+          <div style={{ flex: 1, minWidth: 160, height: 8, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
+            <div style={{
+              width: `${Math.min(100, (pool.data.used / pool.data.total) * 100)}%`,
+              height: '100%',
+              background: pool.data.remaining === 0 ? 'var(--danger, #dc2626)' : 'var(--accent)',
+            }} />
+          </div>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {pool.data.used} affecté{pool.data.used > 1 ? 's' : ''}
+          </span>
+        </div>
+      )}
       {err && <div className="error">{err}</div>}
 
       {activeModules.length === 0 && (
@@ -799,12 +841,20 @@ function SeatAssignments() {
         const assigned = seatsByModule.get(m.moduleCode) ?? [];
         const assignedUserIds = new Set(assigned.map((a) => a.userId));
         const available = (users.data ?? []).filter((u) => !assignedUserIds.has(u.id));
-        const full = m.seatsAssigned >= m.seatsPurchased;
+        // Un module du palier puise dans la réserve commune ; une option garde sa propre limite.
+        const dansLePalier = pool.data?.packModules.includes(m.moduleCode) ?? false;
+        const full = dansLePalier
+          ? (pool.data?.remaining ?? 0) <= 0
+          : m.seatsAssigned >= m.seatsPurchased;
         return (
           <div key={m.moduleCode} style={{ marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <strong>{m.moduleCode}</strong>
-              <span className="badge info">{m.seatsAssigned}/{m.seatsPurchased} jetons</span>
+              <strong>{moduleLabel(m.moduleCode)}</strong>
+              <span className="badge info">
+                {dansLePalier
+                  ? `${m.seatsAssigned} utilisateur${m.seatsAssigned > 1 ? 's' : ''}`
+                  : `${m.seatsAssigned}/${m.seatsPurchased} jetons`}
+              </span>
             </div>
 
             {assigned.length > 0 ? (
@@ -830,7 +880,10 @@ function SeatAssignments() {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {full ? (
                 <span className="muted" style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <Lock size={12} /> Tous les jetons sont affectés. Ajustez le nombre de jetons pour en affecter plus.
+                  <Lock size={12} />
+                  {dansLePalier
+                    ? 'Votre réserve de jetons est épuisée. Retirez un jeton ailleurs, ou augmentez le nombre de jetons de votre formule.'
+                    : 'Tous les jetons de cette option sont affectés. Ajustez-en le nombre pour en affecter plus.'}
                 </span>
               ) : (
                 <>
