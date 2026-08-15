@@ -42,6 +42,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
 const CONTEXT_ICONS: Record<string, React.ElementType> = {
   '': Building2,
   structure: Layers,
+  calendrier: CalendarDays,
   pointages: Users,
   'controle-heures': ClipboardCheck,
   achats: Truck,

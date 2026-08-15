@@ -79,7 +79,8 @@ export function contextualGroup(pathname: string): ContextGroup | null {
       features: [
         { href: `/chantiers/${id}`, label: 'Fiche chantier' },
         { href: `/chantiers/${id}/structure`, label: 'Structure & budget' },
-        { href: `/chantiers/${id}/pointages`, label: 'Pointages' },
+        { href: `/chantiers/${id}/calendrier`, label: 'Calendrier des heures' },
+        { href: `/chantiers/${id}/pointages`, label: 'Pointages (détail)' },
         { href: `/chantiers/${id}/controle-heures`, label: 'Contrôle des heures' },
         { href: `/chantiers/${id}/achats`, label: 'Achats' },
         { href: `/chantiers/${id}/avancement`, label: 'Avancement' },

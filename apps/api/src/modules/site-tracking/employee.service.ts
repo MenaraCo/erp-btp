@@ -14,6 +14,8 @@ export interface EmployeeInput {
   jobTitle?: string | null;
   hourlyCost?: string | number;
   contractType?: ContractType;
+  /** Agence d'intérim, pour un intérimaire. */
+  agency?: string | null;
   active?: boolean;
 }
 
@@ -26,6 +28,7 @@ export interface EmployeeRow {
   jobTitle: string | null;
   hourlyCost: string;
   contractType: ContractType;
+  agency: string | null;
   active: boolean;
 }
 
@@ -53,7 +56,7 @@ export class EmployeeService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `SELECT id, code, first_name, last_name, job_title, hourly_cost, contract_type, active
+        `SELECT id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency, active
            FROM employee
           WHERE deleted_at IS NULL ${includeInactive ? '' : 'AND active = true'}
           ORDER BY last_name, first_name NULLS FIRST`,
@@ -73,9 +76,9 @@ export class EmployeeService {
       const code = await this.numbering.next(em, 'employee');
       const rows = await em.query(
         `INSERT INTO employee
-           (tenant_id, code, first_name, last_name, job_title, hourly_cost, contract_type, active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id, code, first_name, last_name, job_title, hourly_cost, contract_type, active`,
+           (tenant_id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency, active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency, active`,
         [
           tenantId,
           code,
@@ -84,6 +87,7 @@ export class EmployeeService {
           (input.jobTitle ?? '').trim() || null,
           hourlyCost,
           contractType,
+          (input.agency ?? '').trim() || null,
           input.active ?? true,
         ],
       );
@@ -106,9 +110,9 @@ export class EmployeeService {
       const rows = await em.query(
         `UPDATE employee
             SET first_name = $2, last_name = $3, job_title = $4, hourly_cost = $5,
-                contract_type = $6, active = $7, updated_at = now()
+                contract_type = $6, agency = $7, active = $8, updated_at = now()
           WHERE id = $1
-          RETURNING id, code, first_name, last_name, job_title, hourly_cost, contract_type, active`,
+          RETURNING id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency, active`,
         [
           id,
           input.firstName === undefined ? current.first_name : (input.firstName ?? '').trim() || null,
@@ -116,6 +120,7 @@ export class EmployeeService {
           input.jobTitle === undefined ? current.job_title : (input.jobTitle ?? '').trim() || null,
           input.hourlyCost === undefined ? current.hourly_cost : check(input.hourlyCost),
           input.contractType === undefined ? current.contract_type : checkContract(input.contractType),
+          input.agency === undefined ? current.agency : (input.agency ?? '').trim() || null,
           input.active === undefined ? current.active : input.active,
         ],
       );
@@ -169,7 +174,8 @@ function checkContract(v: ContractType | undefined): ContractType {
 
 function toRow(r: {
   id: string; code: string; first_name: string | null; last_name: string;
-  job_title: string | null; hourly_cost: string; contract_type: ContractType; active: boolean;
+  job_title: string | null; hourly_cost: string; contract_type: ContractType;
+  agency: string | null; active: boolean;
 }): EmployeeRow {
   return {
     id: r.id,
@@ -180,6 +186,7 @@ function toRow(r: {
     jobTitle: r.job_title,
     hourlyCost: r.hourly_cost,
     contractType: r.contract_type,
+    agency: r.agency,
     active: r.active,
   };
 }

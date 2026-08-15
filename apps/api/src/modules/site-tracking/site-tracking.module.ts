@@ -5,6 +5,8 @@ import { EstimatingModule } from '../estimating/estimating.module';
 import { ChantierService } from './chantier.service';
 import { ChantierController } from './chantier.controller';
 import { EmployeeService } from './employee.service';
+import { PlanningService } from './planning.service';
+import { PlanningController } from './planning.controller';
 import { EmployeeController } from './employee.controller';
 import { TimesheetService } from './timesheet.service';
 import { TimesheetController } from './timesheet.controller';
@@ -22,16 +24,19 @@ import { AnalyticsController } from './analytics.controller';
 @Module({
   imports: [TenancyModule, NumberingModule, EstimatingModule],
   providers: [ChantierService, TimesheetService,
-    EmployeeService, PurchasingService, AnalyticsService, LibraryTransferService],
+    EmployeeService,
+    PlanningService, PurchasingService, AnalyticsService, LibraryTransferService],
   controllers: [
     ChantierController,
     TimesheetController,
     EmployeeController,
+    PlanningController,
     PurchasingController,
     AnalyticsController,
     LibraryTransferController,
   ],
   exports: [ChantierService, TimesheetService,
-    EmployeeService, PurchasingService, AnalyticsService],
+    EmployeeService,
+    PlanningService, PurchasingService, AnalyticsService],
 })
 export class SiteTrackingModule {}

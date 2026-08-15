@@ -1,0 +1,293 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CalendarDays, Copy, CornerDownRight } from 'lucide-react';
+import { apiFetch, ApiError } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+
+interface Cellule { realise: string; prevu: string; impute: boolean; multiple: boolean }
+interface LigneCalendrier {
+  employeeId: string | null;
+  label: string;
+  contractType: string | null;
+  agency: string | null;
+  jours: Record<string, Cellule>;
+  totalRealise: string;
+  totalPrevu: string;
+}
+interface Calendrier {
+  debut: string; fin: string; jours: string[];
+  salaries: LigneCalendrier[];
+  totalRealise: string; totalPrevu: string;
+}
+interface Employee { id: string; fullName: string; contractType: string; agency: string | null }
+
+const JOURS_COURTS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+
+function iso(d: Date): string { return d.toISOString().slice(0, 10); }
+function lundiDe(d: Date): Date {
+  const c = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const j = c.getUTCDay();
+  c.setUTCDate(c.getUTCDate() - (j === 0 ? 6 : j - 1));
+  return c;
+}
+function estWeekEnd(jour: string): boolean {
+  const j = new Date(`${jour}T00:00:00Z`).getUTCDay();
+  return j === 0 || j === 6;
+}
+
+/**
+ * Calendrier des heures : le réalisé et le prévisionnel dans la même grille.
+ *
+ * La saisie ligne à ligne ne montrait ni qui avait travaillé quel jour, ni où étaient les trous.
+ * Ici chaque case se saisit directement, et « Dupliquer » remplit une période entière — parce
+ * qu'une équipe fait souvent les mêmes journées toute la semaine, et qu'un pointage non saisi
+ * vaut un résultat faux.
+ */
+export default function CalendrierPage() {
+  const { token } = useAuth();
+  const chantierId = String(useParams().chantierId);
+  const qc = useQueryClient();
+
+  const [ancre, setAncre] = useState(() => iso(new Date()));
+  const [portee, setPortee] = useState<'semaine' | 'mois'>('semaine');
+  const [mode, setMode] = useState<'realise' | 'prevu'>('realise');
+  const [err, setErr] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const [dupSalarie, setDupSalarie] = useState('');
+  const [dupHeures, setDupHeures] = useState('7');
+
+  const { debut, fin } = useMemo(() => {
+    const d = new Date(`${ancre}T00:00:00Z`);
+    if (portee === 'semaine') {
+      const l = lundiDe(d);
+      const f = new Date(l); f.setUTCDate(l.getUTCDate() + 6);
+      return { debut: iso(l), fin: iso(f) };
+    }
+    const p = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+    const f = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+    return { debut: iso(p), fin: iso(f) };
+  }, [ancre, portee]);
+
+  const cal = useQuery({
+    queryKey: ['calendrier', chantierId, debut, fin],
+    enabled: Boolean(token),
+    queryFn: () =>
+      apiFetch<Calendrier>(`/chantiers/${chantierId}/planning?debut=${debut}&fin=${fin}`, { token }),
+  });
+  const salaries = useQuery({
+    queryKey: ['employees'],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<Employee[]>('/employees', { token }),
+  });
+
+  const rafraichir = () => {
+    qc.invalidateQueries({ queryKey: ['calendrier'] });
+    qc.invalidateQueries({ queryKey: ['timesheets'] });
+    qc.invalidateQueries({ queryKey: ['chantier-results'] });
+  };
+
+  const ecrire = useMutation({
+    mutationFn: (v: { employeeId: string; date: string; hours: string }) =>
+      apiFetch(`/chantiers/${chantierId}/planning/${mode === 'prevu' ? 'previsionnel' : 'realise'}`, {
+        method: 'PUT', token, body: v,
+      }),
+    onSuccess: () => { setErr(null); rafraichir(); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Saisie impossible'),
+  });
+
+  const dupliquer = useMutation({
+    mutationFn: () =>
+      apiFetch<{ jours: number }>(`/chantiers/${chantierId}/planning/dupliquer`, {
+        method: 'POST', token,
+        body: { employeeId: dupSalarie, hours: dupHeures, debut, fin, joursOuvres: true },
+      }),
+    onSuccess: (r) => {
+      setErr(null);
+      setInfo(`${r.jours} jour${r.jours > 1 ? 's' : ''} planifié${r.jours > 1 ? 's' : ''} (jours ouvrés).`);
+      rafraichir();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Duplication impossible'),
+  });
+
+  const reporter = useMutation({
+    mutationFn: () =>
+      apiFetch<{ crees: number }>(`/chantiers/${chantierId}/planning/reporter`, {
+        method: 'POST', token, body: { debut, fin },
+      }),
+    onSuccess: (r) => {
+      setErr(null);
+      setInfo(`${r.crees} journée${r.crees > 1 ? 's' : ''} reportée${r.crees > 1 ? 's' : ''} en heures réelles. Les jours déjà pointés n’ont pas bougé.`);
+      rafraichir();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Report impossible'),
+  });
+
+  const decaler = (pas: number) => {
+    const d = new Date(`${ancre}T00:00:00Z`);
+    if (portee === 'semaine') d.setUTCDate(d.getUTCDate() + 7 * pas);
+    else d.setUTCMonth(d.getUTCMonth() + pas);
+    setAncre(iso(d));
+  };
+
+  const c = cal.data;
+
+  return (
+    <div>
+      <h1 style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <CalendarDays size={20} /> Calendrier des heures
+      </h1>
+      <p className="muted" style={{ marginTop: 0, maxWidth: 780 }}>
+        Saisissez directement dans les cases. Le <strong>prévisionnel</strong> planifie les jours à
+        venir — il ne coûte rien tant qu’il n’a pas eu lieu ; le <strong>réalisé</strong> est ce qui
+        entre dans le résultat du chantier.
+      </p>
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
+        <button className="btn btn-secondary" onClick={() => decaler(-1)}>‹ Précédent</button>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>À partir du</label>
+          <input type="date" value={ancre} onChange={(e) => setAncre(e.target.value)} style={{ width: 150 }} />
+        </div>
+        <button className="btn btn-secondary" onClick={() => decaler(1)}>Suivant ›</button>
+
+        <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+          {(['semaine', 'mois'] as const).map((p) => (
+            <button key={p} className={portee === p ? 'btn' : 'btn btn-secondary'} onClick={() => setPortee(p)}>
+              {p === 'semaine' ? 'Semaine' : 'Mois'}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+          {(['realise', 'prevu'] as const).map((m) => (
+            <button key={m} className={mode === m ? 'btn' : 'btn btn-secondary'} onClick={() => setMode(m)}>
+              {m === 'realise' ? 'Je saisis le réalisé' : 'Je planifie'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {err && <div className="error" style={{ marginTop: 12 }}>{err}</div>}
+      {info && <div className="badge info" style={{ display: 'block', marginTop: 12, padding: '8px 10px' }}>{info}</div>}
+
+      {/* Outils de rapidité : remplir une période d'un coup, ou entériner le plan. */}
+      <div className="card" style={{ marginTop: 16, display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Salarié</label>
+          <select value={dupSalarie} onChange={(e) => setDupSalarie(e.target.value)} style={{ minWidth: 200 }}>
+            <option value="">— Choisir —</option>
+            {(salaries.data ?? []).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.fullName}{s.contractType === 'interimaire' ? ` · intérim${s.agency ? ` (${s.agency})` : ''}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Heures / jour</label>
+          <input type="number" min={0} step="0.25" value={dupHeures}
+            onChange={(e) => setDupHeures(e.target.value)} style={{ width: 100, textAlign: 'right' }} />
+        </div>
+        <button className="btn" disabled={!dupSalarie || dupliquer.isPending}
+          onClick={() => { setInfo(null); dupliquer.mutate(); }}>
+          <Copy size={14} /> {dupliquer.isPending ? 'Duplication…' : `Planifier toute la ${portee}`}
+        </button>
+        <button className="btn btn-secondary" disabled={reporter.isPending}
+          onClick={() => { setInfo(null); reporter.mutate(); }}
+          title="Reporte le prévisionnel de la période en heures réelles, sans toucher aux jours déjà pointés">
+          <CornerDownRight size={14} /> {reporter.isPending ? 'Report…' : 'Tout s’est passé comme prévu'}
+        </button>
+      </div>
+
+      {c && (
+        <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="grid" style={{ margin: 0 }}>
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 180 }}>Salarié</th>
+                  {c.jours.map((j) => (
+                    <th key={j} style={{
+                      textAlign: 'center', whiteSpace: 'nowrap',
+                      background: estWeekEnd(j) ? 'var(--surface)' : undefined,
+                    }}>
+                      <div style={{ fontSize: 10, fontWeight: 400 }}>
+                        {JOURS_COURTS[new Date(`${j}T00:00:00Z`).getUTCDay()]}
+                      </div>
+                      {j.slice(8)}
+                    </th>
+                  ))}
+                  <th style={{ textAlign: 'right' }}>Réalisé</th>
+                  <th style={{ textAlign: 'right' }}>Prévu</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.salaries.map((l) => (
+                  <tr key={l.employeeId ?? l.label}>
+                    <td>
+                      {l.label}
+                      {l.contractType === 'interimaire' && (
+                        <span className="badge warning" style={{ marginLeft: 6, fontSize: 10 }}>
+                          intérim{l.agency ? ` · ${l.agency}` : ''}
+                        </span>
+                      )}
+                    </td>
+                    {c.jours.map((j) => {
+                      const cell = l.jours[j];
+                      const valeur = mode === 'prevu' ? cell?.prevu : cell?.realise;
+                      const fige = mode === 'realise' && (cell?.impute || cell?.multiple);
+                      return (
+                        <td key={j} style={{ padding: 2, background: estWeekEnd(j) ? 'var(--surface)' : undefined }}>
+                          <input
+                            type="number" min={0} step="0.25"
+                            defaultValue={valeur && Number(valeur) !== 0 ? Number(valeur) : ''}
+                            disabled={!l.employeeId || fige}
+                            title={
+                              cell?.impute ? 'Mois arrêté : ces heures sont figées'
+                                : cell?.multiple ? 'Heures ventilées sur plusieurs ouvrages — à corriger dans le détail'
+                                  : !l.employeeId ? 'Nom saisi à la main : créez la fiche salarié pour saisir ici'
+                                    : undefined
+                            }
+                            onBlur={(e) => {
+                              if (!l.employeeId) return;
+                              const v = e.target.value.trim();
+                              const avant = Number(valeur ?? 0);
+                              if (Number(v || 0) === avant) return;
+                              ecrire.mutate({ employeeId: l.employeeId, date: j, hours: v || '0' });
+                            }}
+                            style={{
+                              width: 46, textAlign: 'right', padding: '3px 4px', fontSize: 12,
+                              // Le prévisionnel se distingue du réel d'un coup d'œil.
+                              color: mode === 'prevu' ? 'var(--accent)' : undefined,
+                              opacity: fige ? 0.5 : 1,
+                            }}
+                          />
+                        </td>
+                      );
+                    })}
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{Number(l.totalRealise)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--accent)' }}>{Number(l.totalPrevu)}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td style={{ fontWeight: 700 }}>Total</td>
+                  {c.jours.map((j) => <td key={j} />)}
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{Number(c.totalRealise)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{Number(c.totalPrevu)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {c.salaries.length === 0 && (
+            <p className="muted" style={{ padding: 16, margin: 0 }}>
+              Aucune heure sur cette période. Utilisez « Planifier toute la {portee} » pour remplir d’un coup.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
