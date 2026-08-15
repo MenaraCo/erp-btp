@@ -2,16 +2,21 @@
 
 import { useMemo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { couleurAbsence, libelleAbsence } from '@/lib/absences';
 
 export interface CreneauCalendrier {
   id: string;
-  kind: 'realise' | 'prevu';
+  /** `absence` : congés, maladie, intempéries… — sans chantier, et sans coût. */
+  kind: 'realise' | 'prevu' | 'absence';
   label: string;
   chantierId: string;
   chantierCode: string;
   chantierNom: string;
   /** Couleur choisie pour ce chantier ; à défaut, une teinte déduite de son identifiant. */
   chantierCouleur?: string | null;
+  /** Motif, pour les seules absences. */
+  motif?: string | null;
+  commentaire?: string | null;
   date: string;
   heures: string;
   debut: string | null;
@@ -30,6 +35,11 @@ export function teinteChantier(id: string, couleur?: string | null): string {
   let n = 0;
   for (let i = 0; i < id.length; i += 1) n = (n + id.charCodeAt(i)) % TEINTES.length;
   return TEINTES[n];
+}
+
+/** Fond rayé : une absence se lit d'un coup d'œil comme « pas de production », pas comme un chantier. */
+function rayures(couleur: string): string {
+  return `repeating-linear-gradient(135deg, ${couleur}22, ${couleur}22 4px, ${couleur}0d 4px, ${couleur}0d 8px)`;
 }
 
 const EN_TETES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
@@ -71,6 +81,8 @@ export function CalendrierMois({
   conflitsParJour,
   onDeplacer,
   onDeposerChantier,
+  onMenuJour,
+  onMenuCreneau,
   hauteurCase = 112,
 }: {
   jours: string[];
@@ -80,6 +92,10 @@ export function CalendrierMois({
   onDeplacer?: (kind: string, id: string, date: string) => void;
   /** Dépôt d'un chantier venu de la légende : planifie une journée sur ce jour. */
   onDeposerChantier?: (chantierId: string, date: string) => void;
+  /** Clic droit sur un jour : ajouter des heures, poser une absence. */
+  onMenuJour?: (jour: string, position: { x: number; y: number }) => void;
+  /** Clic droit sur une intervention : la modifier, la retirer. */
+  onMenuCreneau?: (creneau: CreneauCalendrier, position: { x: number; y: number }) => void;
   hauteurCase?: number;
 }) {
   const [survole, setSurvole] = useState<string | null>(null);
@@ -129,6 +145,10 @@ export function CalendrierMois({
               if (kind === 'chantier') onDeposerChantier?.(id, jour);
               else onDeplacer?.(kind, id, jour);
             } : undefined}
+            onContextMenu={onMenuJour ? (e) => {
+              e.preventDefault();
+              onMenuJour(jour, { x: e.clientX, y: e.clientY });
+            } : undefined}
             title={motifs.join('\n') || undefined}
             style={{
               height: hauteurCase, padding: 6, overflow: 'hidden',
@@ -151,27 +171,43 @@ export function CalendrierMois({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {interventions.slice(0, MAX_VISIBLE).map((c) => (
-                <div
-                  key={c.id}
-                  draggable={Boolean(onDeplacer) && !c.fige}
-                  onDragStart={(e) => e.dataTransfer.setData('text/plain', `${c.kind}:${c.id}`)}
-                  title={`${c.label} · ${c.chantierCode} — ${c.chantierNom}\n${
-                    c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
-                  }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}`}
-                  style={{
-                    background: c.kind === 'prevu' ? 'transparent' : teinteChantier(c.chantierId, c.chantierCouleur),
-                    border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinteChantier(c.chantierId, c.chantierCouleur)}`,
-                    color: c.kind === 'prevu' ? teinteChantier(c.chantierId, c.chantierCouleur) : '#fff',
-                    borderRadius: 4, fontSize: 10, lineHeight: 1.5, padding: '0 5px',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    cursor: !onDeplacer ? 'default' : c.fige ? 'not-allowed' : 'grab',
-                    opacity: c.fige ? 0.55 : 1,
-                  }}
-                >
-                  {c.debut ? `${c.debut} ` : ''}{c.chantierCode} · {c.label}
-                </div>
-              ))}
+              {interventions.slice(0, MAX_VISIBLE).map((c) => {
+                const absence = c.kind === 'absence';
+                const teinte = absence
+                  ? couleurAbsence(c.motif ?? '')
+                  : teinteChantier(c.chantierId, c.chantierCouleur);
+                const plein = c.kind === 'realise';
+                return (
+                  <div
+                    key={c.id}
+                    draggable={Boolean(onDeplacer) && !c.fige && !absence}
+                    onDragStart={(e) => e.dataTransfer.setData('text/plain', `${c.kind}:${c.id}`)}
+                    onContextMenu={onMenuCreneau ? (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onMenuCreneau(c, { x: e.clientX, y: e.clientY });
+                    } : undefined}
+                    title={`${c.label} · ${absence ? libelleAbsence(c.motif ?? '') : `${c.chantierCode} — ${c.chantierNom}`}\n${
+                      c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
+                    }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}${
+                      c.commentaire ? `\n${c.commentaire}` : ''}`}
+                    style={{
+                      background: plein ? teinte : absence ? rayures(teinte) : 'transparent',
+                      border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinte}`,
+                      color: plein ? '#fff' : teinte,
+                      borderRadius: 4, fontSize: 10, lineHeight: 1.5, padding: '0 5px',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      fontWeight: absence ? 600 : 400,
+                      cursor: !onDeplacer ? 'default' : c.fige || absence ? 'default' : 'grab',
+                      opacity: c.fige ? 0.55 : 1,
+                    }}
+                  >
+                    {absence
+                      ? `${libelleAbsence(c.motif ?? '')} · ${c.label}`
+                      : `${c.debut ? `${c.debut} ` : ''}${c.chantierCode} · ${c.label}`}
+                  </div>
+                );
+              })}
               {interventions.length > MAX_VISIBLE && (
                 <div className="muted" style={{ fontSize: 10, lineHeight: 1.5 }}>
                   + {interventions.length - MAX_VISIBLE} autre

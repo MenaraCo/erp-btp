@@ -7,16 +7,22 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { teinteChantier } from '@/components/CalendrierMois';
 import { LegendeChantiers } from '@/components/LegendeChantiers';
+import { MenuContextuel, EntreeMenu } from '@/components/MenuContextuel';
+import { CreneauModal } from '@/components/CreneauModal';
+import { AbsenceModal } from '@/components/AbsenceModal';
+import { couleurAbsence, libelleAbsence } from '@/lib/absences';
 
 interface Creneau {
   id: string;
-  kind: 'realise' | 'prevu';
+  kind: 'realise' | 'prevu' | 'absence';
   employeeId: string;
   label: string;
   chantierId: string;
   chantierCode: string;
   chantierNom: string;
   chantierCouleur: string | null;
+  motif?: string | null;
+  commentaire?: string | null;
   date: string;
   heures: string;
   debut: string | null;
@@ -37,6 +43,14 @@ function lundiDe(d: Date): Date {
   c.setUTCDate(c.getUTCDate() - (j === 0 ? 6 : j - 1));
   return c;
 }
+type Menu =
+  | { type: 'jour'; jour: string; x: number; y: number }
+  | { type: 'creneau'; creneau: Creneau; x: number; y: number };
+
+type Fenetre =
+  | { type: 'creneau'; mode: 'creation' | 'edition'; initial: Parameters<typeof CreneauModal>[0]['initial'] }
+  | { type: 'absence'; mode: 'creation' | 'edition'; initial: Parameters<typeof AbsenceModal>[0]['initial'] };
+
 const JOURS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 /** Amplitude affichée : au-delà, la grille s'étire pour rien. */
 const HEURE_DEBUT = 6;
@@ -65,6 +79,8 @@ export default function PlanningPage() {
   const [chantier, setChantier] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [survole, setSurvole] = useState<string | null>(null);
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const [fenetre, setFenetre] = useState<Fenetre | null>(null);
 
   const { debut, fin } = useMemo(() => {
     const l = lundiDe(new Date(`${ancre}T00:00:00Z`));
@@ -136,6 +152,101 @@ export default function PlanningPage() {
    * Dépôt sur une colonne-jour : soit une intervention qu'on déplace, soit un chantier venu de la
    * légende, qu'on pose comme journée prévue pour le salarié filtré.
    */
+  const supprimer = useMutation({
+    mutationFn: (c: Creneau) =>
+      c.kind === 'absence'
+        ? apiFetch(`/personnel/absences/${c.id}`, { method: 'DELETE', token })
+        : apiFetch(`/personnel/creneaux/${c.kind}/${c.id}`, { method: 'DELETE', token }),
+    onSuccess: rafraichir,
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Suppression impossible'),
+  });
+
+  const optionsSalaries = (salaries.data ?? []).map((s) => ({ id: s.id, label: s.fullName }));
+  const optionsChantiers = (chantiers.data ?? []).map((c) => ({ id: c.id, label: `${c.code} — ${c.name}` }));
+
+  /** Entrées du clic droit — les mêmes gestes que dans la vue mensuelle. */
+  const entreesDuMenu = (m: Menu): EntreeMenu[] => {
+    if (m.type === 'jour') {
+      return [
+        {
+          label: 'Ajouter des heures…',
+          onClick: () => setFenetre({
+            type: 'creneau', mode: 'creation',
+            initial: {
+              kind: 'realise', employeeId: salarie, chantierId: chantier, date: m.jour,
+              heures: '7', debut: '08:00', fin: '12:00',
+            },
+          }),
+        },
+        {
+          label: 'Planifier une journée…',
+          onClick: () => setFenetre({
+            type: 'creneau', mode: 'creation',
+            initial: {
+              kind: 'prevu', employeeId: salarie, chantierId: chantier, date: m.jour,
+              heures: '7', debut: '', fin: '',
+            },
+          }),
+        },
+        {
+          label: 'Poser une absence…',
+          separateurAvant: true,
+          onClick: () => setFenetre({
+            type: 'absence', mode: 'creation',
+            initial: { employeeId: salarie, debut: m.jour, fin: m.jour },
+          }),
+        },
+      ];
+    }
+    const c = m.creneau;
+    if (c.kind === 'absence') {
+      return [
+        {
+          label: "Modifier l'absence…",
+          onClick: () => setFenetre({
+            type: 'absence', mode: 'edition',
+            initial: {
+              id: c.id, employeeId: c.employeeId, kind: c.motif ?? 'conges', debut: c.date,
+              debutHeure: c.debut, finHeure: c.fin, commentaire: c.commentaire ?? null,
+            },
+          }),
+        },
+        {
+          label: "Retirer l'absence", danger: true, separateurAvant: true,
+          onClick: () => supprimer.mutate(c),
+        },
+      ];
+    }
+    return [
+      {
+        label: 'Modifier…',
+        disabled: c.fige,
+        onClick: () => setFenetre({
+          type: 'creneau', mode: 'edition',
+          initial: {
+            id: c.id, kind: c.kind as 'realise' | 'prevu', employeeId: c.employeeId,
+            chantierId: c.chantierId, date: c.date, heures: c.heures, debut: c.debut, fin: c.fin,
+          },
+        }),
+      },
+      {
+        label: 'Ajouter des heures ce jour…',
+        onClick: () => setFenetre({
+          type: 'creneau', mode: 'creation',
+          initial: {
+            kind: 'realise', employeeId: c.employeeId, chantierId: '', date: c.date,
+            heures: '4', debut: '13:00', fin: '17:00',
+          },
+        }),
+      },
+      {
+        label: c.fige ? 'Arrêté : non supprimable' : 'Retirer du chantier',
+        danger: true, disabled: c.fige, separateurAvant: true,
+        onClick: () => supprimer.mutate(c),
+      },
+    ];
+  };
+
   const deposer = (charge: string, jour: string) => {
     const [kind, id] = charge.split(':');
     if (!kind || !id) return;
@@ -156,29 +267,43 @@ export default function PlanningPage() {
   const r = donnees.data;
   const heures = Array.from({ length: HEURE_FIN - HEURE_DEBUT }, (_, i) => HEURE_DEBUT + i);
 
-  const bloc = (c: Creneau, style: React.CSSProperties) => (
-    <div
-      key={c.id}
-      draggable={!c.fige}
-      onDragStart={(e) => e.dataTransfer.setData('text/plain', `${c.kind}:${c.id}`)}
-      title={`${c.label} · ${c.chantierCode} — ${c.chantierNom}\n${
-        c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
-      }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}`}
-      style={{
-        background: c.kind === 'prevu' ? 'transparent' : teinteChantier(c.chantierId, c.chantierCouleur),
-        border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinteChantier(c.chantierId, c.chantierCouleur)}`,
-        color: c.kind === 'prevu' ? teinteChantier(c.chantierId, c.chantierCouleur) : '#fff',
-        borderRadius: 4, fontSize: 10, padding: '1px 4px', overflow: 'hidden',
-        cursor: c.fige ? 'not-allowed' : 'grab', opacity: c.fige ? 0.55 : 1,
-        ...style,
-      }}
-    >
-      <div style={{ fontWeight: 600, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-        {c.chantierCode}
+  const bloc = (c: Creneau, style: React.CSSProperties) => {
+    const absence = c.kind === 'absence';
+    const teinte = absence ? couleurAbsence(c.motif ?? '') : teinteChantier(c.chantierId, c.chantierCouleur);
+    const plein = c.kind === 'realise';
+    return (
+      <div
+        key={c.id}
+        draggable={!c.fige && !absence}
+        onDragStart={(e) => e.dataTransfer.setData('text/plain', `${c.kind}:${c.id}`)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setMenu({ type: 'creneau', creneau: c, x: e.clientX, y: e.clientY });
+        }}
+        title={`${c.label} · ${absence ? libelleAbsence(c.motif ?? '') : `${c.chantierCode} — ${c.chantierNom}`}\n${
+          c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
+        }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}${
+          c.commentaire ? `\n${c.commentaire}` : ''}`}
+        style={{
+          background: plein ? teinte
+            : absence
+              ? `repeating-linear-gradient(135deg, ${teinte}22, ${teinte}22 4px, ${teinte}0d 4px, ${teinte}0d 8px)`
+              : 'transparent',
+          border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinte}`,
+          color: plein ? '#fff' : teinte,
+          borderRadius: 4, fontSize: 10, padding: '1px 4px', overflow: 'hidden',
+          cursor: c.fige || absence ? 'default' : 'grab', opacity: c.fige ? 0.55 : 1,
+          ...style,
+        }}
+      >
+        <div style={{ fontWeight: 600, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+          {absence ? libelleAbsence(c.motif ?? '') : c.chantierCode}
+        </div>
+        <div style={{ whiteSpace: 'nowrap', overflow: 'hidden' }}>{c.label}</div>
       </div>
-      <div style={{ whiteSpace: 'nowrap', overflow: 'hidden' }}>{c.label}</div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div>
@@ -247,6 +372,10 @@ export default function PlanningPage() {
                     e.preventDefault(); setSurvole(null);
                     deposer(e.dataTransfer.getData('text/plain'), j);
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenu({ type: 'jour', jour: j, x: e.clientX, y: e.clientY });
+                  }}
                   style={{
                     borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)',
                     padding: 3, minHeight: 30, display: 'flex', flexDirection: 'column', gap: 2,
@@ -276,6 +405,10 @@ export default function PlanningPage() {
                   onDrop={(e) => {
                     e.preventDefault(); setSurvole(null);
                     deposer(e.dataTransfer.getData('text/plain'), j);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenu({ type: 'jour', jour: j, x: e.clientX, y: e.clientY });
                   }}
                   style={{
                     position: 'relative', borderLeft: '1px solid var(--border)',
@@ -312,6 +445,41 @@ export default function PlanningPage() {
           onChoisirCouleur={(chantierId, color) => colorier.mutate({ chantierId, color })}
         />
         </div>
+      )}
+
+      {menu && (
+        <MenuContextuel
+          x={menu.x}
+          y={menu.y}
+          titre={menu.type === 'jour'
+            ? new Date(`${menu.jour}T00:00:00Z`).toLocaleDateString('fr-FR', {
+              weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC',
+            })
+            : `${menu.creneau.label} · ${menu.creneau.kind === 'absence'
+              ? libelleAbsence(menu.creneau.motif ?? '') : menu.creneau.chantierCode}`}
+          entrees={entreesDuMenu(menu)}
+          onFermer={() => setMenu(null)}
+        />
+      )}
+
+      {fenetre?.type === 'creneau' && (
+        <CreneauModal
+          mode={fenetre.mode}
+          initial={fenetre.initial}
+          salaries={optionsSalaries}
+          chantiers={optionsChantiers}
+          onClose={() => setFenetre(null)}
+          onSaved={() => { setFenetre(null); rafraichir(); }}
+        />
+      )}
+      {fenetre?.type === 'absence' && (
+        <AbsenceModal
+          mode={fenetre.mode}
+          initial={fenetre.initial}
+          salaries={optionsSalaries}
+          onClose={() => setFenetre(null)}
+          onSaved={() => { setFenetre(null); rafraichir(); }}
+        />
       )}
     </div>
   );

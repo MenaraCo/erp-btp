@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { GripVertical } from 'lucide-react';
 import { teinteChantier } from './CalendrierMois';
 
 export interface ChantierLegende {
@@ -11,10 +10,15 @@ export interface ChantierLegende {
   color?: string | null;
 }
 
-/** Palette proposée au choix : franche, et distinguable même pour un daltonien. */
+/**
+ * Palette proposée au choix — teintes franches, distinguables côte à côte dans un calendrier.
+ * Le rouge vif reste réservé aux alertes de gestion : une couleur de chantier ne doit pas crier.
+ */
 const PALETTE = [
-  '#1a3a5c', '#e8550a', '#0f766e', '#7c3aed',
-  '#b45309', '#0369a1', '#4d7c0f', '#9d174d',
+  '#1a3a5c', '#0369a1', '#0891b2', '#0f766e',
+  '#15803d', '#4d7c0f', '#a16207', '#b45309',
+  '#e8550a', '#c2410c', '#9d174d', '#be185d',
+  '#7c3aed', '#4f46e5', '#57534e', '#334155',
 ];
 
 /**
@@ -24,6 +28,9 @@ const PALETTE = [
  * calendrier coloré n'est qu'un patchwork — et elle sert de RÉSERVE à glisser : on attrape un
  * chantier et on le dépose sur un jour pour y planifier une journée, sans passer par un
  * formulaire.
+ *
+ * Chaque entrée tient sur deux lignes (code, puis nom en gris) : sur une seule, les deux se
+ * disputaient la largeur et les codes finissaient coupés au milieu d'un mot.
  */
 export function LegendeChantiers({
   chantiers,
@@ -40,20 +47,27 @@ export function LegendeChantiers({
   aide?: string;
 }) {
   const [ouvert, setOuvert] = useState<string | null>(null);
+  const [survole, setSurvole] = useState<string | null>(null);
 
   return (
     // Largeur fixe : sans elle, un nom de chantier long étire la légende et écrase le calendrier.
-    <div className="card" style={{ marginTop: 16, padding: 12, flex: '0 0 224px', width: 224 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>
+    <aside className="card" style={{ marginTop: 16, padding: '12px 10px', flex: '0 0 248px', width: 248 }}>
+      <div style={{
+        fontSize: 11, fontWeight: 600, letterSpacing: '.04em', color: 'var(--muted)',
+        padding: '0 6px 8px',
+      }}>
         CHANTIERS
       </div>
       {aide && (
-        <p className="muted" style={{ fontSize: 11, marginTop: 0, marginBottom: 10, lineHeight: 1.45 }}>
+        <p className="muted" style={{
+          fontSize: 11, lineHeight: 1.5, margin: '0 6px 10px',
+          paddingBottom: 10, borderBottom: '1px solid var(--border)',
+        }}>
           {aide}
         </p>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
         {chantiers.map((c) => {
           const couleur = teinteChantier(c.id, c.color);
           const present = !actif || actif.has(c.id);
@@ -62,45 +76,62 @@ export function LegendeChantiers({
               <div
                 draggable={glissable}
                 onDragStart={(e) => e.dataTransfer.setData('text/plain', `chantier:${c.id}`)}
+                onMouseEnter={() => setSurvole(c.id)}
+                onMouseLeave={() => setSurvole(null)}
+                title={glissable ? `${c.code} — ${c.name}\nÀ glisser sur un jour du calendrier` : `${c.code} — ${c.name}`}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 11,
-                  padding: '3px 4px', borderRadius: 4,
+                  display: 'flex', alignItems: 'flex-start', gap: 8,
+                  padding: '6px', borderRadius: 6,
                   cursor: glissable ? 'grab' : 'default',
-                  opacity: present ? 1 : 0.45,
+                  background: survole === c.id ? 'var(--surface)' : undefined,
+                  opacity: present ? 1 : 0.5,
                 }}
-                title={`${c.code} — ${c.name}${glissable ? '\nÀ glisser sur un jour du calendrier' : ''}`}
               >
-                {glissable && <GripVertical size={11} color="var(--muted)" />}
                 <button
                   type="button"
                   onClick={() => onChoisirCouleur && setOuvert(ouvert === c.id ? null : c.id)}
                   title={onChoisirCouleur ? 'Changer la couleur' : undefined}
+                  aria-label={onChoisirCouleur ? `Couleur de ${c.code}` : undefined}
                   style={{
-                    width: 13, height: 13, borderRadius: 3, flexShrink: 0,
-                    background: couleur, border: '1px solid rgba(0,0,0,.15)', padding: 0,
+                    width: 12, height: 12, borderRadius: 3, flexShrink: 0, marginTop: 2,
+                    background: couleur, border: 'none', padding: 0,
+                    boxShadow: ouvert === c.id ? '0 0 0 2px var(--surface), 0 0 0 3px var(--primary)' : undefined,
                     cursor: onChoisirCouleur ? 'pointer' : 'default',
                   }}
                 />
-                <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{c.code}</span>
-                <span className="muted" style={{
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0,
-                }}>
-                  {c.name}
-                </span>
+                <div style={{ minWidth: 0, lineHeight: 1.35 }}>
+                  <div style={{
+                    fontSize: 11.5, fontWeight: 600,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {c.code}
+                  </div>
+                  <div className="muted" style={{
+                    fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {c.name}
+                  </div>
+                </div>
               </div>
 
               {ouvert === c.id && onChoisirCouleur && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '4px 0 6px 22px' }}>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 4,
+                  padding: '4px 6px 10px 26px',
+                }}>
                   {PALETTE.map((p) => (
                     <button
                       key={p}
                       type="button"
                       onClick={() => { onChoisirCouleur(c.id, p); setOuvert(null); }}
                       title={p}
+                      aria-label={`Couleur ${p}`}
                       style={{
                         width: 16, height: 16, borderRadius: 3, background: p, padding: 0,
-                        border: p === couleur ? '2px solid var(--primary)' : '1px solid rgba(0,0,0,.15)',
-                        cursor: 'pointer',
+                        border: 'none', cursor: 'pointer',
+                        boxShadow: p === couleur
+                          ? '0 0 0 2px var(--surface), 0 0 0 3px var(--primary)'
+                          : undefined,
                       }}
                     />
                   ))}
@@ -110,9 +141,9 @@ export function LegendeChantiers({
           );
         })}
         {chantiers.length === 0 && (
-          <span className="muted" style={{ fontSize: 11 }}>Aucun chantier.</span>
+          <span className="muted" style={{ fontSize: 11, padding: 6 }}>Aucun chantier.</span>
         )}
       </div>
-    </div>
+    </aside>
   );
 }

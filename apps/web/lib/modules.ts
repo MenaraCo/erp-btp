@@ -183,13 +183,14 @@ export const MODULES: AppModule[] = [
   {
     key: 'personnel',
     label: 'Gestion du personnel',
-    tagline: 'Salariés, heures, planning et occupation, tous chantiers confondus',
+    tagline: 'Salariés, heures, planning, congés et absences, tous chantiers confondus',
     home: '/personnel',
     match: ['/personnel'],
     capabilities: ['site_tracking.timesheet'],
     features: [
       { href: '/personnel', label: 'Occupation' },
       { href: '/personnel/planning', label: 'Planning semaine' },
+      { href: '/personnel/absences', label: 'Congés & absences' },
       { href: '/personnel/conflits', label: 'Conflits' },
       { href: '/personnel/salaries', label: 'Salariés' },
     ],
