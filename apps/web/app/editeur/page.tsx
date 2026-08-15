@@ -567,8 +567,11 @@ function ReglagesCommerciaux({ token, onChanged }: { token: string; onChanged: (
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [jours, setJours] = useState('');
-  const [remise, setRemise] = useState('');
+  // `null` = champ jamais touché (on montre la valeur du serveur). Une CHAÎNE VIDE est une saisie
+  // à part entière : sans cette distinction, vider la cellule la faisait aussitôt se re-remplir,
+  // et il devenait impossible de taper un nouveau chiffre.
+  const [jours, setJours] = useState<string | null>(null);
+  const [remise, setRemise] = useState<string | null>(null);
 
   const reglages = useQuery({
     queryKey: ['editor-pricing-settings'],
@@ -579,8 +582,13 @@ function ReglagesCommerciaux({ token, onChanged }: { token: string; onChanged: (
   });
 
   // Valeurs servies par l'API tant que l'éditeur n'a rien tapé.
-  const joursAff = jours !== '' ? jours : String(reglages.data?.trialDays ?? '');
-  const remiseAff = remise !== '' ? remise : String(reglages.data?.annualDiscountPct ?? '');
+  const joursServeur = String(reglages.data?.trialDays ?? '');
+  const remiseServeur = String(reglages.data?.annualDiscountPct ?? '');
+  const joursAff = jours ?? joursServeur;
+  const remiseAff = remise ?? remiseServeur;
+  // On n'enregistre que si la valeur est renseignée ET différente de celle déjà en place.
+  const joursModifie = jours !== null && jours.trim() !== '' && jours.trim() !== joursServeur;
+  const remiseModifiee = remise !== null && remise.trim() !== '' && remise.trim() !== remiseServeur;
 
   async function enregistrer(chemin: string, body: Record<string, number>) {
     setErr(null);
@@ -588,7 +596,8 @@ function ReglagesCommerciaux({ token, onChanged }: { token: string; onChanged: (
     try {
       await apiFetch(`/editor/${chemin}`, { method: 'POST', token, body });
       await qc.invalidateQueries({ queryKey: ['editor-pricing-settings'] });
-      setJours(''); setRemise('');
+      // Retour à « non touché » : le champ réaffiche ce que le serveur vient de confirmer.
+      setJours(null); setRemise(null);
       onChanged();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'Enregistrement impossible');
@@ -616,7 +625,8 @@ function ReglagesCommerciaux({ token, onChanged }: { token: string; onChanged: (
               aria-label="Durée de l’essai gratuit en jours"
               style={{ ...darkInput, width: 70, textAlign: 'right' }}
             />
-            <ActionBtn accent title="Enregistrer la durée d’essai" disabled={busy || jours === ''}
+            <ActionBtn accent={joursModifie} title="Enregistrer la durée d’essai"
+              disabled={busy || !joursModifie}
               onClick={() => enregistrer('trial-settings', { trialDays: Number(jours) })}>
               {busy ? '…' : 'OK'}
             </ActionBtn>
@@ -630,7 +640,8 @@ function ReglagesCommerciaux({ token, onChanged }: { token: string; onChanged: (
               aria-label="Remise d’engagement annuel en pourcentage"
               style={{ ...darkInput, width: 70, textAlign: 'right' }}
             />
-            <ActionBtn accent title="Enregistrer la remise" disabled={busy || remise === ''}
+            <ActionBtn accent={remiseModifiee} title="Enregistrer la remise"
+              disabled={busy || !remiseModifiee}
               onClick={() => enregistrer('pricing-settings', { annualDiscountPct: Number(remise) })}>
               {busy ? '…' : 'OK'}
             </ActionBtn>
