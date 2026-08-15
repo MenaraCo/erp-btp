@@ -267,7 +267,12 @@ export class EditorService {
       // ils sont couverts par le palier.
       const packRow = sub?.pack_code
         ? (
-            await em.query(`SELECT price_monthly FROM pack WHERE code = $1`, [sub.pack_code])
+            await em.query(
+              `SELECT p.price_monthly, p.seat_tokens,
+                      (SELECT count(*)::int FROM pack_module pm WHERE pm.pack_id = p.id) AS module_count
+                 FROM pack p WHERE p.code = $1`,
+              [sub.pack_code],
+            )
           )[0]
         : null;
       const paidAddons: Array<{ module_code: string; seats_purchased: number }> =
@@ -292,9 +297,15 @@ export class EditorService {
       );
 
       const activeModules = modules.filter((m) => m.active).map((m) => m.module_code);
-      const seatsPurchased = modules
-        .filter((m) => m.active)
-        .reduce((s, m) => s + Number(m.seats_purchased), 0);
+      // Jetons achetés = RÉSERVE du palier (sièges × jetons par siège) + jetons des options.
+      // Additionner `seats_purchased` module par module donnait le bon total tant qu'un siège
+      // ouvrait exactement un jeton par module ; dès que l'éditeur règle ce nombre, les deux
+      // divergent et la console afficherait un total que le client ne reconnaîtrait pas.
+      const tokensPerSeat =
+        packRow?.seat_tokens == null ? Number(packRow?.module_count ?? 0) : Number(packRow.seat_tokens);
+      const poolPalier = Number(sub?.pack_seats ?? 0) * tokensPerSeat;
+      const jetonsOptions = paidAddons.reduce((s, a) => s + Number(a.seats_purchased), 0);
+      const seatsPurchased = poolPalier + jetonsOptions;
       // Seules les souscriptions payantes (active) contribuent ; les essais comptent 0.
       const billable = sub?.status === 'active';
       const billingTerm: BillingTerm = sub?.billing_term === 'annual' ? 'annual' : 'monthly';
