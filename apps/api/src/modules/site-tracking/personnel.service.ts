@@ -222,6 +222,7 @@ export class PersonnelService {
       const conds: string[] = [];
       if (filtre.employeeId) { params.push(filtre.employeeId); conds.push(`e.id = $${params.length}`); }
       if (filtre.chantierId) { params.push(filtre.chantierId); conds.push(`c.id = $${params.length}`); }
+      if (filtre.contractType) { params.push(filtre.contractType); conds.push(`e.contract_type = $${params.length}`); }
       const filtres = conds.length ? `AND ${conds.join(' AND ')}` : '';
 
       const rows: Array<Record<string, unknown>> = await em.query(

@@ -40,8 +40,9 @@ export class PersonnelController {
     @Query('fin') fin: string,
     @Query('salarie') employeeId?: string,
     @Query('chantier') chantierId?: string,
+    @Query('contrat') contractType?: string,
   ) {
-    return this.personnel.creneaux({ debut, fin, employeeId, chantierId });
+    return this.personnel.creneaux({ debut, fin, employeeId, chantierId, contractType });
   }
 
   /** Déplace un créneau (glisser-déposer) : nouveau jour, éventuellement nouvel horaire. */

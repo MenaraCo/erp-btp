@@ -1,44 +1,37 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CalendarDays } from 'lucide-react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
-interface OccupationJour {
-  date: string;
-  chantiers: Array<{ chantierId: string; code: string; nom: string; heures: string; prevu: boolean }>;
-  totalHeures: string;
-  conflits: string[];
-}
-interface LignePersonnel {
+interface Creneau {
+  id: string;
+  kind: 'realise' | 'prevu';
   employeeId: string;
   label: string;
-  contractType: string;
-  agency: string | null;
-  codeAnalytique: string | null;
-  jours: Record<string, OccupationJour>;
-  totalHeures: string;
-  totalPrevu: string;
-  conflits: number;
+  chantierId: string;
+  chantierCode: string;
+  chantierNom: string;
+  date: string;
+  heures: string;
+  debut: string | null;
+  fin: string | null;
+  fige: boolean;
 }
-interface Occupation {
-  debut: string; fin: string; jours: string[];
-  salaries: LignePersonnel[];
-  totalHeures: string; totalPrevu: string; conflits: number;
-}
-interface Employee { id: string; fullName: string; contractType: string }
+interface Creneaux { debut: string; fin: string; jours: string[]; creneaux: Creneau[] }
+interface Conflit { employeeId: string; label: string; date: string; motifs: string[] }
+interface Conflits { conflits: Conflit[]; total: number }
+interface Employee { id: string; fullName: string }
 interface Chantier { id: string; code: string; name: string }
 
-/** Une couleur stable par chantier, pour lire la répartition d'un coup d'œil. */
 const TEINTES = ['#1a3a5c', '#e8550a', '#0f766e', '#7c3aed', '#b45309', '#be123c', '#0369a1'];
 function teinte(id: string): string {
   let n = 0;
   for (let i = 0; i < id.length; i += 1) n = (n + id.charCodeAt(i)) % TEINTES.length;
   return TEINTES[n];
 }
-
 function iso(d: Date): string { return d.toISOString().slice(0, 10); }
 function lundiDe(d: Date): Date {
   const c = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -46,35 +39,49 @@ function lundiDe(d: Date): Date {
   c.setUTCDate(c.getUTCDate() - (j === 0 ? 6 : j - 1));
   return c;
 }
-const JOURS_COURTS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+const EN_TETES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août',
+  'septembre', 'octobre', 'novembre', 'décembre'];
 
 /**
- * Occupation du personnel — vue d'entreprise.
+ * Occupation du personnel — calendrier mensuel.
  *
- * Le pointage se saisit chantier par chantier ; cette page rassemble. Chaque journée montre les
- * chantiers d'un salarié sous forme de barres colorées : on voit la répartition, les trous, et
- * les journées en conflit (même personne sur deux chantiers, ou cumul impossible).
+ * La version précédente était un tableau qui s'étirait sur trente colonnes : il fallait le faire
+ * défiler de gauche à droite pour lire un mois, ce qu'aucun calendrier ne demande. Ici, la
+ * semaine se lit sur une ligne et le mois tient dans l'écran, comme dans un agenda.
+ *
+ * Chaque jour liste ses interventions ; celles qui posent problème (même personne à deux endroits
+ * au même moment, cumul impossible) teintent la case.
  */
-export default function OccupationPersonnelPage() {
+export default function OccupationPage() {
   const { token } = useAuth();
+  const qc = useQueryClient();
   const [ancre, setAncre] = useState(() => iso(new Date()));
-  const [portee, setPortee] = useState<'semaine' | 'mois'>('semaine');
   const [salarie, setSalarie] = useState('');
   const [chantier, setChantier] = useState('');
   const [contrat, setContrat] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const [survole, setSurvole] = useState<string | null>(null);
 
-  const { debut, fin } = useMemo(() => {
+  // La grille couvre des semaines entières : un mois commence rarement un lundi.
+  const { debut, fin, moisAffiche, semaines } = useMemo(() => {
     const d = new Date(`${ancre}T00:00:00Z`);
-    if (portee === 'semaine') {
-      const l = lundiDe(d);
-      const f = new Date(l); f.setUTCDate(l.getUTCDate() + 6);
-      return { debut: iso(l), fin: iso(f) };
-    }
+    const premier = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+    const dernier = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+    const depart = lundiDe(premier);
+    const arrivee = lundiDe(dernier);
+    arrivee.setUTCDate(arrivee.getUTCDate() + 6);
+    const jours: string[] = [];
+    for (const c = new Date(depart); c <= arrivee; c.setUTCDate(c.getUTCDate() + 1)) jours.push(iso(c));
+    const paquets: string[][] = [];
+    for (let i = 0; i < jours.length; i += 7) paquets.push(jours.slice(i, i + 7));
     return {
-      debut: iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))),
-      fin: iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))),
+      debut: iso(depart),
+      fin: iso(arrivee),
+      moisAffiche: `${MOIS[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+      semaines: paquets,
     };
-  }, [ancre, portee]);
+  }, [ancre]);
 
   const requete = useMemo(() => {
     const p = new URLSearchParams({ debut, fin });
@@ -84,67 +91,91 @@ export default function OccupationPersonnelPage() {
     return p.toString();
   }, [debut, fin, salarie, chantier, contrat]);
 
-  const vue = useQuery({
-    queryKey: ['occupation', requete],
+  const donnees = useQuery({
+    queryKey: ['creneaux-mois', requete],
     enabled: Boolean(token),
-    queryFn: () => apiFetch<Occupation>(`/personnel/occupation?${requete}`, { token }),
+    queryFn: () => apiFetch<Creneaux>(`/personnel/creneaux?${requete}`, { token }),
+  });
+  const conflits = useQuery({
+    queryKey: ['conflits-mois', debut, fin],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<Conflits>(`/personnel/conflits?debut=${debut}&fin=${fin}`, { token }),
   });
   const salaries = useQuery({
-    queryKey: ['employees'],
-    enabled: Boolean(token),
+    queryKey: ['employees'], enabled: Boolean(token),
     queryFn: () => apiFetch<Employee[]>('/employees', { token }),
   });
   const chantiers = useQuery({
-    queryKey: ['chantiers'],
-    enabled: Boolean(token),
+    queryKey: ['chantiers'], enabled: Boolean(token),
     queryFn: () => apiFetch<Chantier[]>('/chantiers', { token }),
+  });
+
+  const deplacer = useMutation({
+    mutationFn: (v: { kind: string; id: string; date: string }) =>
+      apiFetch(`/personnel/creneaux/${v.kind}/${v.id}`, { method: 'PATCH', token, body: { date: v.date } }),
+    onSuccess: () => {
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ['creneaux-mois'] });
+      qc.invalidateQueries({ queryKey: ['conflits-mois'] });
+      qc.invalidateQueries({ queryKey: ['occupation'] });
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Déplacement impossible'),
   });
 
   const decaler = (pas: number) => {
     const d = new Date(`${ancre}T00:00:00Z`);
-    if (portee === 'semaine') d.setUTCDate(d.getUTCDate() + 7 * pas);
-    else d.setUTCMonth(d.getUTCMonth() + pas);
+    d.setUTCMonth(d.getUTCMonth() + pas, 1);
     setAncre(iso(d));
   };
 
-  const v = vue.data;
+  const parJour = useMemo(() => {
+    const m = new Map<string, Creneau[]>();
+    for (const c of donnees.data?.creneaux ?? []) {
+      m.set(c.date, [...(m.get(c.date) ?? []), c]);
+    }
+    return m;
+  }, [donnees.data]);
+
+  const conflitsParJour = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const c of conflits.data?.conflits ?? []) {
+      m.set(c.date, [...(m.get(c.date) ?? []), `${c.label} — ${c.motifs.join(' · ')}`]);
+    }
+    return m;
+  }, [conflits.data]);
+
+  const moisCourant = new Date(`${ancre}T00:00:00Z`).getUTCMonth();
 
   return (
     <div>
       <h1 style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
         <CalendarDays size={20} /> Occupation du personnel
       </h1>
-      <p className="muted" style={{ marginTop: 0, maxWidth: 800 }}>
-        Qui travaille où, tous chantiers confondus. Chaque barre est un chantier ; les journées en
-        rouge demandent une vérification — même personne sur deux chantiers, ou cumul impossible.
+      <p className="muted" style={{ marginTop: 0, maxWidth: 820 }}>
+        Qui travaille où, tous chantiers confondus. Glissez une intervention sur un autre jour pour
+        la déplacer ; les journées teintées demandent une vérification.
       </p>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
         <button className="btn btn-secondary" onClick={() => decaler(-1)}>‹</button>
-        <div className="field" style={{ marginBottom: 0 }}>
-          <label>À partir du</label>
-          <input type="date" value={ancre} onChange={(e) => setAncre(e.target.value)} style={{ width: 150 }} />
+        <div style={{ minWidth: 150, textAlign: 'center', fontWeight: 600, textTransform: 'capitalize' }}>
+          {moisAffiche}
         </div>
         <button className="btn btn-secondary" onClick={() => decaler(1)}>›</button>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {(['semaine', 'mois'] as const).map((p) => (
-            <button key={p} className={portee === p ? 'btn' : 'btn btn-secondary'} onClick={() => setPortee(p)}>
-              {p === 'semaine' ? 'Semaine' : 'Mois'}
-            </button>
-          ))}
-        </div>
-        <div className="field" style={{ marginBottom: 0 }}>
+        <button className="btn btn-secondary" onClick={() => setAncre(iso(new Date()))}>Aujourd’hui</button>
+
+        <div className="field" style={{ marginBottom: 0, marginLeft: 12 }}>
           <label>Salarié</label>
-          <select value={salarie} onChange={(e) => setSalarie(e.target.value)} style={{ minWidth: 170 }}>
+          <select value={salarie} onChange={(e) => setSalarie(e.target.value)} style={{ minWidth: 160 }}>
             <option value="">Tous</option>
             {(salaries.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.fullName}</option>)}
           </select>
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
           <label>Chantier</label>
-          <select value={chantier} onChange={(e) => setChantier(e.target.value)} style={{ minWidth: 170 }}>
+          <select value={chantier} onChange={(e) => setChantier(e.target.value)} style={{ minWidth: 160 }}>
             <option value="">Tous</option>
-            {(chantiers.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}
+            {(chantiers.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.code}</option>)}
           </select>
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
@@ -158,92 +189,97 @@ export default function OccupationPersonnelPage() {
         </div>
       </div>
 
-      {v && v.conflits > 0 && (
-        <div className="card" style={{ marginTop: 16, borderColor: 'var(--danger, #dc2626)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--danger, #dc2626)' }}>
+      {err && <div className="error" style={{ marginTop: 12 }}>{err}</div>}
+      {conflits.data && conflits.data.total > 0 && (
+        <div className="card" style={{ marginTop: 12, borderColor: 'var(--danger, #dc2626)', padding: '10px 14px' }}>
+          <span style={{ color: 'var(--danger, #dc2626)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <AlertTriangle size={16} />
-            <strong>{v.conflits} journée{v.conflits > 1 ? 's' : ''} à vérifier</strong>
-          </div>
+            <strong>{conflits.data.total} journée{conflits.data.total > 1 ? 's' : ''} à vérifier</strong>
+          </span>
         </div>
       )}
 
-      {v && (
-        <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="grid" style={{ margin: 0 }}>
-              <thead>
-                <tr>
-                  <th style={{ minWidth: 190 }}>Salarié</th>
-                  {v.jours.map((j) => (
-                    <th key={j} style={{ textAlign: 'center', minWidth: 54 }}>
-                      <div style={{ fontSize: 10, fontWeight: 400 }}>
-                        {JOURS_COURTS[new Date(`${j}T00:00:00Z`).getUTCDay()]}
-                      </div>
-                      {j.slice(8)}
-                    </th>
-                  ))}
-                  <th style={{ textAlign: 'right' }}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {v.salaries.map((s) => (
-                  <tr key={s.employeeId}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{s.label}</div>
-                      <div className="muted" style={{ fontSize: 11 }}>
-                        {s.contractType === 'interimaire' ? `Intérim${s.agency ? ` · ${s.agency}` : ''}` : '—'}
-                        {s.codeAnalytique ? ` · ${s.codeAnalytique}` : ''}
-                      </div>
-                    </td>
-                    {v.jours.map((j) => {
-                      const jour = s.jours[j];
-                      const enConflit = (jour?.conflits.length ?? 0) > 0;
-                      return (
-                        <td key={j} style={{
-                          padding: 3, verticalAlign: 'top',
-                          background: enConflit ? '#fef2f2' : undefined,
-                        }}
-                          title={enConflit ? jour.conflits.join(' — ') : undefined}
-                        >
-                          {/* Une barre par chantier : la hauteur dit les heures, la couleur le chantier. */}
-                          {(jour?.chantiers ?? []).map((c) => (
-                            <div
-                              key={`${c.chantierId}-${c.prevu}`}
-                              title={`${c.code} — ${c.nom} · ${Number(c.heures)} h${c.prevu ? ' (prévu)' : ''}`}
-                              style={{
-                                background: c.prevu ? 'transparent' : teinte(c.chantierId),
-                                border: c.prevu ? `1px dashed ${teinte(c.chantierId)}` : undefined,
-                                color: c.prevu ? teinte(c.chantierId) : '#fff',
-                                borderRadius: 3, fontSize: 10, padding: '1px 4px', marginBottom: 2,
-                                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                              }}
-                            >
-                              {c.code} {Number(c.heures)}h
-                            </div>
-                          ))}
-                        </td>
-                      );
-                    })}
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                      {Number(s.totalHeures)}
-                      {Number(s.totalPrevu) > 0 && (
-                        <div style={{ color: 'var(--accent)', fontWeight: 400, fontSize: 11 }}>
-                          {Number(s.totalPrevu)} prévu
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {v.salaries.length === 0 && (
-            <p className="muted" style={{ padding: 16, margin: 0 }}>
-              Personne n’est pointé ni planifié sur cette période.
-            </p>
-          )}
+      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
+        {/* En-têtes des jours */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+          {EN_TETES.map((j) => (
+            <div key={j} style={{
+              padding: '8px 10px', fontSize: 11, fontWeight: 600, textAlign: 'center',
+              borderBottom: '1px solid var(--border)', color: 'var(--muted)',
+            }}>
+              {j}
+            </div>
+          ))}
         </div>
-      )}
+
+        {semaines.map((semaine) => (
+          <div key={semaine[0]} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+            {semaine.map((jour) => {
+              const dansLeMois = new Date(`${jour}T00:00:00Z`).getUTCMonth() === moisCourant;
+              const interventions = parJour.get(jour) ?? [];
+              const motifs = conflitsParJour.get(jour) ?? [];
+              return (
+                <div
+                  key={jour}
+                  onDragOver={(e) => { e.preventDefault(); setSurvole(jour); }}
+                  onDragLeave={() => setSurvole(null)}
+                  onDrop={(e) => {
+                    e.preventDefault(); setSurvole(null);
+                    const [kind, id] = e.dataTransfer.getData('text/plain').split(':');
+                    if (kind && id) deplacer.mutate({ kind, id, date: jour });
+                  }}
+                  title={motifs.join('\n') || undefined}
+                  style={{
+                    minHeight: 108, padding: 6, borderTop: '1px solid var(--border)',
+                    borderLeft: '1px solid var(--border)',
+                    background: survole === jour ? 'var(--surface)'
+                      : motifs.length > 0 ? '#fef2f2'
+                        : dansLeMois ? undefined : 'var(--surface)',
+                    opacity: dansLeMois ? 1 : 0.6,
+                  }}
+                >
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    fontSize: 11, marginBottom: 4,
+                  }}>
+                    <span style={{ fontWeight: dansLeMois ? 600 : 400 }}>{Number(jour.slice(8))}</span>
+                    {motifs.length > 0 && <AlertTriangle size={12} color="var(--danger, #dc2626)" />}
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {interventions.slice(0, 4).map((c) => (
+                      <div
+                        key={c.id}
+                        draggable={!c.fige}
+                        onDragStart={(e) => e.dataTransfer.setData('text/plain', `${c.kind}:${c.id}`)}
+                        title={`${c.label} · ${c.chantierCode} — ${c.chantierNom}\n${
+                          c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
+                        }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}`}
+                        style={{
+                          background: c.kind === 'prevu' ? 'transparent' : teinte(c.chantierId),
+                          border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinte(c.chantierId)}`,
+                          color: c.kind === 'prevu' ? teinte(c.chantierId) : '#fff',
+                          borderRadius: 4, fontSize: 10, padding: '1px 5px',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          cursor: c.fige ? 'not-allowed' : 'grab', opacity: c.fige ? 0.55 : 1,
+                        }}
+                      >
+                        {c.debut ? `${c.debut} ` : ''}{c.chantierCode} · {c.label.split(' ')[0]}
+                      </div>
+                    ))}
+                    {/* Une case ne peut pas tout montrer : on annonce le reste plutôt que de tronquer en silence. */}
+                    {interventions.length > 4 && (
+                      <div className="muted" style={{ fontSize: 10 }}>
+                        + {interventions.length - 4} autre{interventions.length - 4 > 1 ? 's' : ''}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
