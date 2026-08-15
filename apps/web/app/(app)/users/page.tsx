@@ -23,6 +23,10 @@ interface Permission { key: string; label: string }
 export default function UsersPage() {
   const { token } = useAuth();
   const qc = useQueryClient();
+  // Un changement de profil prend effet immédiatement : on le fait CONFIRMER plutôt que de
+  // l'appliquer au premier clic dans la liste, où une fausse manœuvre retire des droits.
+  const [pending, setPending] = useState<Record<string, string>>({});
+  const [roleErr, setRoleErr] = useState<string | null>(null);
 
   const users = useQuery({
     queryKey: ['admin-users'],
@@ -70,7 +74,13 @@ export default function UsersPage() {
   const setRole = useMutation({
     mutationFn: ({ userId, roleCode }: { userId: string; roleCode: string | null }) =>
       apiFetch(`/admin/users/${userId}/role`, { method: 'POST', token, body: { roleCode } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: (_r, v) => {
+      setRoleErr(null);
+      setPending((p) => { const n = { ...p }; delete n[v.userId]; return n; });
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+    },
+    // Le serveur refuse notamment de retirer le dernier administrateur : on montre sa phrase.
+    onError: (e) => setRoleErr(e instanceof ApiError ? e.message : 'Changement impossible'),
   });
 
   if (users.isError) {
@@ -97,6 +107,8 @@ export default function UsersPage() {
         pour travailler dans un module.
       </p>
 
+      {roleErr && <div className="error" style={{ marginTop: 12 }}>{roleErr}</div>}
+
       <div className="card" style={{ marginTop: 12, padding: 0, overflow: 'hidden' }}>
         {users.isLoading && <p className="muted" style={{ padding: 16 }}>Chargement…</p>}
         {users.data && (
@@ -119,15 +131,18 @@ export default function UsersPage() {
                     <td>
                       {(() => {
                         const courant = u.roles[0] ?? '';
-                        const role = (roles.data ?? []).find((r) => r.code === courant);
+                        const choisi = pending[u.id] ?? courant;
+                        const enAttente = choisi !== courant;
+                        const role = (roles.data ?? []).find((r) => r.code === choisi);
                         return (
                           <div>
                             <select
-                              value={courant}
+                              value={choisi}
                               disabled={setRole.isPending}
-                              onChange={(e) =>
-                                setRole.mutate({ userId: u.id, roleCode: e.target.value || null })
-                              }
+                              onChange={(e) => {
+                                setRoleErr(null);
+                                setPending((p) => ({ ...p, [u.id]: e.target.value }));
+                              }}
                               style={{ minWidth: 200 }}
                             >
                               <option value="">— Aucun droit —</option>
@@ -135,6 +150,30 @@ export default function UsersPage() {
                                 <option key={r.code} value={r.code}>{r.label}</option>
                               ))}
                             </select>
+                            {enAttente && (
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+                                <button
+                                  className="btn"
+                                  style={{ padding: '3px 10px', fontSize: 12 }}
+                                  disabled={setRole.isPending}
+                                  onClick={() =>
+                                    setRole.mutate({ userId: u.id, roleCode: choisi || null })
+                                  }
+                                >
+                                  {setRole.isPending ? '…' : 'Appliquer'}
+                                </button>
+                                <button
+                                  className="link"
+                                  type="button"
+                                  onClick={() => {
+                                    setRoleErr(null);
+                                    setPending((p) => { const n = { ...p }; delete n[u.id]; return n; });
+                                  }}
+                                >
+                                  Annuler
+                                </button>
+                              </div>
+                            )}
                             {/* Comptes hérités du temps où les rôles se cumulaient : la liste n'en
                                 montre qu'un. On le dit, car choisir un profil retirera les autres. */}
                             {u.roles.length > 1 && (
@@ -174,7 +213,8 @@ export default function UsersPage() {
         )}
       </div>
       <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-        Choisissez un profil par personne : il décide de ce qu'elle a le droit de faire. Pour lui ouvrir
+        Choisissez un profil par personne, puis confirmez par « Appliquer » : il décide de ce qu'elle
+        a le droit de faire. Pour lui ouvrir
         un module, affectez-lui un jeton dans{' '}
         <Link href="/abonnement" className="link">Abonnement → Formule & Options</Link>.
       </p>

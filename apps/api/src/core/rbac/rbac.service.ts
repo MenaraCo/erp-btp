@@ -73,9 +73,70 @@ export class RbacService {
     });
   }
 
+  /**
+   * Refuse de laisser une société sans personne capable de gérer les comptes.
+   *
+   * Retirer ses droits au dernier administrateur enferme le client hors de sa propre
+   * administration : plus personne ne peut les rendre, et il faut une intervention en base pour
+   * réparer. On vérifie donc, AVANT d'écrire, qu'il restera au moins un utilisateur actif
+   * détenant `rbac.user_role.assign` — la permission qui permet de rendre les droits.
+   *
+   * Le contrôle porte sur la permission, pas sur le code « admin » : un rôle sur mesure qui la
+   * détient fait tout aussi bien l'affaire.
+   */
+  private async assertNotLastAdmin(
+    em: { query: (sql: string, params?: unknown[]) => Promise<Array<Record<string, unknown>>> },
+    userId: string,
+    keptRoleCode: string | null,
+  ): Promise<void> {
+    const GUARD = 'rbac.user_role.assign';
+
+    // Le profil conservé garde-t-il la main ? Alors rien ne se perd.
+    if (keptRoleCode) {
+      const kept = await em.query(
+        `SELECT 1 FROM role r
+           JOIN role_permission rp ON rp.role_id = r.id
+           JOIN permission p ON p.id = rp.permission_id
+          WHERE r.code = $1 AND p.key = $2 LIMIT 1`,
+        [keptRoleCode, GUARD],
+      );
+      if (kept.length > 0) return;
+    }
+
+    // Cet utilisateur détient-il seulement cette permission aujourd'hui ?
+    const porte = await em.query(
+      `SELECT 1 FROM user_role ur
+         JOIN role r ON r.id = ur.role_id
+         JOIN role_permission rp ON rp.role_id = r.id
+         JOIN permission p ON p.id = rp.permission_id
+        WHERE ur.user_id = $1 AND p.key = $2 LIMIT 1`,
+      [userId, GUARD],
+    );
+    if (porte.length === 0) return; // il ne l'a pas : son changement ne retire rien.
+
+    const autres = await em.query(
+      `SELECT count(DISTINCT ur.user_id)::int AS n
+         FROM user_role ur
+         JOIN role r ON r.id = ur.role_id
+         JOIN role_permission rp ON rp.role_id = r.id
+         JOIN permission p ON p.id = rp.permission_id
+         JOIN user_account u ON u.id = ur.user_id
+        WHERE p.key = $1 AND ur.user_id <> $2
+          AND u.status = 'active' AND u.deleted_at IS NULL`,
+      [GUARD, userId],
+    );
+    if (Number((autres[0] as { n: number }).n) === 0) {
+      throw new BadRequestException(
+        'Impossible : cette personne est le dernier administrateur de la société. '
+        + 'Nommez d’abord un autre administrateur, sinon plus personne ne pourrait gérer les comptes.',
+      );
+    }
+  }
+
   /** Removes a role (by code) from a user. */
   revokeRole(tenantId: string, userId: string, roleCode: string): Promise<void> {
     return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertNotLastAdmin(em, userId, null);
       await em.query(
         `DELETE FROM user_role ur
           USING role r
@@ -124,6 +185,7 @@ export class RbacService {
         }
         roleId = roleRows[0].id as string;
       }
+      await this.assertNotLastAdmin(em, userId, roleCode);
       await em.query(`DELETE FROM user_role WHERE user_id = $1`, [userId]);
       if (roleId) {
         await em.query(
