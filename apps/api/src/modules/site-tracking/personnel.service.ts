@@ -1,9 +1,12 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException, ConflictException, Injectable, NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { dureeDuCreneau, normaliserCreneau } from './timesheet.service';
 
 export interface FiltrePersonnel {
   debut: string;
@@ -205,6 +208,133 @@ export class PersonnelService {
     );
     return { debut: vue.debut, fin: vue.fin, conflits: liste, total: liste.length };
   }
+  /**
+   * Créneaux individuels d'une période — ce que la vue calendrier affiche et déplace.
+   *
+   * L'occupation agrège par jour ; ici on veut chaque bloc avec son identifiant, pour pouvoir le
+   * saisir à la souris. Le réalisé et le prévisionnel arrivent ensemble, distingués par `kind`.
+   */
+  creneaux(filtre: FiltrePersonnel) {
+    const tenantId = this.context.requireTenantId();
+    const { debut, fin } = bornes(filtre.debut, filtre.fin);
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const params: unknown[] = [debut, fin];
+      const conds: string[] = [];
+      if (filtre.employeeId) { params.push(filtre.employeeId); conds.push(`e.id = $${params.length}`); }
+      if (filtre.chantierId) { params.push(filtre.chantierId); conds.push(`c.id = $${params.length}`); }
+      const filtres = conds.length ? `AND ${conds.join(' AND ')}` : '';
+
+      const rows: Array<Record<string, unknown>> = await em.query(
+        `SELECT t.id, 'realise' AS kind, e.id AS employee_id,
+                trim(coalesce(e.first_name,'') || ' ' || e.last_name) AS label,
+                c.id AS chantier_id, c.code AS chantier_code, c.name AS chantier_nom,
+                t.work_date::text AS date, t.hours::text AS heures,
+                to_char(t.start_time,'HH24:MI') AS debut, to_char(t.end_time,'HH24:MI') AS fin,
+                (t.imputed_at IS NOT NULL) AS fige
+           FROM timesheet t
+           JOIN employee e ON e.id = t.employee_id
+           JOIN chantier c ON c.id = t.chantier_id
+          WHERE t.work_date BETWEEN $1 AND $2 ${filtres}
+         UNION ALL
+         SELECT f.id, 'prevu', e.id,
+                trim(coalesce(e.first_name,'') || ' ' || e.last_name),
+                c.id, c.code, c.name,
+                f.work_date::text, f.hours::text,
+                to_char(f.start_time,'HH24:MI'), to_char(f.end_time,'HH24:MI'), false
+           FROM timesheet_forecast f
+           JOIN employee e ON e.id = f.employee_id
+           JOIN chantier c ON c.id = f.chantier_id
+          WHERE f.work_date BETWEEN $1 AND $2 ${filtres}
+          ORDER BY 8, 10 NULLS FIRST`,
+        params,
+      );
+
+      return {
+        debut,
+        fin,
+        jours: joursEntre(debut, fin),
+        creneaux: rows.map((r) => ({
+          id: r.id as string,
+          kind: r.kind as 'realise' | 'prevu',
+          employeeId: r.employee_id as string,
+          label: r.label as string,
+          chantierId: r.chantier_id as string,
+          chantierCode: r.chantier_code as string,
+          chantierNom: r.chantier_nom as string,
+          date: r.date as string,
+          heures: new Decimal(r.heures as string).toString(),
+          debut: (r.debut as string | null) ?? null,
+          fin: (r.fin as string | null) ?? null,
+          fige: Boolean(r.fige),
+        })),
+      };
+    });
+  }
+
+  /**
+   * Déplace un créneau : nouveau jour, et éventuellement nouvel horaire.
+   *
+   * C'est le geste du glisser-déposer. Un créneau réalisé et ARRÊTÉ ne bouge pas : ses heures
+   * alimentent un résultat déjà publié.
+   */
+  deplacer(
+    kind: 'realise' | 'prevu',
+    id: string,
+    cible: { date?: string; debut?: string | null; fin?: string | null },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    if (cible.date && !ISO.test(cible.date)) {
+      throw new BadRequestException('Date attendue au format AAAA-MM-JJ.');
+    }
+    const creneau = normaliserCreneau(cible.debut, cible.fin);
+    const table = kind === 'prevu' ? 'timesheet_forecast' : 'timesheet';
+
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const ligne = (
+        await em.query(
+          `SELECT *, work_date::text AS work_date FROM ${table} WHERE id = $1`,
+          [id],
+        )
+      )[0] as Record<string, unknown> | undefined;
+      if (!ligne) throw new NotFoundException('Créneau introuvable');
+      if (kind === 'realise' && ligne.imputed_at) {
+        throw new ConflictException(
+          'Ce créneau est arrêté : ses heures alimentent déjà le résultat du chantier.',
+        );
+      }
+
+      const date = cible.date ?? (ligne.work_date as string);
+      // Un déplacement peut aussi changer la durée : on la recalcule depuis le nouveau créneau.
+      const heures = creneau ? dureeDuCreneau(creneau) : new Decimal(String(ligne.hours));
+
+      if (kind === 'prevu') {
+        // Le prévisionnel est unique par salarié et par jour : déposer sur un jour déjà planifié
+        // remplace la valeur plutôt que d'échouer sur une contrainte.
+        await em.query(
+          `DELETE FROM timesheet_forecast
+            WHERE chantier_id = $1 AND employee_id = $2 AND work_date = $3 AND id <> $4`,
+          [ligne.chantier_id, ligne.employee_id, date, id],
+        );
+        await em.query(
+          `UPDATE timesheet_forecast
+              SET work_date = $2, hours = $3, start_time = $4, end_time = $5, updated_at = now()
+            WHERE id = $1`,
+          [id, date, heures.toString(), creneau?.debut ?? null, creneau?.fin ?? null],
+        );
+      } else {
+        const cout = heures.times(String(ligne.hourly_cost)).toDecimalPlaces(2);
+        await em.query(
+          `UPDATE timesheet
+              SET work_date = $2, hours = $3, cost = $4, start_time = $5, end_time = $6,
+                  updated_at = now()
+            WHERE id = $1`,
+          [id, date, heures.toString(), cout.toString(), creneau?.debut ?? null, creneau?.fin ?? null],
+        );
+      }
+      return { id, kind, date, heures: heures.toString(), debut: creneau?.debut ?? null, fin: creneau?.fin ?? null };
+    });
+  }
+
 }
 
 function joursEntre(debut: string, fin: string): string[] {

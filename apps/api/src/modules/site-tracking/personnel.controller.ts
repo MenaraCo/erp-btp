@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { PersonnelService } from './personnel.service';
@@ -30,5 +30,32 @@ export class PersonnelController {
   @RequiresPermission('site_tracking.read')
   conflits(@Query('debut') debut: string, @Query('fin') fin: string) {
     return this.personnel.conflits(debut, fin);
+  }
+  /** Créneaux individuels — ce que la vue calendrier affiche et déplace à la souris. */
+  @Get('creneaux')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.read')
+  creneaux(
+    @Query('debut') debut: string,
+    @Query('fin') fin: string,
+    @Query('salarie') employeeId?: string,
+    @Query('chantier') chantierId?: string,
+  ) {
+    return this.personnel.creneaux({ debut, fin, employeeId, chantierId });
+  }
+
+  /** Déplace un créneau (glisser-déposer) : nouveau jour, éventuellement nouvel horaire. */
+  @Patch('creneaux/:kind/:id')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.write')
+  deplacer(
+    @Param('kind') kind: string,
+    @Param('id') id: string,
+    @Body() body: { date?: string; debut?: string | null; fin?: string | null },
+  ) {
+    if (kind !== 'realise' && kind !== 'prevu') {
+      throw new BadRequestException('Type de créneau inconnu (realise ou prevu).');
+    }
+    return this.personnel.deplacer(kind, id, body ?? {});
   }
 }

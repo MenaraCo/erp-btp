@@ -29,6 +29,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/direction': Gauge,
   '/chantiers': Building2,
   '/personnel': CalendarDays,
+  '/personnel/planning': CalendarDays,
   '/personnel/conflits': ClipboardCheck,
   '/personnel/salaries': Users,
   '/chantiers/bibliotheque': BookOpen,

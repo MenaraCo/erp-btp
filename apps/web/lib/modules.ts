@@ -189,6 +189,7 @@ export const MODULES: AppModule[] = [
     capabilities: ['site_tracking.timesheet'],
     features: [
       { href: '/personnel', label: 'Occupation' },
+      { href: '/personnel/planning', label: 'Planning semaine' },
       { href: '/personnel/conflits', label: 'Conflits' },
       { href: '/personnel/salaries', label: 'Salariés' },
     ],
