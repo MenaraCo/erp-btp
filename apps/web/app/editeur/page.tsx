@@ -61,6 +61,7 @@ interface PromoCodeRow {
   discountType: 'percent' | 'fixed';
   discountValue: number;
   appliesTo: 'monthly' | 'annual' | 'both';
+  durationMonths: number | null;
   active: boolean;
   validFrom: string | null;
   validUntil: string | null;
@@ -526,6 +527,8 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent');
   const [discountValue, setDiscountValue] = useState('10');
   const [appliesTo, setAppliesTo] = useState<'monthly' | 'annual' | 'both'>('both');
+  // '' = toute la période ; sinon nombre de premiers mois remisés.
+  const [durationMonths, setDurationMonths] = useState('');
   const [validUntil, setValidUntil] = useState('');
   const [maxRedemptions, setMaxRedemptions] = useState('');
 
@@ -560,11 +563,13 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
           discountType,
           discountValue: Number(discountValue.replace(',', '.')),
           appliesTo,
+          durationMonths: durationMonths === '' ? null : Number(durationMonths),
           validUntil: validUntil || null,
           maxRedemptions: maxRedemptions === '' ? null : Number(maxRedemptions),
         },
       });
-      setCode(''); setLabel(''); setValidUntil(''); setMaxRedemptions(''); setAppliesTo('both');
+      setCode(''); setLabel(''); setValidUntil(''); setMaxRedemptions('');
+      setAppliesTo('both'); setDurationMonths('');
     });
 
   const toggle = (p: PromoCodeRow) =>
@@ -613,6 +618,16 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
             <option value="annual">Annuel seul</option>
           </select>
         </FieldSm>
+        <FieldSm label="Durée de la remise">
+          <select value={durationMonths} onChange={(e) => setDurationMonths(e.target.value)} style={{ ...darkInput, width: 150 }}>
+            <option value="">Toute la période</option>
+            {[1, 2, 3, 4, 5, 6, 9, 12].map((n) => (
+              <option key={n} value={String(n)}>
+                {n === 1 ? '1er mois seulement' : `${n} premiers mois`}
+              </option>
+            ))}
+          </select>
+        </FieldSm>
         <FieldSm label="Valide jusqu’au">
           <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} style={{ ...darkInput, width: 140 }} />
         </FieldSm>
@@ -635,6 +650,7 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
               <Th>Code</Th>
               <Th>Remise</Th>
               <Th>Portée</Th>
+              <Th>Durée</Th>
               <Th>Validité</Th>
               <Th right>Utilisations</Th>
               <Th right>État</Th>
@@ -652,6 +668,15 @@ function PromoCodesEditor({ token, onChanged }: { token: string; onChanged: () =
                 <Td>
                   <span style={{ color: '#94a3b8', fontSize: 11 }}>
                     {p.appliesTo === 'monthly' ? 'Mensuel' : p.appliesTo === 'annual' ? 'Annuel' : 'Mensuel + annuel'}
+                  </span>
+                </Td>
+                <Td>
+                  <span style={{ color: '#94a3b8', fontSize: 11 }}>
+                    {p.durationMonths === null
+                      ? 'Toute la période'
+                      : p.durationMonths === 1
+                        ? '1er mois'
+                        : `${p.durationMonths} premiers mois`}
                   </span>
                 </Td>
                 <Td>

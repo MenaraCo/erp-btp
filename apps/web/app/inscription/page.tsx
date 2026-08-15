@@ -65,7 +65,12 @@ export default function InscriptionPage() {
   const [annualDiscountPct, setAnnualDiscountPct] = useState(10);
   // Remise du code promo validée par le serveur, pour afficher le montant réellement dû.
   const [promo, setPromo] = useState<
-    { discountType: 'percent' | 'fixed'; discountValue: number; appliesTo: 'monthly' | 'annual' | 'both' } | null
+    {
+      discountType: 'percent' | 'fixed';
+      discountValue: number;
+      appliesTo: 'monthly' | 'annual' | 'both';
+      durationMonths: number | null;
+    } | null
   >(null);
   const [promoStatus, setPromoStatus] = useState<'idle' | 'checking' | 'ok' | 'invalid'>('idle');
 
@@ -102,9 +107,15 @@ export default function InscriptionPage() {
           discountType?: 'percent' | 'fixed';
           discountValue?: number;
           appliesTo?: 'monthly' | 'annual' | 'both';
+          durationMonths?: number | null;
         }>(`/public/catalog/promo/${encodeURIComponent(code)}`);
         if (r.usable && r.discountType && typeof r.discountValue === 'number') {
-          setPromo({ discountType: r.discountType, discountValue: r.discountValue, appliesTo: r.appliesTo ?? 'both' });
+          setPromo({
+            discountType: r.discountType,
+            discountValue: r.discountValue,
+            appliesTo: r.appliesTo ?? 'both',
+            durationMonths: r.durationMonths ?? null,
+          });
           setPromoStatus('ok');
         } else {
           setPromo(null);
@@ -174,15 +185,46 @@ export default function InscriptionPage() {
     return Math.max(0, Math.round(reduced * 100) / 100);
   }, [monthlyAfterTerm, promo, promoApplies]);
 
+  /** Mois de la 1re année couverts par la remise (12 = toute la période). Miroir du serveur. */
+  const promoMonths = useMemo(() => {
+    if (!promo || !promoApplies) return 0;
+    const n = promo.durationMonths;
+    if (n === null || n === undefined) return 12;
+    return Math.min(12, Math.max(1, Math.trunc(n)));
+  }, [promo, promoApplies]);
+
+  const promoLimited = promoMonths > 0 && promoMonths < 12;
+
+  /** Total réellement payé sur les 12 premiers mois, remise limitée comprise. */
+  const firstYearTotal = useMemo(
+    () =>
+      Math.round((monthlyAfterTerm * 12 - (monthlyAfterTerm - monthlyNet) * promoMonths) * 100) / 100,
+    [monthlyAfterTerm, monthlyNet, promoMonths],
+  );
+
   const amountPerInvoice = useMemo(
-    () => (billingInterval === 'yearly' ? Math.round(monthlyNet * 12 * 100) / 100 : monthlyNet),
-    [monthlyNet, billingInterval],
+    () => (billingInterval === 'yearly' ? firstYearTotal : monthlyNet),
+    [firstYearTotal, monthlyNet, billingInterval],
+  );
+
+  /** Montant des échéances suivantes, une fois la remise épuisée. */
+  const amountAfterPromo = useMemo(
+    () =>
+      billingInterval === 'yearly'
+        ? Math.round(monthlyAfterTerm * 12 * 100) / 100
+        : promoLimited ? monthlyAfterTerm : monthlyNet,
+    [billingInterval, monthlyAfterTerm, monthlyNet, promoLimited],
   );
 
   const annualSavings = useMemo(
-    () => Math.round((monthlyTotal - monthlyNet) * 12 * 100) / 100,
-    [monthlyTotal, monthlyNet],
+    () => Math.round((monthlyTotal * 12 - firstYearTotal) * 100) / 100,
+    [monthlyTotal, firstYearTotal],
   );
+
+  /** « 1er mois » / « 2 premiers mois » — libellé partagé par l'aide et le récapitulatif. */
+  const promoDureeLabel = promoLimited
+    ? promoMonths === 1 ? '1er mois' : `${promoMonths} premiers mois`
+    : null;
 
   function chooseDoor(d: Door) {
     setError(null);
@@ -475,6 +517,7 @@ export default function InscriptionPage() {
                       ✓ Remise appliquée{promo.discountType === 'percent'
                         ? ` : −${promo.discountValue} %`
                         : ` : −${euro(promo.discountValue)}/mois`}
+                      {promoDureeLabel ? ` — ${promoDureeLabel}` : ''}
                     </span>
                   )}
                   {promoStatus === 'ok' && promo && !promoApplies && (
@@ -545,9 +588,13 @@ export default function InscriptionPage() {
                     <td>
                       Code promo « {promoCode.trim()} »
                       {promo.discountType === 'percent' ? ` (${promo.discountValue} %)` : ''}
+                      {promoDureeLabel && (
+                        <span className="muted" style={{ fontSize: 11 }}> — {promoDureeLabel}</span>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--accent)' }}>
-                      −{euro(Math.round((monthlyAfterTerm - monthlyNet) * 100) / 100)} /mois
+                      −{euro(Math.round((monthlyAfterTerm - monthlyNet) * 100) / 100)}
+                      {promoLimited ? ` × ${promoMonths}` : ' /mois'}
                     </td>
                   </tr>
                 )}
@@ -569,10 +616,28 @@ export default function InscriptionPage() {
                 )}
                 <tr>
                   <td style={{ fontWeight: 700 }}>
-                    {billingInterval === 'yearly' ? 'Total annuel HT' : 'Total mensuel HT'}
+                    {billingInterval === 'yearly'
+                      ? 'Total 1re année HT'
+                      : promoLimited
+                        ? `Total mensuel HT (${promoDureeLabel})`
+                        : 'Total mensuel HT'}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>{euro(amountPerInvoice)}</td>
                 </tr>
+                {/* Une remise limitée s'arrête : on dit tout de suite ce qui sera payé ensuite,
+                    plutôt que de laisser le client découvrir l'augmentation sur sa facture. */}
+                {promoLimited && (
+                  <tr>
+                    <td className="muted" style={{ fontSize: 12 }}>
+                      {billingInterval === 'yearly'
+                        ? 'Puis, à partir de la 2e année'
+                        : `Puis à partir du ${promoMonths + 1}e mois`}
+                    </td>
+                    <td className="muted" style={{ textAlign: 'right', fontSize: 12 }}>
+                      {euro(amountAfterPromo)} {billingInterval === 'yearly' ? '/an' : '/mois'}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
 

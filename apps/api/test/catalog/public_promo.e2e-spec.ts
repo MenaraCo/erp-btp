@@ -56,6 +56,7 @@ describe('Catalogue public — validation d’un code promo', () => {
       discountType: 'percent',
       discountValue: 15,
       appliesTo: 'both',
+      durationMonths: null,
     });
   });
 

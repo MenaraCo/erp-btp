@@ -24,6 +24,11 @@ export interface PromoDiscount {
   discountValue: number;
   /** Portée : `monthly` (sans engagement), `annual` (engagement), `both`/absent (les deux). */
   appliesTo?: PromoAppliesTo;
+  /**
+   * Durée de la remise, en mois. `null`/absent = toute la période (comportement historique) ;
+   * N = seulement les N premiers mois (offre de lancement : 1er mois, 2 premiers mois…).
+   */
+  durationMonths?: number | null;
 }
 
 /** Le code promo s'applique-t-il à la formule d'engagement choisie ? */
@@ -32,6 +37,19 @@ export function promoAppliesToTerm(promo: PromoDiscount | null | undefined, term
   const scope = promo.appliesTo ?? 'both';
   if (scope === 'both') return true;
   return scope === term;
+}
+
+/**
+ * Nombre de mois de la PREMIÈRE ANNÉE couverts par la remise promo.
+ * 0 si le code ne s'applique pas ; 12 s'il court sur toute la période ; N s'il est limité.
+ */
+export function promoMonthsCovered(promo: PromoDiscount | null | undefined): number {
+  if (!promo) return 0;
+  const raw = promo.durationMonths;
+  if (raw === null || raw === undefined) return MONTHS_PER_YEAR;
+  const n = Math.trunc(Number(raw));
+  if (!Number.isFinite(n) || n < 1) return 0;
+  return Math.min(MONTHS_PER_YEAR, n);
 }
 
 export interface PricingInput {
@@ -51,17 +69,29 @@ export interface PricingResult {
   termDiscountPct: number;
   /** Mensuel après remise d'engagement, avant code promo. */
   monthlyAfterTerm: number;
-  /** Mensuel réellement facturé, après cascade engagement puis promo. C'est le MRR. */
+  /** Mensuel réellement facturé PENDANT la remise promo, après cascade engagement puis promo. */
   monthlyNet: number;
+  /** Mensuel une fois la remise promo terminée (identique à monthlyNet si elle ne s'arrête pas). */
+  monthlyAfterPromo: number;
+  /** Mois de la 1re année couverts par la remise promo (0 = aucune, 12 = toute la période). */
+  promoMonths: number;
+  /** La remise promo s'arrête-t-elle avant la fin de la période ? */
+  promoLimited: boolean;
   /** MRR = équivalent mensuel net (identique à monthlyNet, nommé explicitement). */
   mrr: number;
-  /** Montant de chaque facture, selon le rythme (mensuel ⇒ monthlyNet, annuel ⇒ ×12). */
+  /** Montant de la PROCHAINE facture, selon le rythme (mensuel ⇒ monthlyNet, annuel ⇒ 12 mois). */
   amountPerInvoice: number;
+  /** Montant des factures suivantes, une fois la remise promo épuisée. */
+  amountPerInvoiceAfterPromo: number;
+  /** Total réellement payé sur les 12 premiers mois (remise limitée comprise). */
+  firstYearTotal: number;
   /** Économie annuelle totale par rapport au tarif catalogue mensuel. */
   annualSavings: number;
   /** Nombre de mois d'engagement (12 pour l'annuel, 0 sinon). */
   commitmentMonths: number;
 }
+
+const MONTHS_PER_YEAR = 12;
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -105,14 +135,29 @@ export function computePricing(input: PricingInput): PricingResult {
   const activePromo = promoAppliesToTerm(input.promo, billingTerm) ? input.promo : null;
   const monthlyNet = applyPromoDiscount(monthlyAfterTerm, activePromo);
 
+  // Une remise peut ne couvrir que les premiers mois : le prix des factures suivantes remonte
+  // alors au tarif d'après-remise. On chiffre donc séparément « pendant » et « après ».
+  const promoMonths = promoMonthsCovered(activePromo);
+  const promoLimited = promoMonths > 0 && promoMonths < MONTHS_PER_YEAR;
+  const economiePromo = round2((monthlyAfterTerm - monthlyNet) * promoMonths);
+  const firstYearTotal = round2(monthlyAfterTerm * MONTHS_PER_YEAR - economiePromo);
+
   return {
     monthlyBase,
     termDiscountPct,
     monthlyAfterTerm,
     monthlyNet,
+    monthlyAfterPromo: promoLimited ? monthlyAfterTerm : monthlyNet,
+    promoMonths,
+    promoLimited,
     mrr: monthlyNet,
-    amountPerInvoice: billingInterval === 'yearly' ? round2(monthlyNet * 12) : monthlyNet,
-    annualSavings: round2((monthlyBase - monthlyNet) * 12),
-    commitmentMonths: billingTerm === 'annual' ? 12 : 0,
+    amountPerInvoice: billingInterval === 'yearly' ? firstYearTotal : monthlyNet,
+    amountPerInvoiceAfterPromo:
+      billingInterval === 'yearly'
+        ? round2(monthlyAfterTerm * MONTHS_PER_YEAR)
+        : promoLimited ? monthlyAfterTerm : monthlyNet,
+    firstYearTotal,
+    annualSavings: round2(monthlyBase * MONTHS_PER_YEAR - firstYearTotal),
+    commitmentMonths: billingTerm === 'annual' ? MONTHS_PER_YEAR : 0,
   };
 }

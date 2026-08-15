@@ -51,6 +51,7 @@ export class PublicCatalogController {
       discountType: promo.discountType,
       discountValue: promo.discountValue,
       appliesTo: promo.appliesTo,
+      durationMonths: promo.durationMonths,
     };
   }
 }

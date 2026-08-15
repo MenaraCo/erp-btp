@@ -291,10 +291,53 @@ describe('Abonnement — paiement par redirection et webhook', () => {
       const r = await appel('get', '/abonnement/paiement/devis').expect(200);
       const d = r.body.devis;
       expect(d.mensuelBase).toBe(117);
-      expect(d.promoCode).toEqual({ code: 'TEST20', discountType: 'percent', discountValue: 20 });
+      expect(d.promoCode).toEqual({
+        code: 'TEST20',
+        discountType: 'percent',
+        discountValue: 20,
+        durationMonths: null,
+      });
       expect(d.mensuelApresEngagement).toBe(117); // pas d'engagement annuel ici
       expect(d.mensuelNet).toBe(93.6);
       expect(d.montantCentimes).toBe(9360);
+    });
+
+    it('une remise limitée ne couvre que ses premiers mois de l’annuel', async () => {
+      // Essentiel × 3 = 117 €/mois → annuel −10 % = 105,30 → promo −20 % = 84,24, mais 2 mois
+      // seulement : l'année coûte 1 263,60 − (21,06 × 2) = 1 221,48 €.
+      const [pc] = await ds.query(
+        `INSERT INTO promo_code (code, discount_type, discount_value, applies_to, duration_months, active)
+         VALUES ('TEST2M', 'percent', 20, 'annual', 2, true) RETURNING id`,
+      );
+      await runInTenant(ds, tenantId, (em) =>
+        em.query(
+          `UPDATE subscription
+              SET promo_code_id = $2, billing_term = 'annual', billing_interval = 'yearly'
+            WHERE tenant_id = $1`,
+          [tenantId, pc.id],
+        ),
+      );
+
+      const r = await appel('get', '/abonnement/paiement/devis').expect(200);
+      const d = r.body.devis;
+      expect(d.promoCode.durationMonths).toBe(2);
+      expect(d.promoMois).toBe(2);
+      expect(d.promoLimitee).toBe(true);
+      expect(d.mensuelApresEngagement).toBe(105.3);
+      expect(d.mensuelNet).toBe(84.24); // pendant la remise
+      expect(d.montantCentimes).toBe(122148); // 1re année, remise de 2 mois déduite
+      expect(d.montantCentimesApresPromo).toBe(126360); // années suivantes, sans promo
+
+      // On remet la souscription telle qu'elle était pour la suite des tests.
+      await runInTenant(ds, tenantId, (em) =>
+        em.query(
+          `UPDATE subscription
+              SET promo_code_id = NULL, billing_term = 'monthly', billing_interval = 'monthly'
+            WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+      );
+      await ds.query(`DELETE FROM promo_code WHERE code = 'TEST2M'`);
     });
 
     it('retirer le code promo redonne le tarif plein', async () => {

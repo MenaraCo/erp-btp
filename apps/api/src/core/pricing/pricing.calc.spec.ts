@@ -97,6 +97,65 @@ describe('Tarification — engagement, rythme de facturation et cascade de remis
     expect(p.monthlyNet).toBe(96.3); // seulement la remise d'engagement, pas le promo
   });
 
+  it('promo_sans_duree_couvre_toute_la_periode_douze_mois', () => {
+    // Comportement historique : la remise court sur les 12 mois, rien ne remonte ensuite.
+    const p = base({
+      billingTerm: 'annual',
+      billingInterval: 'yearly',
+      promo: { discountType: 'percent', discountValue: 20 },
+    });
+    expect(p.promoMonths).toBe(12);
+    expect(p.promoLimited).toBe(false);
+    expect(p.monthlyAfterPromo).toBe(77.04); // pas de retour au tarif plein
+    expect(p.amountPerInvoice).toBe(924.48); // 77,04 × 12
+  });
+
+  it('promo_limitee_au_premier_mois_ne_remise_qu_un_mois_de_l_annuel', () => {
+    // 107 → 96,30 (annuel −10 %). Le promo −20 % ne joue que sur 1 mois : −19,26 sur l'année.
+    const p = base({
+      billingTerm: 'annual',
+      billingInterval: 'yearly',
+      promo: { discountType: 'percent', discountValue: 20, durationMonths: 1 },
+    });
+    expect(p.promoMonths).toBe(1);
+    expect(p.promoLimited).toBe(true);
+    expect(p.monthlyNet).toBe(77.04); // pendant la remise
+    expect(p.monthlyAfterPromo).toBe(96.3); // une fois la remise épuisée
+    expect(p.firstYearTotal).toBe(1136.34); // 1 155,60 − 19,26
+    expect(p.amountPerInvoice).toBe(1136.34); // payé en une fois
+    expect(p.amountPerInvoiceAfterPromo).toBe(1155.6); // année suivante, sans promo
+  });
+
+  it('promo_limitee_a_deux_mois_en_annuel_mensualise_ne_remise_que_les_deux_premieres_factures', () => {
+    const p = base({
+      billingTerm: 'annual',
+      billingInterval: 'monthly',
+      promo: { discountType: 'percent', discountValue: 20, durationMonths: 2 },
+    });
+    expect(p.amountPerInvoice).toBe(77.04); // les 2 premières mensualités
+    expect(p.amountPerInvoiceAfterPromo).toBe(96.3); // les 10 suivantes
+    expect(p.firstYearTotal).toBe(1117.08); // 1 155,60 − (19,26 × 2)
+  });
+
+  it('duree_de_promo_est_plafonnee_a_douze_mois', () => {
+    const p = base({
+      billingTerm: 'annual',
+      billingInterval: 'yearly',
+      promo: { discountType: 'percent', discountValue: 20, durationMonths: 36 },
+    });
+    expect(p.promoMonths).toBe(12);
+    expect(p.promoLimited).toBe(false);
+  });
+
+  it('economie_annuelle_tient_compte_d_une_promo_limitee', () => {
+    const p = base({
+      billingTerm: 'annual',
+      billingInterval: 'yearly',
+      promo: { discountType: 'percent', discountValue: 20, durationMonths: 1 },
+    });
+    expect(p.annualSavings).toBe(147.66); // 1 284 (catalogue) − 1 136,34 réellement payé
+  });
+
   it('taux_de_remise_annuelle_est_parametrable', () => {
     const a15 = base({ billingTerm: 'annual', billingInterval: 'yearly', annualDiscountPct: 15 });
     expect(a15.monthlyAfterTerm).toBe(90.95); // 107 × 0,85

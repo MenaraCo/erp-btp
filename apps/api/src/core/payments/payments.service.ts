@@ -27,7 +27,19 @@ export interface DevisPaiement {
   /** Mensuel après remise d'engagement, AVANT code promo (pour ventiler les deux remises). */
   mensuelApresEngagement: number;
   /** Code promo appliqué à la souscription, le cas échéant — pour l'afficher côté client. */
-  promoCode: { code: string; discountType: 'percent' | 'fixed'; discountValue: number } | null;
+  promoCode: {
+    code: string;
+    discountType: 'percent' | 'fixed';
+    discountValue: number;
+    /** Mois couverts par la remise (null = toute la période). */
+    durationMonths: number | null;
+  } | null;
+  /** Mois de la 1re année réellement remisés par le code promo. */
+  promoMois: number;
+  /** La remise s'arrête-t-elle avant la fin de la période ? */
+  promoLimitee: boolean;
+  /** Montant des échéances SUIVANTES, une fois la remise épuisée (en CENTIMES). */
+  montantCentimesApresPromo: number;
   /** Mensuel réellement facturé (le MRR), après cascade engagement puis promo. */
   mensuelNet: number;
 }
@@ -120,8 +132,16 @@ export class PaymentsService {
       remisePct: prix.termDiscountPct,
       mensuelApresEngagement: prix.monthlyAfterTerm,
       promoCode: promo
-        ? { code: promo.code, discountType: promo.discountType, discountValue: promo.discountValue }
+        ? {
+            code: promo.code,
+            discountType: promo.discountType,
+            discountValue: promo.discountValue,
+            durationMonths: promo.durationMonths,
+          }
         : null,
+      promoMois: prix.promoMonths,
+      promoLimitee: prix.promoLimited,
+      montantCentimesApresPromo: Math.round(prix.amountPerInvoiceAfterPromo * 100),
       mensuelNet: prix.monthlyNet,
     };
   }

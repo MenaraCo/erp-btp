@@ -75,7 +75,15 @@ interface Devis {
   mensuelBase: number;
   remisePct: number;
   mensuelApresEngagement: number;
-  promoCode: { code: string; discountType: 'percent' | 'fixed'; discountValue: number } | null;
+  promoCode: {
+    code: string;
+    discountType: 'percent' | 'fixed';
+    discountValue: number;
+    durationMonths: number | null;
+  } | null;
+  promoMois: number;
+  promoLimitee: boolean;
+  montantCentimesApresPromo: number;
   mensuelNet: number;
 }
 interface EtatPaiement {
@@ -428,6 +436,9 @@ function CartePaiement() {
                     {d.promoCode.discountType === 'percent'
                       ? ` (${d.promoCode.discountValue} %)`
                       : ''}
+                    {d.promoLimitee
+                      ? ` — ${d.promoMois === 1 ? '1er mois' : `${d.promoMois} premiers mois`}`
+                      : ''}
                   </td>
                   <td style={{ textAlign: 'right', color: 'var(--accent)' }}>
                     −{euro(d.mensuelApresEngagement - d.mensuelNet)}
@@ -440,6 +451,18 @@ function CartePaiement() {
                   {euro(d.montantCentimes / 100)}<span className="muted" style={{ fontWeight: 400 }}> /{parPeriode}</span>
                 </td>
               </tr>
+              {/* La remise s'arrête avant la fin : on annonce le montant suivant plutôt que de
+                  laisser le client le découvrir sur son relevé. */}
+              {d.promoLimitee && (
+                <tr>
+                  <td colSpan={2} className="muted" style={{ fontSize: 12 }}>
+                    Puis, une fois la remise épuisée
+                  </td>
+                  <td className="muted" style={{ textAlign: 'right', fontSize: 12 }}>
+                    {euro(d.montantCentimesApresPromo / 100)} /{parPeriode}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
 

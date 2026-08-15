@@ -14,6 +14,8 @@ export interface PromoCode {
   discountType: DiscountType;
   discountValue: number;
   appliesTo: PromoAppliesTo;
+  /** Durée de la remise en mois : `null` = toute la période, N = les N premiers mois. */
+  durationMonths: number | null;
   active: boolean;
   validFrom: Date | null;
   validUntil: Date | null;
@@ -29,6 +31,7 @@ export interface PromoCodeInput {
   discountType?: DiscountType;
   discountValue?: number;
   appliesTo?: PromoAppliesTo;
+  durationMonths?: number | null;
   active?: boolean;
   validFrom?: string | null;
   validUntil?: string | null;
@@ -42,6 +45,7 @@ interface PromoRow {
   discount_type: DiscountType;
   discount_value: string;
   applies_to: PromoAppliesTo;
+  duration_months: number | null;
   active: boolean;
   valid_from: Date | null;
   valid_until: Date | null;
@@ -118,6 +122,7 @@ export class PromoCodeService {
     const discountType = input.discountType === 'fixed' ? 'fixed' : 'percent';
     const discountValue = this.checkValue(discountType, input.discountValue);
     const appliesTo = this.checkAppliesTo(input.appliesTo);
+    const durationMonths = this.checkDuration(input.durationMonths);
     const { validFrom, validUntil } = this.checkWindow(input.validFrom, input.validUntil);
     const maxRedemptions = this.checkMax(input.maxRedemptions);
 
@@ -128,8 +133,8 @@ export class PromoCodeService {
 
     const rows: PromoRow[] = await this.dataSource.query(
       `INSERT INTO promo_code
-         (code, label, discount_type, discount_value, applies_to, active, valid_from, valid_until, max_redemptions)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         (code, label, discount_type, discount_value, applies_to, duration_months, active, valid_from, valid_until, max_redemptions)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         code,
@@ -137,6 +142,7 @@ export class PromoCodeService {
         discountType,
         discountValue,
         appliesTo,
+        durationMonths,
         input.active ?? true,
         validFrom,
         validUntil,
@@ -169,12 +175,17 @@ export class PromoCodeService {
         : this.checkMax(input.maxRedemptions);
     const appliesTo =
       input.appliesTo === undefined ? current.appliesTo : this.checkAppliesTo(input.appliesTo);
+    const durationMonths =
+      input.durationMonths === undefined
+        ? current.durationMonths
+        : this.checkDuration(input.durationMonths);
 
     const rows = returningRows<PromoRow>(
       await this.dataSource.query(
         `UPDATE promo_code
-          SET label = $2, discount_type = $3, discount_value = $4, applies_to = $5, active = $6,
-              valid_from = $7, valid_until = $8, max_redemptions = $9, updated_at = now()
+          SET label = $2, discount_type = $3, discount_value = $4, applies_to = $5,
+              duration_months = $6, active = $7,
+              valid_from = $8, valid_until = $9, max_redemptions = $10, updated_at = now()
         WHERE id = $1
         RETURNING *`,
         [
@@ -183,6 +194,7 @@ export class PromoCodeService {
           discountType,
           discountValue,
           appliesTo,
+          durationMonths,
           input.active ?? current.active,
           validFrom,
           validUntil,
@@ -221,6 +233,19 @@ export class PromoCodeService {
       throw new BadRequestException('La portée doit être « monthly », « annual » ou « both »');
     }
     return value;
+  }
+
+  /**
+   * Durée de remise : `null`/vide = toute la période. Sinon un entier de 1 à 12 mois (une remise
+   * plus longue que l'engagement n'aurait pas de sens).
+   */
+  private checkDuration(value: number | null | undefined): number | null {
+    if (value === null || value === undefined || (value as unknown as string) === '') return null;
+    const n = Math.trunc(Number(value));
+    if (!Number.isFinite(n) || n < 1 || n > 12) {
+      throw new BadRequestException('La durée de la remise doit être un entier de 1 à 12 mois');
+    }
+    return n;
   }
 
   private checkValue(type: DiscountType, value: number | undefined): number {
@@ -275,6 +300,7 @@ export class PromoCodeService {
       discountType: r.discount_type,
       discountValue: Number(r.discount_value),
       appliesTo: r.applies_to ?? 'both',
+      durationMonths: r.duration_months ?? null,
       active: r.active,
       validFrom: r.valid_from,
       validUntil: r.valid_until,
