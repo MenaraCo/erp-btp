@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CalendarDays } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { CalendrierMois, grilleDuMois, iso } from '@/components/CalendrierMois';
 
 interface Creneau {
   id: string;
@@ -26,20 +27,6 @@ interface Conflits { conflits: Conflit[]; total: number }
 interface Employee { id: string; fullName: string }
 interface Chantier { id: string; code: string; name: string }
 
-const TEINTES = ['#1a3a5c', '#e8550a', '#0f766e', '#7c3aed', '#b45309', '#be123c', '#0369a1'];
-function teinte(id: string): string {
-  let n = 0;
-  for (let i = 0; i < id.length; i += 1) n = (n + id.charCodeAt(i)) % TEINTES.length;
-  return TEINTES[n];
-}
-function iso(d: Date): string { return d.toISOString().slice(0, 10); }
-function lundiDe(d: Date): Date {
-  const c = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const j = c.getUTCDay();
-  c.setUTCDate(c.getUTCDate() - (j === 0 ? 6 : j - 1));
-  return c;
-}
-const EN_TETES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août',
   'septembre', 'octobre', 'novembre', 'décembre'];
 
@@ -61,26 +48,12 @@ export default function OccupationPage() {
   const [chantier, setChantier] = useState('');
   const [contrat, setContrat] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const [survole, setSurvole] = useState<string | null>(null);
 
   // La grille couvre des semaines entières : un mois commence rarement un lundi.
-  const { debut, fin, moisAffiche, semaines } = useMemo(() => {
+  const { debut, fin, jours, mois, moisAffiche } = useMemo(() => {
+    const g = grilleDuMois(ancre);
     const d = new Date(`${ancre}T00:00:00Z`);
-    const premier = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
-    const dernier = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
-    const depart = lundiDe(premier);
-    const arrivee = lundiDe(dernier);
-    arrivee.setUTCDate(arrivee.getUTCDate() + 6);
-    const jours: string[] = [];
-    for (const c = new Date(depart); c <= arrivee; c.setUTCDate(c.getUTCDate() + 1)) jours.push(iso(c));
-    const paquets: string[][] = [];
-    for (let i = 0; i < jours.length; i += 7) paquets.push(jours.slice(i, i + 7));
-    return {
-      debut: iso(depart),
-      fin: iso(arrivee),
-      moisAffiche: `${MOIS[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
-      semaines: paquets,
-    };
+    return { ...g, moisAffiche: `${MOIS[d.getUTCMonth()]} ${d.getUTCFullYear()}` };
   }, [ancre]);
 
   const requete = useMemo(() => {
@@ -128,14 +101,6 @@ export default function OccupationPage() {
     setAncre(iso(d));
   };
 
-  const parJour = useMemo(() => {
-    const m = new Map<string, Creneau[]>();
-    for (const c of donnees.data?.creneaux ?? []) {
-      m.set(c.date, [...(m.get(c.date) ?? []), c]);
-    }
-    return m;
-  }, [donnees.data]);
-
   const conflitsParJour = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const c of conflits.data?.conflits ?? []) {
@@ -144,7 +109,6 @@ export default function OccupationPage() {
     return m;
   }, [conflits.data]);
 
-  const moisCourant = new Date(`${ancre}T00:00:00Z`).getUTCMonth();
 
   return (
     <div>
@@ -199,87 +163,13 @@ export default function OccupationPage() {
         </div>
       )}
 
-      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
-        {/* En-têtes des jours */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
-          {EN_TETES.map((j) => (
-            <div key={j} style={{
-              padding: '8px 10px', fontSize: 11, fontWeight: 600, textAlign: 'center',
-              borderBottom: '1px solid var(--border)', color: 'var(--muted)',
-            }}>
-              {j}
-            </div>
-          ))}
-        </div>
-
-        {semaines.map((semaine) => (
-          <div key={semaine[0]} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
-            {semaine.map((jour) => {
-              const dansLeMois = new Date(`${jour}T00:00:00Z`).getUTCMonth() === moisCourant;
-              const interventions = parJour.get(jour) ?? [];
-              const motifs = conflitsParJour.get(jour) ?? [];
-              return (
-                <div
-                  key={jour}
-                  onDragOver={(e) => { e.preventDefault(); setSurvole(jour); }}
-                  onDragLeave={() => setSurvole(null)}
-                  onDrop={(e) => {
-                    e.preventDefault(); setSurvole(null);
-                    const [kind, id] = e.dataTransfer.getData('text/plain').split(':');
-                    if (kind && id) deplacer.mutate({ kind, id, date: jour });
-                  }}
-                  title={motifs.join('\n') || undefined}
-                  style={{
-                    minHeight: 108, padding: 6, borderTop: '1px solid var(--border)',
-                    borderLeft: '1px solid var(--border)',
-                    background: survole === jour ? 'var(--surface)'
-                      : motifs.length > 0 ? '#fef2f2'
-                        : dansLeMois ? undefined : 'var(--surface)',
-                    opacity: dansLeMois ? 1 : 0.6,
-                  }}
-                >
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    fontSize: 11, marginBottom: 4,
-                  }}>
-                    <span style={{ fontWeight: dansLeMois ? 600 : 400 }}>{Number(jour.slice(8))}</span>
-                    {motifs.length > 0 && <AlertTriangle size={12} color="var(--danger, #dc2626)" />}
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {interventions.slice(0, 4).map((c) => (
-                      <div
-                        key={c.id}
-                        draggable={!c.fige}
-                        onDragStart={(e) => e.dataTransfer.setData('text/plain', `${c.kind}:${c.id}`)}
-                        title={`${c.label} · ${c.chantierCode} — ${c.chantierNom}\n${
-                          c.debut ? `${c.debut}–${c.fin}` : `${Number(c.heures)} h`
-                        }${c.kind === 'prevu' ? ' (prévu)' : ''}${c.fige ? '\nArrêté : non déplaçable' : ''}`}
-                        style={{
-                          background: c.kind === 'prevu' ? 'transparent' : teinte(c.chantierId),
-                          border: `1px ${c.kind === 'prevu' ? 'dashed' : 'solid'} ${teinte(c.chantierId)}`,
-                          color: c.kind === 'prevu' ? teinte(c.chantierId) : '#fff',
-                          borderRadius: 4, fontSize: 10, padding: '1px 5px',
-                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                          cursor: c.fige ? 'not-allowed' : 'grab', opacity: c.fige ? 0.55 : 1,
-                        }}
-                      >
-                        {c.debut ? `${c.debut} ` : ''}{c.chantierCode} · {c.label.split(' ')[0]}
-                      </div>
-                    ))}
-                    {/* Une case ne peut pas tout montrer : on annonce le reste plutôt que de tronquer en silence. */}
-                    {interventions.length > 4 && (
-                      <div className="muted" style={{ fontSize: 10 }}>
-                        + {interventions.length - 4} autre{interventions.length - 4 > 1 ? 's' : ''}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+      <CalendrierMois
+        jours={jours}
+        mois={mois}
+        creneaux={donnees.data?.creneaux ?? []}
+        conflitsParJour={conflitsParJour}
+        onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
+      />
     </div>
   );
 }

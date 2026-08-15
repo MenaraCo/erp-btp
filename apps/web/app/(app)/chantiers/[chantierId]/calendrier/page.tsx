@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, Copy, CornerDownRight } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { CalendrierMois, CreneauCalendrier, grilleDuMois } from '@/components/CalendrierMois';
 
 interface Cellule { realise: string; prevu: string; impute: boolean; multiple: boolean }
 interface LigneCalendrier {
@@ -60,16 +61,16 @@ export default function CalendrierPage() {
   const [dupSalarie, setDupSalarie] = useState('');
   const [dupHeures, setDupHeures] = useState('7');
 
-  const { debut, fin } = useMemo(() => {
+  const { debut, fin, joursDuMois, moisIndex } = useMemo(() => {
     const d = new Date(`${ancre}T00:00:00Z`);
     if (portee === 'semaine') {
       const l = lundiDe(d);
       const f = new Date(l); f.setUTCDate(l.getUTCDate() + 6);
-      return { debut: iso(l), fin: iso(f) };
+      return { debut: iso(l), fin: iso(f), joursDuMois: [] as string[], moisIndex: d.getUTCMonth() };
     }
-    const p = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
-    const f = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
-    return { debut: iso(p), fin: iso(f) };
+    // En mois, la grille couvre des semaines entières : un mois commence rarement un lundi.
+    const g = grilleDuMois(ancre);
+    return { debut: g.debut, fin: g.fin, joursDuMois: g.jours, moisIndex: g.mois };
   }, [ancre, portee]);
 
   const cal = useQuery({
@@ -78,6 +79,23 @@ export default function CalendrierPage() {
     queryFn: () =>
       apiFetch<Calendrier>(`/chantiers/${chantierId}/planning?debut=${debut}&fin=${fin}`, { token }),
   });
+  // En vue mois, on affiche les interventions une par une, comme un agenda.
+  const creneauxMois = useQuery({
+    queryKey: ['creneaux-chantier', chantierId, debut, fin],
+    enabled: Boolean(token) && portee === 'mois',
+    queryFn: () =>
+      apiFetch<{ creneaux: CreneauCalendrier[] }>(
+        `/personnel/creneaux?debut=${debut}&fin=${fin}&chantier=${chantierId}`,
+        { token },
+      ),
+  });
+  const deplacer = useMutation({
+    mutationFn: (v: { kind: string; id: string; date: string }) =>
+      apiFetch(`/personnel/creneaux/${v.kind}/${v.id}`, { method: 'PATCH', token, body: { date: v.date } }),
+    onSuccess: () => { setErr(null); rafraichir(); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Déplacement impossible'),
+  });
+
   const salaries = useQuery({
     queryKey: ['employees'],
     enabled: Boolean(token),
@@ -86,6 +104,7 @@ export default function CalendrierPage() {
 
   const rafraichir = () => {
     qc.invalidateQueries({ queryKey: ['calendrier'] });
+    qc.invalidateQueries({ queryKey: ['creneaux-chantier'] });
     qc.invalidateQueries({ queryKey: ['timesheets'] });
     qc.invalidateQueries({ queryKey: ['chantier-results'] });
   };
@@ -141,9 +160,10 @@ export default function CalendrierPage() {
         <CalendarDays size={20} /> Calendrier des heures
       </h1>
       <p className="muted" style={{ marginTop: 0, maxWidth: 780 }}>
-        Saisissez directement dans les cases. Le <strong>prévisionnel</strong> planifie les jours à
-        venir — il ne coûte rien tant qu’il n’a pas eu lieu ; le <strong>réalisé</strong> est ce qui
-        entre dans le résultat du chantier.
+        En <strong>semaine</strong>, saisissez directement dans les cases. En <strong>mois</strong>,
+        l’agenda montre les interventions et se réorganise au glisser-déposer. Le
+        <strong> prévisionnel</strong> planifie les jours à venir — il ne coûte rien tant qu’il n’a
+        pas eu lieu ; le <strong>réalisé</strong> entre dans le résultat du chantier.
       </p>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
@@ -202,7 +222,16 @@ export default function CalendrierPage() {
         </button>
       </div>
 
-      {c && (
+      {portee === 'mois' && (
+        <CalendrierMois
+          jours={joursDuMois}
+          mois={moisIndex}
+          creneaux={creneauxMois.data?.creneaux ?? []}
+          onDeplacer={(kind, id, date) => deplacer.mutate({ kind, id, date })}
+        />
+      )}
+
+      {portee === 'semaine' && c && (
         <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
             <table className="grid" style={{ margin: 0 }}>
