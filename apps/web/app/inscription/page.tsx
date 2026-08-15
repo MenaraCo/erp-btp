@@ -8,6 +8,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { CompanySearch } from '@/components/CompanySearch';
+import { InfoBulle } from '@/components/InfoBulle';
 import { Mfa2FASetup } from '@/components/Mfa2FASetup';
 
 /* ─────────── types ─────────── */
@@ -714,14 +715,21 @@ function PackCard({
   // Le Socle est le tronc commun : on ne le liste pas, on le mentionne.
   const shown = pack.modules.filter((c) => c !== 'core');
   return (
+    // Rangée : le bouton porte le choix, le « ⓘ » vit à côté — un bouton dans un bouton ne serait
+    // pas du HTML valide, et le clic sur le détail sélectionnerait le palier par mégarde.
+    <span style={{
+      display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+      borderRadius: 8, paddingRight: 10,
+      border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+      boxShadow: selected ? '0 0 0 1px var(--accent) inset' : 'none',
+    }}>
     <button
       type="button"
       onClick={onClick}
       style={{
-        display: 'flex', alignItems: 'flex-start', gap: 10, textAlign: 'left', width: '100%',
+        display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%',
         padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: 'transparent',
-        border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
-        boxShadow: selected ? '0 0 0 1px var(--accent) inset' : 'none',
+        border: 'none',
       }}
     >
       <span
@@ -734,19 +742,30 @@ function PackCard({
       />
       <span style={{ flex: 1 }}>
         <span style={{ display: 'block', fontWeight: 600, fontSize: 13 }}>{pack.label}</span>
-        {pack.description && (
-          <span className="muted" style={{ fontSize: 11, display: 'block' }}>{pack.description}</span>
+        {/* Ce que le siège donne réellement : sans ce chiffre, deux paliers au même prix
+            paraissent équivalents alors qu'ils n'ouvrent pas le même nombre d'accès. */}
+        {pack.seatTokens > 0 && (
+          <span style={{ fontSize: 11, display: 'block', marginTop: 2, color: 'var(--accent)' }}>
+            {pack.seatTokens} jetons par siège
+          </span>
         )}
-        <span className="muted" style={{ fontSize: 11, display: 'block', marginTop: 2 }}>
-          Socle inclus{shown.length > 0 ? ' + ' : ''}
-          {shown.map((c) => moduleLabels.get(c) ?? c).join(' + ')}
-        </span>
       </span>
       <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
         {euro(pack.priceMonthly)}
         <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> /siège</span>
       </span>
     </button>
+    <InfoBulle label={`Ce que contient ${pack.label}`}>
+      {pack.description && <span style={{ display: 'block', marginBottom: 6 }}>{pack.description}</span>}
+      <strong style={{ display: 'block', marginBottom: 4 }}>Modules inclus</strong>
+      {/* Une liste se parcourt du regard ; « A + B + C » se lit comme une phrase et se compare mal
+          d'un palier à l'autre. */}
+      <ul style={{ margin: 0, paddingLeft: 16 }}>
+        <li>Socle</li>
+        {shown.map((c) => <li key={c}>{moduleLabels.get(c) ?? c}</li>)}
+      </ul>
+    </InfoBulle>
+    </span>
   );
 }
 

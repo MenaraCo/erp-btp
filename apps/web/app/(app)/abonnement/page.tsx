@@ -8,6 +8,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { MODULES, moduleLabel } from '@/lib/modules';
+import { InfoBulle } from '@/components/InfoBulle';
 
 /* ─────────── types ─────────── */
 interface Subscription {
@@ -600,6 +601,11 @@ function TabModules() {
     () => new Map((catalog.data ?? []).map((m) => [m.code, m.label])),
     [catalog.data],
   );
+  // Descriptions du catalogue : elles ne s'affichent qu'à la demande, derrière le « ⓘ ».
+  const description = useMemo(() => {
+    const map = new Map((catalog.data ?? []).map((m) => [m.code, m.description]));
+    return (code: string) => map.get(code) ?? null;
+  }, [catalog.data]);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['sub-pack-state'] });
@@ -669,11 +675,22 @@ function TabModules() {
                     {p.label}
                     {current && <span className="badge success" style={{ marginLeft: 8 }}>votre formule</span>}
                   </div>
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    Socle inclus{included.length ? ' + ' : ''}
-                    {included.map((c) => moduleLabels.get(c) ?? c).join(' + ')}
-                  </div>
+                  {/* Le nombre de jetons qu'ouvre un siège distingue deux paliers autant que
+                      leur contenu : il doit se lire ici, au moment du choix. La composition,
+                      elle, ne sert qu'en cas de doute : elle vit dans le « ⓘ ». */}
+                  {p.seatTokens > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--accent)' }}>
+                      {p.seatTokens} jetons par siège
+                    </div>
+                  )}
                 </div>
+                <InfoBulle label={`Ce que contient ${p.label}`}>
+                  <strong style={{ display: 'block', marginBottom: 4 }}>Modules inclus</strong>
+                  <ul style={{ margin: 0, paddingLeft: 16 }}>
+                    <li>Socle</li>
+                    {included.map((c) => <li key={c}>{moduleLabels.get(c) ?? c}</li>)}
+                  </ul>
+                </InfoBulle>
                 <div style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{euro(p.priceMonthly)}<span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> /siège</span></div>
                 <button
                   className={current ? 'btn btn-secondary' : 'btn'}
@@ -735,6 +752,12 @@ function TabModules() {
                       : `Nécessite au minimum le palier ${requiredPack?.label ?? a.minTierLevel}`}
                   </div>
                 </div>
+                {description(a.code) && (
+                  <InfoBulle label={`À quoi sert ${a.label}`}>
+                    <strong style={{ display: 'block', marginBottom: 2 }}>{a.label}</strong>
+                    {description(a.code)}
+                  </InfoBulle>
+                )}
                 {a.eligible && !onDevis && (
                   <>
                     <input

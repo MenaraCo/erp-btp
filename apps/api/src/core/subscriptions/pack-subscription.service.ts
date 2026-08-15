@@ -8,6 +8,8 @@ export interface PackRow {
   label: string;
   tierLevel: number;
   priceMonthly: number | null;
+  /** Jetons ouverts par siège (réglable par l'éditeur ; défaut = nombre de modules du palier). */
+  seatTokens: number;
   modules: string[];
   description: string | null;
 }
@@ -50,13 +52,13 @@ export class PackSubscriptionService {
   /** Catalogue des paliers, du plus simple au plus complet. */
   async listPacks(): Promise<PackRow[]> {
     const rows = await this.dataSource.query(
-      `SELECT p.code, p.label, p.tier_level, p.price_monthly,
+      `SELECT p.code, p.label, p.tier_level, p.price_monthly, p.seat_tokens,
               COALESCE(array_agg(m.code ORDER BY m.code) FILTER (WHERE m.code IS NOT NULL), '{}') AS modules
          FROM pack p
          LEFT JOIN pack_module pm ON pm.pack_id = p.id
          LEFT JOIN module m ON m.id = pm.module_id
         WHERE p.active = true
-        GROUP BY p.code, p.label, p.tier_level, p.price_monthly
+        GROUP BY p.code, p.label, p.tier_level, p.price_monthly, p.seat_tokens
         ORDER BY p.tier_level`,
     );
     return rows.map(
@@ -65,12 +67,15 @@ export class PackSubscriptionService {
         label: string;
         tier_level: number;
         price_monthly: string | null;
+        seat_tokens: number | null;
         modules: string[];
       }) => ({
         code: r.code,
         label: r.label,
         tierLevel: Number(r.tier_level),
         priceMonthly: r.price_monthly === null ? null : Number(r.price_monthly),
+        // Sans réglage éditeur, un siège ouvre un jeton par module du palier.
+        seatTokens: r.seat_tokens === null ? r.modules.length : Number(r.seat_tokens),
         modules: r.modules,
         description: null,
       }),

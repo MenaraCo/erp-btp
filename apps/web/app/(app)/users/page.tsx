@@ -181,13 +181,14 @@ export default function UsersPage() {
                                 Cumule {u.roles.length} rôles ; choisir un profil ne gardera que celui-ci.
                               </div>
                             )}
-                            {/* Ce que le profil autorise, en clair, sous la liste : le choix se
-                                fait sur des mots métier, pas sur des clés techniques. */}
-                            <div className="muted" style={{ fontSize: 11, marginTop: 4, maxWidth: 320 }}>
-                              {role
-                                ? role.permissions.map(permissionLabel).join(' · ')
-                                : 'Cet utilisateur ne peut rien faire tant qu’aucun profil ne lui est attribué.'}
-                            </div>
+                            {/* Le détail de chaque profil est donné UNE fois, dans la légende en bas
+                                de page : le répéter sous chaque personne allongeait le tableau sans
+                                rien apprendre. Ne reste ici que ce qui concerne CETTE personne. */}
+                            {!role && (
+                              <div className="muted" style={{ fontSize: 11, marginTop: 4, maxWidth: 320 }}>
+                                Cet utilisateur ne peut rien faire tant qu’aucun profil ne lui est attribué.
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
