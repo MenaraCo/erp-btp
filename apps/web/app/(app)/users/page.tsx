@@ -10,7 +10,7 @@ import { moduleLabel } from '@/lib/modules';
 
 /* ─────────── types ─────────── */
 interface Role { code: string; label: string; isSystem: boolean; permissions: string[] }
-interface UserWithRoles { id: string; email: string; firstName: string | null; lastName: string | null; fullName: string | null; roles: string[] }
+interface UserWithRoles { id: string; email: string; firstName: string | null; lastName: string | null; fullName: string | null; jobTitle: string | null; roles: string[] }
 interface Seat { id: string; moduleCode: string; userId: string; email: string; fullName: string | null }
 interface Permission { key: string; label: string }
 
@@ -126,6 +126,9 @@ export default function UsersPage() {
                   <tr key={u.id}>
                     <td>
                       <div style={{ fontWeight: 600 }}>{u.fullName ?? u.email}</div>
+                      {u.jobTitle && (
+                        <div className="muted" style={{ fontSize: 12 }}>{u.jobTitle}</div>
+                      )}
                       <div className="muted" style={{ fontSize: 12 }}>{u.email}</div>
                     </td>
                     <td>
@@ -261,6 +264,7 @@ function CreateUser({ roles, token, onCreated }: { roles: Role[]; token: string 
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
   const [password, setPassword] = useState('');
   const [roleCode, setRoleCode] = useState('estimator');
   const [err, setErr] = useState<string | null>(null);
@@ -274,13 +278,14 @@ function CreateUser({ roles, token, onCreated }: { roles: Role[]; token: string 
           email: email.trim(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
+          jobTitle: jobTitle.trim() || null,
           password,
           roleCode: roleCode || null,
         },
       }),
     onSuccess: () => {
       setErr(null); setOk(true);
-      setEmail(''); setFirstName(''); setLastName(''); setPassword('');
+      setEmail(''); setFirstName(''); setLastName(''); setJobTitle(''); setPassword('');
       onCreated();
       setTimeout(() => setOk(false), 3000);
     },
@@ -308,6 +313,10 @@ function CreateUser({ roles, token, onCreated }: { roles: Role[]; token: string 
         <div className="field" style={{ marginBottom: 0 }}>
           <label>Nom</label>
           <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Deviseur" />
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Fonction</label>
+          <input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="Conducteur de travaux" />
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
           <label>E-mail</label>

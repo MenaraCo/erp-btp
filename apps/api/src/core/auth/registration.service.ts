@@ -19,8 +19,24 @@ import type { BillingInterval, BillingTerm } from '../pricing/pricing.calc';
 
 export type RegisterMode = 'trial' | 'direct';
 
+/** Identité administrative saisie (ou reprise de l'annuaire officiel) à l'inscription. */
+export interface RegisterCompanyInfo {
+  siren?: string | null;
+  siret?: string | null;
+  legalForm?: string | null;
+  address?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  vatIntra?: string | null;
+  phone?: string | null;
+}
+
 export interface RegisterInput {
   companyName: string;
+  /** Fonction du créateur dans l'entreprise (gérant, conducteur de travaux…). */
+  jobTitle?: string | null;
+  /** Informations légales de la société, reportées telles quelles dans sa fiche. */
+  company?: RegisterCompanyInfo | null;
   /** Prénom et nom, saisis séparément. `fullName` reste accepté (rétro-compat) et recomposé. */
   firstName?: string;
   lastName?: string;
@@ -78,6 +94,7 @@ export class RegistrationService {
 
   async register(input: RegisterInput): Promise<RegisterResult> {
     const companyName = (input.companyName ?? '').trim();
+    const jobTitle = (input.jobTitle ?? '').trim() || null;
     const { firstName, lastName, fullName } = splitName(input);
     const email = (input.email ?? '').trim().toLowerCase();
     const password = input.password ?? '';
@@ -137,9 +154,9 @@ export class RegistrationService {
       const uid: string = (
         await runInTenant(this.dataSource, tenantId, (em) =>
           em.query(
-            `INSERT INTO user_account (tenant_id, email, full_name, first_name, last_name)
-             VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-            [tenantId, email, fullName, firstName, lastName],
+            `INSERT INTO user_account (tenant_id, email, full_name, first_name, last_name, job_title)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+            [tenantId, email, fullName, firstName, lastName, jobTitle],
           ),
         )
       )[0].id;
@@ -147,6 +164,7 @@ export class RegistrationService {
       await this.auth.setPassword(tenantId, uid, password);
       await this.rbac.provisionSystemRoles(tenantId);
       await this.rbac.assignRole(tenantId, uid, 'admin');
+      await this.creerFicheSociete(tenantId, companyName, input.company ?? null, email);
 
       // Porte 2 : palier souscrit, puis options à la carte (refusées si le palier est trop bas).
       if (usePack) {
@@ -196,6 +214,57 @@ export class RegistrationService {
       tenantId,
       mode,
     };
+  }
+
+  /**
+   * Crée la fiche société avec ce qui a été saisi à l'inscription.
+   *
+   * Sans cela, l'identité administrative reprise de l'annuaire officiel (SIREN, forme juridique,
+   * adresse…) était perdue : la fiche se créait plus tard, vide, au premier passage dans
+   * Paramètres, et le client devait ressaisir ce qu'il venait de donner. Les devis et factures
+   * s'appuient sur cette fiche : mieux vaut qu'elle naisse complète.
+   *
+   * `ON CONFLICT DO NOTHING` sur (tenant_id, code) : la fiche « DEFAULT » est aussi créée à la
+   * volée par les Paramètres, et deux chemins ne doivent pas se marcher dessus.
+   */
+  private creerFicheSociete(
+    tenantId: string,
+    companyName: string,
+    info: RegisterCompanyInfo | null,
+    email: string,
+  ): Promise<void> {
+    const vide = (v: string | null | undefined) => (v ?? '').trim() || null;
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `INSERT INTO company
+           (tenant_id, code, name, siren, siret, legal_form, address, postal_code, city,
+            vat_intra, phone, email)
+         VALUES ($1, 'DEFAULT', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (tenant_id, code) DO NOTHING
+         RETURNING id`,
+        [
+          tenantId,
+          companyName,
+          vide(info?.siren),
+          vide(info?.siret),
+          vide(info?.legalForm),
+          vide(info?.address),
+          vide(info?.postalCode),
+          vide(info?.city),
+          vide(info?.vatIntra),
+          vide(info?.phone),
+          email,
+        ],
+      );
+      const companyId = rows[0]?.id as string | undefined;
+      if (!companyId) return;
+      // Les préférences accompagnent toujours la fiche (couleurs, taux par défaut, numérotation).
+      await em.query(
+        `INSERT INTO company_preferences (tenant_id, company_id) VALUES ($1, $2)
+         ON CONFLICT (company_id) DO NOTHING`,
+        [tenantId, companyId],
+      );
+    });
   }
 
   /** Builds a URL-safe slug from the company name and ensures it is unique (appends -2, -3, …). */

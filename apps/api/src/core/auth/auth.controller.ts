@@ -72,6 +72,8 @@ export class AuthController {
   register(@Body() body: RegisterDto) {
     return this.registration.register({
       companyName: body.companyName ?? '',
+      jobTitle: body.jobTitle ?? null,
+      company: body.company ?? null,
       firstName: body.firstName,
       lastName: body.lastName,
       fullName: body.fullName ?? '',

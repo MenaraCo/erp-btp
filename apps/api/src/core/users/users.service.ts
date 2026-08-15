@@ -8,6 +8,8 @@ import { splitName } from '../auth/person-name.util';
 
 export interface CreateUserInput {
   email: string;
+  /** Fonction dans l'entreprise, facultative. */
+  jobTitle?: string | null;
   /** Prénom et nom saisis séparément. `fullName` reste accepté (rétro-compat) et recomposé. */
   firstName?: string;
   lastName?: string;
@@ -23,6 +25,8 @@ export interface UserWithRoles {
   firstName: string | null;
   lastName: string | null;
   fullName: string | null;
+  /** Fonction dans l'entreprise (gérant, conducteur de travaux…). */
+  jobTitle: string | null;
   roles: string[];
 }
 
@@ -45,13 +49,13 @@ export class UsersService {
   listUsersWithRoles(tenantId: string): Promise<UserWithRoles[]> {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `SELECT u.id, u.email, u.full_name, u.first_name, u.last_name,
+        `SELECT u.id, u.email, u.full_name, u.first_name, u.last_name, u.job_title,
                 COALESCE(ARRAY_AGG(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
            FROM user_account u
            LEFT JOIN user_role ur ON ur.user_id = u.id
            LEFT JOIN role r ON r.id = ur.role_id
           WHERE u.status = 'active' AND u.deleted_at IS NULL
-          GROUP BY u.id, u.email, u.full_name, u.first_name, u.last_name
+          GROUP BY u.id, u.email, u.full_name, u.first_name, u.last_name, u.job_title
           ORDER BY u.last_name NULLS LAST, u.first_name NULLS LAST, u.full_name NULLS LAST, u.email`,
       );
       return rows.map(
@@ -61,6 +65,7 @@ export class UsersService {
           full_name: string | null;
           first_name: string | null;
           last_name: string | null;
+          job_title: string | null;
           roles: string[];
         }) => ({
           id: r.id,
@@ -68,6 +73,7 @@ export class UsersService {
           firstName: r.first_name,
           lastName: r.last_name,
           fullName: r.full_name,
+          jobTitle: r.job_title,
           roles: r.roles ?? [],
         }),
       );
@@ -113,9 +119,9 @@ export class UsersService {
         throw new ConflictException('Un utilisateur avec cet e-mail existe déjà.');
       }
       const rows = await em.query(
-        `INSERT INTO user_account (tenant_id, email, full_name, first_name, last_name)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [tenantId, email, fullName, firstName, lastName],
+        `INSERT INTO user_account (tenant_id, email, full_name, first_name, last_name, job_title)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [tenantId, email, fullName, firstName, lastName, (input.jobTitle ?? '').trim() || null],
       );
       return rows[0].id as string;
     });
@@ -131,6 +137,7 @@ export class UsersService {
       firstName,
       lastName,
       fullName,
+      jobTitle: (input.jobTitle ?? '').trim() || null,
       roles: input.roleCode ? [input.roleCode] : [],
     };
   }

@@ -49,6 +49,16 @@ export default function InscriptionPage() {
   const [afterMfa, setAfterMfa] = useState('/');
 
   const [companyName, setCompanyName] = useState('');
+  // Identité administrative : reprise de l'annuaire officiel au clic, modifiable à la main.
+  const [siren, setSiren] = useState('');
+  const [siret, setSiret] = useState('');
+  const [legalForm, setLegalForm] = useState('');
+  const [address, setAddress] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+  const [city, setCity] = useState('');
+  const [vatIntra, setVatIntra] = useState('');
+  const [phone, setPhone] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -250,9 +260,20 @@ export default function InscriptionPage() {
     try {
       const body =
         door === 'trial'
-          ? { companyName, firstName, lastName, email, password, mode: 'trial' as const }
+          ? {
+              companyName,
+              jobTitle,
+              company: { siren, siret, legalForm, address, postalCode, city, vatIntra, phone },
+              firstName,
+              lastName,
+              email,
+              password,
+              mode: 'trial' as const,
+            }
           : {
               companyName,
+              jobTitle,
+              company: { siren, siret, legalForm, address, postalCode, city, vatIntra, phone },
               firstName,
               lastName,
               email,
@@ -350,13 +371,65 @@ export default function InscriptionPage() {
             <div className="field">
               <CompanySearch
                 label="Rechercher votre entreprise (annuaire officiel)"
-                onSelect={(c) => setCompanyName(c.name)}
+                onSelect={(c) => {
+                  // Tout ce que l'annuaire sait, on le reprend : le client n'a pas à ressaisir
+                  // ce que l'État publie déjà.
+                  setCompanyName(c.name);
+                  setSiren(c.siren ?? '');
+                  setSiret(c.siret ?? '');
+                  setLegalForm(c.legalForm ?? '');
+                  setAddress(c.address ?? '');
+                  setPostalCode(c.postalCode ?? '');
+                  setCity(c.city ?? '');
+                  setVatIntra(c.vatIntra ?? '');
+                }}
               />
             </div>
             <div className="field">
               <label>Société</label>
               <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Ma société BTP" autoFocus />
             </div>
+            {/* Identité administrative : pré-remplie par l'annuaire, corrigeable à la main. Elle
+                alimente directement la fiche société — donc les devis et les factures. */}
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label>SIRET</label>
+                <input value={siret} onChange={(e) => setSiret(e.target.value)} placeholder="123 456 789 00012" />
+              </div>
+              <div className="field" style={{ width: 140 }}>
+                <label>SIREN</label>
+                <input value={siren} onChange={(e) => setSiren(e.target.value)} placeholder="123456789" />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label>Forme juridique</label>
+                <input value={legalForm} onChange={(e) => setLegalForm(e.target.value)} placeholder="SARL, SAS…" />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label>N° TVA intracommunautaire</label>
+                <input value={vatIntra} onChange={(e) => setVatIntra(e.target.value)} placeholder="FR00123456789" />
+              </div>
+            </div>
+            <div className="field">
+              <label>Adresse</label>
+              <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="12 rue des Bâtisseurs" />
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div className="field" style={{ width: 140 }}>
+                <label>Code postal</label>
+                <input value={postalCode} onChange={(e) => setPostalCode(e.target.value)} placeholder="75011" />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label>Ville</label>
+                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Paris" />
+              </div>
+            </div>
+            <div className="field">
+              <label>Téléphone</label>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01 23 45 67 89" />
+            </div>
+
             <div style={{ display: 'flex', gap: 12 }}>
               <div className="field" style={{ flex: 1 }}>
                 <label>Prénom</label>
@@ -366,6 +439,11 @@ export default function InscriptionPage() {
                 <label>Nom</label>
                 <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Durand" />
               </div>
+            </div>
+            <div className="field">
+              <label>Votre fonction</label>
+              <input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)}
+                placeholder="Gérant, conducteur de travaux, deviseur…" />
             </div>
             <div className="field">
               <label>E-mail</label>
