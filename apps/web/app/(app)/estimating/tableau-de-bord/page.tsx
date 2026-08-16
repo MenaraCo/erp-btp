@@ -7,6 +7,7 @@ import { STATUT_AFFAIRE, statut } from '@/lib/statuts';
 import { Badge, BadgeStatut } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { BarresClassement, Camembert } from '@/components/Graphiques';
 import { downloadStyledXlsx, SheetCell, StyleKey } from '@/lib/xlsx';
 
 interface DevisTotals { debourse: string; revient: string; pvHt: string; margeNette: string; margeNettePct: string }
@@ -126,14 +127,45 @@ export default function DashboardPage() {
         <KpiCard label="Clients" value={clientsQ.data?.total ?? '—'} sub="Référentiel" loading={clientsQ.isLoading} />
       </div>
 
-      {/* Devis par statut */}
+      {/* Devis par statut : le compte à gauche, la proportion à droite — un taux de
+          transformation se lit mieux en surface qu'en quatre nombres alignés. */}
       <div className="form-section-title" style={{ marginTop: 24 }}>Devis par statut</div>
-      <div style={statusGrid}>
-        <StatusTile n={drafts.length} label="Brouillons" color="#64748b" />
-        <StatusTile n={sent.length} label="Envoyés" color="#2563eb" />
-        <StatusTile n={won.length} label="Gagnés" color="#16a34a" />
-        <StatusTile n={lost.length} label="Refusés" color="#dc2626" />
+      <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'minmax(280px, 1.2fr) minmax(260px, 1fr)' }}>
+        <div style={statusGrid}>
+          <StatusTile n={drafts.length} label="Brouillons" color="#64748b" />
+          <StatusTile n={sent.length} label="Envoyés" color="#2563eb" />
+          <StatusTile n={won.length} label="Gagnés" color="#16a34a" />
+          <StatusTile n={lost.length} label="Refusés" color="#dc2626" />
+        </div>
+        <div className="card">
+          <Camembert
+            parts={[
+              { label: 'Gagnés', valeur: won.length, couleur: '#16a34a' },
+              { label: 'Envoyés', valeur: sent.length, couleur: '#2563eb' },
+              { label: 'Brouillons', valeur: drafts.length, couleur: '#64748b' },
+              { label: 'Refusés', valeur: lost.length, couleur: '#dc2626' },
+            ]}
+            total={String(devis.length)}
+            titre="devis"
+            unite=""
+          />
+        </div>
       </div>
+
+      {/* Les dix plus gros devis en montant de vente : d'où vient le chiffre d'affaires. */}
+      {devis.length > 0 && (
+        <div className="card" style={{ marginTop: 14 }}>
+          <h2 style={{ marginTop: 0 }}>Devis les plus importants</h2>
+          <BarresClassement
+            parts={devis.map((d) => ({
+              label: `${d.numero ?? d.affaire_code} · ${d.affaire_name ?? ''}`.trim(),
+              valeur: pv(d),
+              couleur: d.status === 'won' ? '#16a34a' : d.status === 'lost' ? '#cbd5e1' : undefined,
+            }))}
+            formatValeur={(v) => euro(v.toFixed(2))}
+          />
+        </div>
+      )}
 
       {/* Ce qui vient (échéances) à gauche, ce qui s'est passé (historique) à droite. */}
       <div style={colonnesGrid}>

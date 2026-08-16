@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
 import { Alerte, Badge, Bouton, CarteKpi, EtatVide } from '@/components/ui';
+import { BarresClassement, Camembert } from '@/components/Graphiques';
 
 /* ─────────── types ─────────── */
 interface PortfolioRow {
@@ -110,6 +111,32 @@ export default function DirectionPage() {
             valeur={`${t.aRisque} / ${t.chantiers}`}
             ton={t.aRisque > 0 ? 'danger' : undefined}
           />
+        </div>
+      )}
+
+      {portfolio.data && portfolio.data.rows.length > 0 && (
+        <div style={{ display: 'grid', gap: 14, marginTop: 16, gridTemplateColumns: 'minmax(300px, 1.3fr) minmax(280px, 1fr)' }}>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Marge prévisionnelle par chantier</h2>
+            {/* Rouge dès que la marge passe sous zéro : c'est la seule lecture qui doit sauter
+                aux yeux sur cet écran. */}
+            <BarresClassement
+              parts={portfolio.data.rows.map((r) => ({
+                label: r.code,
+                valeur: Number(r.margePrevisionnelle ?? 0),
+                couleur: Number(r.margePrevisionnelle ?? 0) < 0 ? '#dc2626' : '#15803d',
+              }))}
+              formatValeur={(v) => euro(v.toFixed(2))}
+            />
+          </div>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Poids des chantiers</h2>
+            <Camembert
+              parts={portfolio.data.rows.map((r) => ({ label: r.code, valeur: Number(r.vente) }))}
+              total={euro(portfolio.data.totals.vente)}
+              titre="vente"
+            />
+          </div>
         </div>
       )}
 

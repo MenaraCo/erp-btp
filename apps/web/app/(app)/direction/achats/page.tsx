@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
 import { Alerte, Bouton, CarteKpi, EtatVide } from '@/components/ui';
+import { BarresGroupees, Camembert, PALETTE } from '@/components/Graphiques';
 
 type Axe = 'fournisseur' | 'ressource' | 'code' | 'famille' | 'lot' | 'chantier' | 'nature';
 
@@ -221,6 +222,36 @@ export default function ReportingAchatsPage() {
             ton={Number(t.ecartPrix) > 0 ? 'danger' : undefined}
             detail="facturé − commandé, à quantité égale"
           />
+        </div>
+      )}
+
+      {/* Le dessin précède le tableau : il montre qui pèse, le tableau donne le chiffre exact. */}
+      {conso.data && conso.data.lignes.length > 0 && (
+        <div style={{ display: 'grid', gap: 14, marginTop: 16, gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)' }}>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Répartition du commandé</h2>
+            <Camembert
+              parts={conso.data.lignes.map((l) => ({
+                label: l.code, valeur: Number(l.commande), couleur: l.couleur ?? undefined,
+              }))}
+              total={euro(conso.data.total.commande)}
+              titre="commandé"
+            />
+          </div>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Commandé, reçu, facturé</h2>
+            <BarresGroupees
+              categories={conso.data.lignes.slice(0, 6).map((l) => l.code)}
+              series={[
+                { label: 'Commandé', couleur: PALETTE[0] },
+                { label: 'Réceptionné', couleur: PALETTE[2] },
+                { label: 'Facturé', couleur: PALETTE[1] },
+              ]}
+              valeurs={conso.data.lignes.slice(0, 6).map((l) => [
+                Number(l.commande), Number(l.receptionne), Number(l.facture),
+              ])}
+            />
+          </div>
         </div>
       )}
 

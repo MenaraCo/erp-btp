@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
+import { BarresGroupees, PALETTE } from '@/components/Graphiques';
 import { teinteChantier } from '@/components/CalendrierMois';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro, percent } from '@/lib/format';
@@ -276,44 +277,63 @@ export default function ChantierDetailPage() {
           <p className="muted">Module « Gestion financière » non actif pour cet utilisateur.</p>
         )}
         {analytical.data && (
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>Poste</th>
-                <th style={{ textAlign: 'right' }}>Budget objectif</th>
-                <th style={{ textAlign: 'right' }}>Engagé</th>
-                <th style={{ textAlign: 'right' }}>Réalisé</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analytical.data.natures.map((n) => (
-                <NatureRows key={n.nature} nature={n} />
-              ))}
-              {hasValue(analytical.data.aVentiler.metrics) && (
+          <>
+            {/* Le dessin d'abord : trois colonnes de chiffres ne montrent pas d'un coup d'œil
+                quel poste dérive. Le tableau qui suit garde le détail au centime. */}
+            <div style={{ marginBottom: 16 }}>
+              <BarresGroupees
+                categories={analytical.data.natures.map((n) => n.label)}
+                series={[
+                  { label: 'Budget objectif', couleur: PALETTE[0] },
+                  { label: 'Engagé', couleur: PALETTE[1] },
+                  { label: 'Réalisé', couleur: PALETTE[2] },
+                ]}
+                valeurs={analytical.data.natures.map((n) => [
+                  Number(n.metrics.budgetObjectif ?? 0),
+                  Number(n.metrics.engage ?? 0),
+                  Number(n.metrics.realise ?? 0),
+                ])}
+              />
+            </div>
+            <table className="grid">
+              <thead>
+                <tr>
+                  <th>Poste</th>
+                  <th style={{ textAlign: 'right' }}>Budget objectif</th>
+                  <th style={{ textAlign: 'right' }}>Engagé</th>
+                  <th style={{ textAlign: 'right' }}>Réalisé</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytical.data.natures.map((n) => (
+                  <NatureRows key={n.nature} nature={n} />
+                ))}
+                {hasValue(analytical.data.aVentiler.metrics) && (
+                  <tr>
+                    <td>
+                      <strong>
+                        <span className="code-cell">{analytical.data.aVentiler.code}</span>{' '}
+                        {analytical.data.aVentiler.label}
+                      </strong>
+                    </td>
+                    <MetricCells m={analytical.data.aVentiler.metrics} />
+                  </tr>
+                )}
                 <tr>
                   <td>
-                    <strong>
-                      <span className="code-cell">{analytical.data.aVentiler.code}</span>{' '}
-                      {analytical.data.aVentiler.label}
-                    </strong>
+                    <strong>{analytical.data.siteOverhead.label}</strong>
                   </td>
-                  <MetricCells m={analytical.data.aVentiler.metrics} />
+                  <MetricCells m={analytical.data.siteOverhead.metrics} />
                 </tr>
-              )}
-              <tr>
-                <td>
-                  <strong>{analytical.data.siteOverhead.label}</strong>
-                </td>
-                <MetricCells m={analytical.data.siteOverhead.metrics} />
-              </tr>
-              <tr style={{ borderTop: '2px solid var(--border)' }}>
-                <td>
-                  <strong>Total chantier</strong>
-                </td>
-                <MetricCells m={analytical.data.total} />
-              </tr>
-            </tbody>
-          </table>
+                <tr style={{ borderTop: '2px solid var(--border)' }}>
+                  <td>
+                    <strong>Total chantier</strong>
+                  </td>
+                  <MetricCells m={analytical.data.total} />
+                </tr>
+              </tbody>
+            </table>
+          </>
         )}
       </div>
 
