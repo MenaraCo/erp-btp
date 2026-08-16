@@ -40,6 +40,13 @@ export const STATUT_AFFAIRE: Record<string, Statut> = {
   abandoned: { label: 'Abandonné', ton: 'neutre' },
 };
 
+/** Relevé mensuel de paye : brouillon tant qu'il bouge, figé une fois signé. */
+export const STATUT_RELEVE: Record<string, Statut> = {
+  brouillon: { label: 'Brouillon', ton: 'neutre' },
+  valide: { label: 'Validé', ton: 'info' },
+  signe: { label: 'Signé', ton: 'succes' },
+};
+
 /** Décision d'un circuit de validation. */
 export const STATUT_VALIDATION: Record<string, Statut> = {
   pending: { label: 'En attente', ton: 'attention' },

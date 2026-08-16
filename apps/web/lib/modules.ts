@@ -228,6 +228,8 @@ export const MODULES: AppModule[] = [
       { href: '/personnel/planning', label: 'Planning semaine' },
       { href: '/personnel/absences', label: 'Congés & absences' },
       { href: '/personnel/conflits', label: 'Conflits' },
+      { href: '/personnel/releves', label: 'Relevés mensuels' },
+      { href: '/personnel/rubriques', label: 'Rubriques de paye' },
       { href: '/personnel/salaries', label: 'Salariés' },
     ],
   },

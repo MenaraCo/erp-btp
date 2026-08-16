@@ -7,7 +7,7 @@ import {
   LayoutDashboard, CalendarDays, FolderOpen, FileText, BookOpen,
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
   CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
-  LayoutGrid, ArrowLeft, ArrowLeftRight, BarChart3,
+  LayoutGrid, ArrowLeft, ArrowLeftRight, BarChart3, FileSignature, Wallet,
   AlertTriangle, CalendarRange, Dot, PackageCheck, PalmtreeIcon, ReceiptText, ShieldCheck,
   ShoppingCart,
 } from 'lucide-react';
@@ -35,6 +35,8 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/personnel/planning': CalendarRange,
   '/personnel/absences': PalmtreeIcon,
   '/personnel/conflits': AlertTriangle,
+  '/personnel/releves': FileSignature,
+  '/personnel/rubriques': Wallet,
   '/personnel/salaries': Users,
   '/chantiers/bibliotheque': BookOpen,
   '/chantiers/validation-achats': ShieldCheck,
