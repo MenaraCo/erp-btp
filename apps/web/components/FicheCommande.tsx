@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { Fragment, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, FileText, History, Lock, PackageCheck, ReceiptText, Send, ShieldCheck, Unlock, X,
+  ArrowLeft, FileText, History, Lock, PackageCheck, ReceiptText, Redo2, Send, ShieldCheck,
+  Undo2, Unlock, X,
 } from 'lucide-react';
 import { apiFetch, apiDownload, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -17,7 +18,7 @@ import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAna
 import { SelectRessource } from '@/components/SelectRessource';
 import { Modale } from '@/components/Modale';
 import { EnvoiCommandeModal } from '@/components/EnvoiCommandeModal';
-import { CELL_CTR, UnitSelect, focusNextCell, infoBtn } from '@/components/GrilleSaisie';
+import { CELL_CTR, Cellule, UnitSelect, infoBtn } from '@/components/GrilleSaisie';
 
 interface Ligne {
   id: string;
@@ -107,6 +108,24 @@ const GRILLE_COMMENTAIRE: React.CSSProperties = {
   alignItems: 'stretch',
   columnGap: 0,
 };
+
+/** Valeur actuelle d'un champ de ligne, exprimée comme le patch l'attend. */
+function valeurCourante(ligne: Ligne, cle: string): string | null {
+  switch (cle) {
+    case 'designation': return ligne.designation;
+    case 'quantity': return String(Number(ligne.quantity));
+    case 'unitPrice': return String(Number(ligne.unit_price));
+    case 'nature': return ligne.nature;
+    case 'code': return ligne.code;
+    case 'uniteAchat': return ligne.unite_achat;
+    case 'codeAnalytiqueId': return ligne.code_analytique_id;
+    case 'executionLineId': return ligne.execution_line_id;
+    case 'refFournisseur': return ligne.ref_fournisseur;
+    case 'codeProduit': return ligne.code_produit;
+    case 'coeffConversion': return ligne.coeff_conversion;
+    default: return null;
+  }
+}
 
 const ETATS: Record<string, string> = {
   aucune: 'rien', partielle: 'partielle', complete: 'complète',
@@ -328,6 +347,15 @@ export function FicheCommande({
   const [saisie, setSaisie] = useState<null | 'reception' | 'facture'>(null);
   const [apercu, setApercu] = useState(false);
   const [envoiOuvert, setEnvoiOuvert] = useState(false);
+  /**
+   * Annuler / rétablir : chaque modification de ligne pousse le couple (avant, après). Annuler
+   * réapplique l'état d'avant, rétablir celui d'après — par le même chemin que la saisie, donc
+   * avec les mêmes contrôles. Une erreur de frappe ne coûte plus une re-saisie.
+   */
+  const [historique, setHistorique] = useState<Array<{
+    id: string; avant: Record<string, unknown>; apres: Record<string, unknown>;
+  }>>([]);
+  const [rang, setRang] = useState(0);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [ouvrirReouverture, setOuvrirReouverture] = useState(false);
@@ -465,11 +493,42 @@ export function FicheCommande({
     onError: (e) => echec(e, 'En-tête non enregistré.'),
   });
   const majLigne = useMutation({
-    mutationFn: (v: { id: string; patch: Record<string, string | null> }) =>
-      apiFetch(`/purchase-order-lines/${v.id}`, { method: 'PATCH', token, body: v.patch }),
-    onSuccess: rafraichir,
+    mutationFn: (v: {
+      id: string;
+      patch: Record<string, string | null>;
+      /** Rejeu d'un annuler/rétablir : on ne réempile pas ce qu'on est en train de dépiler. */
+      sansHistorique?: boolean;
+    }) => {
+      const ligne = fiche.data?.lignes.find((l) => l.id === v.id);
+      const avant = ligne
+        ? Object.fromEntries(Object.keys(v.patch).map((cle) => [cle, valeurCourante(ligne, cle)]))
+        : {};
+      return apiFetch(`/purchase-order-lines/${v.id}`, { method: 'PATCH', token, body: v.patch })
+        .then((r) => ({ r, id: v.id, avant, apres: v.patch, sansHistorique: v.sansHistorique }));
+    },
+    onSuccess: (v) => {
+      if (!v.sansHistorique) {
+        // Une nouvelle action efface ce qui avait été « rétabli » : on ne garde pas deux futurs.
+        setHistorique((h) => [...h.slice(0, rang), { id: v.id, avant: v.avant, apres: v.apres }]);
+        setRang((n) => n + 1);
+      }
+      rafraichir();
+    },
     onError: (e) => echec(e, 'Ligne non modifiée.'),
   });
+
+  const revenirEnArriere = () => {
+    const pas = historique[rang - 1];
+    if (!pas) return;
+    setRang((n) => n - 1);
+    majLigne.mutate({ id: pas.id, patch: pas.avant as Record<string, string | null>, sansHistorique: true });
+  };
+  const retablir = () => {
+    const pas = historique[rang];
+    if (!pas) return;
+    setRang((n) => n + 1);
+    majLigne.mutate({ id: pas.id, patch: pas.apres as Record<string, string | null>, sansHistorique: true });
+  };
   const supprimerLigne = useMutation({
     mutationFn: (id: string) => apiFetch(`/purchase-order-lines/${id}`, { method: 'DELETE', token }),
     onSuccess: rafraichir,
@@ -529,6 +588,27 @@ export function FicheCommande({
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Commande {c.code}</h1>
         <span className={`badge ${BADGE[c.status] ?? 'info'}`}>{STATUTS[c.status] ?? c.status}</span>
+
+        {brouillon && (
+          <span style={{ display: 'inline-flex', gap: 4, marginLeft: 8 }}>
+            <button
+              className="btn btn-ghost"
+              title="Annuler la dernière modification"
+              disabled={rang === 0}
+              onClick={revenirEnArriere}
+            >
+              <Undo2 size={14} />
+            </button>
+            <button
+              className="btn btn-ghost"
+              title="Rétablir"
+              disabled={rang >= historique.length}
+              onClick={retablir}
+            >
+              <Redo2 size={14} />
+            </button>
+          </span>
+        )}
 
         {/* Le document se relit et se télécharge à TOUT moment : brouillon, envoyée ou soldée. */}
         <button
@@ -816,15 +896,13 @@ export function FicheCommande({
             // Un commentaire traverse la grille : ni quantité, ni prix, ni imputation.
             <div key={l.id} className="sd-row" style={{ ...GRILLE_COMMENTAIRE, padding: '0 6px', fontSize: 12 }}>
               <span style={CELL_CTR} title="Commentaire">✎</span>
-              <input
-                data-cell="commande:commentaire"
-                onKeyDown={focusNextCell}
-                defaultValue={l.designation}
-                disabled={!brouillon}
+              <Cellule
+                cell="commande:commentaire"
+                valeur={l.designation}
+                readOnly={!brouillon}
                 placeholder="Commentaire à l’attention du fournisseur"
-                onBlur={(e) => e.target.value !== l.designation
-                  && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
-                style={{ width: '100%', fontStyle: 'italic' }}
+                style={{ fontStyle: 'italic' }}
+                onChange={(v) => majLigne.mutate({ id: l.id, patch: { designation: v } })}
               />
               <span className="sd-actions">
                 {brouillon && (
@@ -851,16 +929,13 @@ export function FicheCommande({
                 readOnly={!brouillon}
                 onChange={(v) => majLigne.mutate({ id: l.id, patch: { code: v } })}
               />
-              <input
-                data-cell="commande:designation"
-                onKeyDown={focusNextCell}
-                key={l.designation}
-                defaultValue={l.designation}
-                disabled={!brouillon}
+              <Cellule
+                cell="commande:designation"
+                valeur={l.designation}
+                readOnly={!brouillon}
                 title={l.designation}
-                onBlur={(e) => e.target.value.trim() && e.target.value !== l.designation
-                  && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
-                style={{ width: '100%', minWidth: 0 }}
+                style={{ minWidth: 0 }}
+                onChange={(v) => v.trim() && majLigne.mutate({ id: l.id, patch: { designation: v } })}
               />
               <UnitSelect
                 value={l.unite_achat}
@@ -869,27 +944,23 @@ export function FicheCommande({
                 style={{ width: '100%' }}
                 onChange={(v) => majLigne.mutate({ id: l.id, patch: { uniteAchat: v || null } })}
               />
-              <input
-                data-cell="commande:quantite"
-                onKeyDown={focusNextCell}
-                key={`q-${l.quantity}`}
-                defaultValue={Number(l.quantity)}
-                disabled={!brouillon}
+              <Cellule
+                cell="commande:quantite"
+                type="number"
+                align="right"
+                valeur={Number(l.quantity)}
+                readOnly={!brouillon}
                 title="Quantité"
-                onBlur={(e) => Number(e.target.value) !== Number(l.quantity)
-                  && majLigne.mutate({ id: l.id, patch: { quantity: e.target.value || '0' } })}
-                style={{ width: '100%', textAlign: 'right' }}
+                onChange={(v) => majLigne.mutate({ id: l.id, patch: { quantity: v || '0' } })}
               />
-              <input
-                data-cell="commande:pu"
-                onKeyDown={focusNextCell}
-                key={`p-${l.unit_price}`}
-                defaultValue={Number(l.unit_price)}
-                disabled={!brouillon}
+              <Cellule
+                cell="commande:pu"
+                type="number"
+                align="right"
+                valeur={Number(l.unit_price)}
+                readOnly={!brouillon}
                 title="Prix unitaire d’achat"
-                onBlur={(e) => Number(e.target.value) !== Number(l.unit_price)
-                  && majLigne.mutate({ id: l.id, patch: { unitPrice: e.target.value || '0' } })}
-                style={{ width: '100%', textAlign: 'right' }}
+                onChange={(v) => majLigne.mutate({ id: l.id, patch: { unitPrice: v || '0' } })}
               />
               <span style={{
                 width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums',

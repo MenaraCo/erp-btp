@@ -55,11 +55,11 @@ export function SelectRessource({
    * autre modification) envoyait une valeur vide et EFFAÇAIT le code déjà saisi. Une cellule ne
    * doit jamais écrire ce que personne n'a tapé.
    */
-  const [touche, setTouche] = useState(false);
+  const touche = useRef(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const champ = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setSaisie(valeur ?? ''); setTouche(false); }, [valeur]);
+  useEffect(() => { setSaisie(valeur ?? ''); touche.current = false; }, [valeur]);
 
   useEffect(() => {
     if (!ouvert) return undefined;
@@ -96,7 +96,7 @@ export function SelectRessource({
 
   const choisir = (code: string) => {
     setSaisie(code);
-    setTouche(false);
+    touche.current = false;
     setOuvert(false);
     if (code !== (valeur ?? '')) onChange(code);
   };
@@ -109,11 +109,12 @@ export function SelectRessource({
         disabled={readOnly}
         placeholder="Code"
         title="Code d’article — facultatif. Choisissez-en un pour rattacher la ligne à une ressource connue."
-        onChange={(e) => { setSaisie(e.target.value); setTouche(true); placer(); setOuvert(true); }}
+        onChange={(e) => { setSaisie(e.target.value); touche.current = true; placer(); setOuvert(true); }}
         onFocus={() => { placer(); setOuvert(true); }}
         onBlur={(e) => {
           // Le blur valide la saisie libre ; la sélection dans la liste passe par `choisir`.
-          if (!touche) return;
+          if (!touche.current) return;
+          touche.current = false;
           const v = e.target.value.trim();
           if (v !== (valeur ?? '')) onChange(v);
         }}

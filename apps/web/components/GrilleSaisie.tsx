@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 
@@ -32,6 +33,65 @@ export function focusNextCell(e: React.KeyboardEvent<HTMLInputElement>) {
   const next = nodes[nodes.indexOf(e.currentTarget) + 1];
   if (next) { next.focus(); next.select(); }
   else e.currentTarget.blur();
+}
+
+/**
+ * Cellule de saisie d'une grille — elle n'émet QUE ce que l'utilisateur a tapé.
+ *
+ * Le piège qu'elle évite : un champ non modifié qui perd le focus (parce que la ligne se
+ * rafraîchit après une AUTRE modification) renvoyait sa valeur périmée et écrasait ce que le
+ * serveur venait d'écrire. On a vu un prix repris d'un catalogue être remplacé aussitôt par
+ * l'ancien. Une cellule ne doit jamais écrire ce que personne n'a saisi.
+ */
+export function Cellule({
+  valeur,
+  type = 'text',
+  readOnly,
+  placeholder,
+  title,
+  cell,
+  align,
+  style,
+  onChange,
+}: {
+  valeur: string | number | null | undefined;
+  type?: 'text' | 'number';
+  readOnly?: boolean;
+  placeholder?: string;
+  title?: string;
+  /** Identifiant de colonne : c'est lui qui fait descendre la touche Entrée d'une ligne. */
+  cell?: string;
+  align?: 'right';
+  style?: React.CSSProperties;
+  onChange: (v: string) => void;
+}) {
+  const initiale = valeur === null || valeur === undefined ? '' : String(valeur);
+  const [saisie, setSaisie] = useState(initiale);
+  // RÉFÉRENCE et non état : le blur suit parfois la frappe dans le même tour, avant que React
+  // n'ait appliqué un `setState`. Un drapeau d'état serait alors lu à « false » et la saisie
+  // perdue. La référence, elle, est déjà à jour.
+  const touche = useRef(false);
+
+  useEffect(() => { setSaisie(initiale); touche.current = false; }, [initiale]);
+
+  return (
+    <input
+      type={type}
+      data-cell={cell}
+      onKeyDown={focusNextCell}
+      value={saisie}
+      disabled={readOnly}
+      placeholder={placeholder}
+      title={title}
+      onChange={(e) => { setSaisie(e.target.value); touche.current = true; }}
+      onBlur={(e) => {
+        if (!touche.current) return;
+        touche.current = false;
+        if (e.target.value !== initiale) onChange(e.target.value);
+      }}
+      style={{ width: '100%', textAlign: align, ...style }}
+    />
+  );
 }
 
 /** Cellule de code : monospace et compacte, comme dans le déboursé. */

@@ -279,17 +279,33 @@ export class PurchasingService {
       const codeSaisi = patch.code === undefined ? null : (patch.code ?? '').trim();
       let repris: Record<string, unknown> | null = null;
       if (codeSaisi && codeSaisi !== (ligne.code ?? '')) {
+        // On cherche d'abord dans la NOMENCLATURE du chantier — c'est ce que la liste propose en
+        // premier, et ce qui porte les prix négociés pour CE chantier — puis dans les catalogues.
         repris = (await em.query(
-          `SELECT r.id, r.code, r.label, r.unit, r.nature, r.unit_cost, r.code_analytique_id,
-                  r.code_produit, r.ref_fournisseur, r.unite_achat,
-                  COALESCE(r.coeff_conversion, 1) AS coeff_conversion
-             FROM resource r
-             JOIN library li ON li.id = r.library_id
-            WHERE r.deleted_at IS NULL AND upper(r.code) = upper($1)
-            ORDER BY (li.scope = 'chantier') DESC
+          `SELECT n.id, n.code, n.label, n.unit, n.nature, n.unit_cost_objectif AS unit_cost,
+                  n.code_analytique_id, NULL::varchar AS code_produit, n.ref_fournisseur,
+                  n.unite_achat, COALESCE(n.coeff_conversion, 1) AS coeff_conversion,
+                  false AS du_catalogue
+             FROM nomenclature_resource n
+            WHERE n.chantier_id = $2 AND upper(n.code) = upper($1)
             LIMIT 1`,
-          [codeSaisi],
+          [codeSaisi, ligne.chantier_id],
         ))[0] ?? null;
+
+        if (!repris) {
+          repris = (await em.query(
+            `SELECT r.id, r.code, r.label, r.unit, r.nature, r.unit_cost, r.code_analytique_id,
+                    r.code_produit, r.ref_fournisseur, r.unite_achat,
+                    COALESCE(r.coeff_conversion, 1) AS coeff_conversion,
+                    true AS du_catalogue
+               FROM resource r
+               JOIN library li ON li.id = r.library_id
+              WHERE r.deleted_at IS NULL AND upper(r.code) = upper($1)
+              ORDER BY (li.scope = 'chantier') DESC
+              LIMIT 1`,
+            [codeSaisi],
+          ))[0] ?? null;
+        }
       }
 
       const coeffRepris = repris ? new Decimal(String(repris.coeff_conversion ?? 1)) : null;
@@ -342,7 +358,7 @@ export class PurchasingService {
             repris ? (repris.label as string) : null,
             repris ? (repris.nature as string) : null,
             patch.code !== undefined, codeSaisi || null,
-            repris ? (repris.id as string) : null,
+            repris && repris.du_catalogue ? (repris.id as string) : null,
             repris ? ((repris.ref_fournisseur as string | null) ?? null) : null,
             repris ? ((repris.unite_achat as string | null) ?? (repris.unit as string | null)) : null,
             repris ? coeffRepris!.toString() : null,

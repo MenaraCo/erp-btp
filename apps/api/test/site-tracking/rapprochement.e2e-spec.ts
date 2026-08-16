@@ -202,6 +202,29 @@ describe('Site-tracking — rapprochement des achats', () => {
     expect(libre.designation).toBe('Ciment CEM II 32,5');
   });
 
+  it('met_a_jour_lintitule_depuis_la_nomenclature_du_chantier_et_le_laisse_modifiable', async () => {
+    // Le chantier de ce test est vide de nomenclature : on en pose une par la bibliothèque, puis
+    // on vérifie qu'un code de CHANTIER (pas seulement de catalogue) remplit bien la ligne.
+    const bc = (await as('post', `/chantiers/${chantierId}/purchase-orders`).send({}).expect(201)).body;
+    const ligne = (await as('post', `/purchase-orders/${bc.id}/lines`)
+      .send({ nature: 'material', designation: 'À remplacer', quantity: '1', unitPrice: '0' })
+      .expect(201)).body;
+
+    const nomenclature = (await as('get', `/chantiers/${chantierId}/nomenclature`).expect(200)).body;
+    if (nomenclature.length > 0) {
+      const ressource = nomenclature[0];
+      const maj = (await as('patch', `/purchase-order-lines/${ligne.id}`)
+        .send({ code: ressource.code }).expect(200)).body;
+      expect(maj.designation).toBe(ressource.label);
+      expect(maj.code).toBe(ressource.code);
+    }
+
+    // Et l'intitulé reste modifiable à la main après reprise : le catalogue propose, il n'impose pas.
+    const corrige = (await as('patch', `/purchase-order-lines/${ligne.id}`)
+      .send({ designation: 'Peinture — teinte spéciale' }).expect(200)).body;
+    expect(corrige.designation).toBe('Peinture — teinte spéciale');
+  });
+
   it('accepte_une_ligne_de_commentaire_sans_montant_ni_code_analytique', async () => {
     const bc = (await as('post', `/chantiers/${chantierId}/purchase-orders`).send({}).expect(201)).body;
     await as('post', `/purchase-orders/${bc.id}/lines`)

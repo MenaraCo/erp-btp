@@ -20,11 +20,13 @@ describe('Site-tracking — approvisionnement depuis la nomenclature', () => {
   let chantierId: string;
   let supplierId: string;
   let ouvrageId: string;
+  let libId: string;
 
-  function as(method: 'get' | 'post' | 'put', path: string) {
+  function as(method: 'get' | 'post' | 'put' | 'patch', path: string) {
     const s = app.getHttpServer();
     const base = method === 'get' ? request(s).get(path)
-      : method === 'put' ? request(s).put(path) : request(s).post(path);
+      : method === 'put' ? request(s).put(path)
+        : method === 'patch' ? request(s).patch(path) : request(s).post(path);
     return base.set('Host', 'localhost').set('X-Tenant-Id', tenantId).set('X-User-Id', userId);
   }
 
@@ -36,6 +38,7 @@ describe('Site-tracking — approvisionnement depuis la nomenclature', () => {
     supplierId = (await as('post', '/suppliers').send({ name: 'Point P' }).expect(201)).body.id;
 
     const lib = (await as('post', '/libraries').send({ code: 'L', name: 'L' }).expect(201)).body;
+    libId = lib.id;
     // Colle vendue au SAC de 25 kg : l'étude chiffre au kg, l'achat se fait au sac.
     const colle = (
       await as('post', `/libraries/${lib.id}/resources`)
@@ -115,6 +118,40 @@ describe('Site-tracking — approvisionnement depuis la nomenclature', () => {
     const vide = (await as('post', `/purchase-orders/${bc2.id}/lines/nomenclature`)
       .send({ mode: 'reste' }).expect(201)).body;
     expect(vide.inserees).toBe(0);
+  });
+
+  it('un_code_de_la_nomenclature_remplit_la_ligne_avec_le_prix_du_chantier', async () => {
+    const bc = (await as('post', `/chantiers/${chantierId}/purchase-orders`).send({}).expect(201)).body;
+    const ligne = (await as('post', `/purchase-orders/${bc.id}/lines`)
+      .send({ nature: 'material', designation: 'À remplacer', quantity: '3', unitPrice: '0' })
+      .expect(201)).body;
+
+    // COLLE est chiffrée POUR CE CHANTIER : c'est son prix qui doit être repris, pas celui du
+    // catalogue — un prix négocié sur un chantier ne remonte pas dans la bibliothèque.
+    const maj = (await as('patch', `/purchase-order-lines/${ligne.id}`)
+      .send({ code: 'colle' }).expect(200)).body;
+    expect(maj.designation).toBe('Colle carrelage');
+    expect(maj.unite_achat).toBe('sac');
+    expect(Number(maj.coeff_conversion)).toBe(25);
+    expect(Number(maj.unit_price)).toBe(50);     // 2 €/kg × 25 kg par sac
+    expect(Number(maj.amount_ht)).toBe(150);     // 3 sacs
+
+    // Une ressource SANS unité d'achat ni conditionnement ne doit pas faire échouer la reprise :
+    // c'est le cas le plus courant d'un chantier (unité d'emploi seule).
+    const brut = (await as('post', `/libraries/${libId}/resources`)
+      .send({ code: 'BETON', label: 'Béton C25/30', unit: 'M3', nature: 'material', unitCost: '120' })
+      .expect(201)).body;
+    expect(brut.code).toBe('BETON');
+    const sansConditionnement = (await as('patch', `/purchase-order-lines/${ligne.id}`)
+      .send({ code: 'BETON' }).expect(200)).body;
+    expect(sansConditionnement.designation).toBe('Béton C25/30');
+    expect(Number(sansConditionnement.unit_price)).toBe(120);
+
+    // L'intitulé reste modifiable : la reprise propose, elle n'impose pas.
+    const corrige = (await as('patch', `/purchase-order-lines/${ligne.id}`)
+      .send({ designation: 'Béton — teinte grise' }).expect(200)).body;
+    expect(corrige.designation).toBe('Béton — teinte grise');
+    expect(corrige.code).toBe('BETON');
   });
 
   it('limite_la_quantite_a_lavancement_quand_on_le_demande', async () => {
