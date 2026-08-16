@@ -192,8 +192,8 @@ export class RapprochementService {
            SELECT order_line_id, SUM(quantite_facturee) AS qte, SUM(montant_ht) AS montant
              FROM supplier_invoice_line GROUP BY order_line_id
          ) fact ON fact.order_line_id = l.id
-        WHERE l.order_id = $1
-        ORDER BY l.created_at ASC`,
+        WHERE l.order_id = $1 AND l.kind <> 'comment'
+        ORDER BY l.sort_order ASC, l.created_at ASC`,
       [orderId],
     );
 

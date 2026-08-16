@@ -49,7 +49,7 @@ describe('Site-tracking — rapprochement des achats', () => {
   beforeAll(async () => {
     ds = await createTestDataSource();
     app = await buildSocleApp();
-    ({ tenantId, userId } = await entitleUser(app, ds, 'Rappro', 'admin', ['site_tracking', 'core']));
+    ({ tenantId, userId } = await entitleUser(app, ds, 'Rappro', 'admin', ['site_tracking', 'core', 'estimating']));
     chantierId = (await as('post', '/chantiers').send({ name: 'Tour Nord' }).expect(201)).body.id;
 
     const lotId = (await as('post', '/params/lots').send({ code: 'GO', label: 'Gros œuvre' }).expect(201)).body.id;
@@ -167,6 +167,62 @@ describe('Site-tracking — rapprochement des achats', () => {
     // L'ouvrage reste facultatif ; le code analytique, non.
     const refus = await as('post', `/purchase-orders/${bc.id}/submit`).expect(400);
     expect(refus.body.message).toMatch(/code analytique/i);
+  });
+
+  it('remplit_la_ligne_depuis_le_catalogue_quand_on_tape_un_code_connu', async () => {
+    const lib = (await as('post', '/libraries')
+      .send({ code: 'CHT', name: 'Catalogue chantier', scope: 'chantier' }).expect(201)).body;
+    await as('post', `/libraries/${lib.id}/resources`)
+      .send({
+        code: 'CIM-32', label: 'Ciment CEM II 32,5', unit: 'kg', nature: 'material',
+        unitCost: '0.20', uniteAchat: 'sac', coeffConversion: '25', refFournisseur: 'PP-77',
+        codeAnalytiqueId,
+      })
+      .expect(201);
+
+    const bc = (await as('post', `/chantiers/${chantierId}/purchase-orders`).send({}).expect(201)).body;
+    const ligne = (await as('post', `/purchase-orders/${bc.id}/lines`)
+      .send({ nature: 'material', designation: 'À remplacer', quantity: '4', unitPrice: '0' })
+      .expect(201)).body;
+
+    const maj = (await as('patch', `/purchase-order-lines/${ligne.id}`)
+      .send({ code: 'cim-32' }).expect(200)).body; // la casse ne doit pas gêner
+    expect(maj.designation).toBe('Ciment CEM II 32,5');
+    expect(maj.unite_achat).toBe('sac');
+    expect(Number(maj.coeff_conversion)).toBe(25);
+    expect(maj.ref_fournisseur).toBe('PP-77');
+    expect(maj.code_analytique_id).toBe(codeAnalytiqueId);
+    expect(Number(maj.unit_price)).toBe(5);   // 0,20 €/kg × 25 kg par sac
+    expect(Number(maj.amount_ht)).toBe(20);   // 4 sacs
+
+    // Un code inconnu reste accepté : tout n'est pas au catalogue.
+    const libre = (await as('patch', `/purchase-order-lines/${ligne.id}`)
+      .send({ code: 'HORS-CATALOGUE' }).expect(200)).body;
+    expect(libre.code).toBe('HORS-CATALOGUE');
+    expect(libre.designation).toBe('Ciment CEM II 32,5');
+  });
+
+  it('accepte_une_ligne_de_commentaire_sans_montant_ni_code_analytique', async () => {
+    const bc = (await as('post', `/chantiers/${chantierId}/purchase-orders`).send({}).expect(201)).body;
+    await as('post', `/purchase-orders/${bc.id}/lines`)
+      .send({
+        nature: 'material', designation: 'Sable', quantity: '2', unitPrice: '100', codeAnalytiqueId,
+      })
+      .expect(201);
+    const commentaire = (await as('post', `/purchase-orders/${bc.id}/lines`)
+      .send({ kind: 'comment', designation: 'Livrer par la rue arrière' })
+      .expect(201)).body;
+    expect(commentaire.kind).toBe('comment');
+    expect(Number(commentaire.amount_ht)).toBe(0);
+
+    // Il ne pèse ni sur le total, ni sur l'exigence de code analytique.
+    const fiche = (await as('get', `/purchase-orders/${bc.id}`).expect(200)).body;
+    expect(Number(fiche.commande.total_ht)).toBe(200);
+    await as('post', `/purchase-orders/${bc.id}/submit`).expect(201);
+
+    // Et il reste hors du rapprochement, qui ne parle que de quantités.
+    const t = (await as('get', `/purchase-orders/${bc.id}/rapprochement`).expect(200)).body;
+    expect(t.lignes).toHaveLength(1);
   });
 
   it('corrige_et_supprime_une_ligne_tant_que_la_commande_est_en_brouillon', async () => {

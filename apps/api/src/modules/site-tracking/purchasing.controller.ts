@@ -199,6 +199,13 @@ export class PurchasingController {
   @RequiresCapability('purchasing')
   @RequiresPermission('site_tracking.write')
   addLine(@Param('orderId') orderId: string, @Body() body: OrderLineInput) {
+    // Un commentaire n'a pas de nature d'achat : il n'entre dans aucun budget.
+    if (body?.kind === 'comment') {
+      return this.purchasing.addLine(orderId, {
+        ...body, nature: 'material', quantity: 0, unitPrice: 0,
+        designation: body.designation || 'Commentaire',
+      });
+    }
     if (!body?.nature || !NATURES.includes(body.nature) || !body?.designation) {
       throw new BadRequestException('nature (valid) and designation are required');
     }
@@ -273,6 +280,8 @@ export class PurchasingController {
     @Body() body: {
       designation?: string; quantity?: string | number; unitPrice?: string | number;
       nature?: string; executionLineId?: string | null; codeAnalytiqueId?: string | null;
+      refFournisseur?: string | null; uniteAchat?: string | null;
+      coeffConversion?: string | number | null; codeProduit?: string | null; code?: string | null;
     },
   ) {
     if (body?.nature && !NATURES.includes(body.nature)) {

@@ -33,6 +33,12 @@ export interface OrderLineInput {
   unitPrice: string | number;
   /** Imputation analytique au code analytique du plan partagé (engagé, cahier §5.8). Optionnel. */
   codeAnalytiqueId?: string | null;
+  /** Code d'article affiché et saisissable ; il sert à retrouver la ressource au catalogue. */
+  code?: string | null;
+  /** `comment` : une ligne de texte sous une ressource, sans quantité ni prix. */
+  kind?: 'resource' | 'comment';
+  /** Position dans la commande ; à défaut, la ligne se pose à la fin. */
+  sortOrder?: number | null;
 }
 
 export interface SupplierInvoiceInput {
@@ -112,8 +118,10 @@ export class PurchasingService {
 
   addLine(orderId: string, input: OrderLineInput) {
     const tenantId = this.context.requireTenantId();
-    const qty = new Decimal(input.quantity ?? 0);
-    const price = new Decimal(input.unitPrice ?? 0);
+    // Un commentaire n'a ni quantité ni prix : le forcer à zéro évite qu'il pèse sur un total.
+    const commentaire = input.kind === 'comment';
+    const qty = commentaire ? new Decimal(0) : new Decimal(input.quantity ?? 0);
+    const price = commentaire ? new Decimal(0) : new Decimal(input.unitPrice ?? 0);
     const amount = qty.times(price).toDecimalPlaces(2);
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const order = await em.query(`SELECT chantier_id, status FROM purchase_order WHERE id = $1`, [orderId]);
@@ -131,18 +139,27 @@ export class PurchasingService {
       if (input.codeAnalytiqueId != null) {
         await this.assertCodeAnalytiqueExists(em, input.codeAnalytiqueId);
       }
+      // Position : juste après la ligne visée si on en donne une, sinon à la fin. C'est ce qui
+      // permet de glisser un commentaire SOUS sa ressource.
+      const rang = input.sortOrder ?? (
+        Number((await em.query(
+          `SELECT COALESCE(MAX(sort_order), 0) + 10 AS rang FROM purchase_order_line WHERE order_id = $1`,
+          [orderId],
+        ))[0].rang)
+      );
       const line = (
         await em.query(
           `INSERT INTO purchase_order_line
              (tenant_id, order_id, execution_line_id, nature, designation, quantity, unit_price, amount_ht,
               code_analytique_id, nomenclature_resource_id, library_resource_id,
-              ref_fournisseur, unite_achat, coeff_conversion, code_produit)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+              ref_fournisseur, unite_achat, coeff_conversion, code_produit, code, kind, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
           [tenantId, orderId, input.executionLineId ?? null, input.nature, input.designation,
             qty.toString(), price.toString(), amount.toString(), input.codeAnalytiqueId ?? null,
             input.nomenclatureResourceId ?? null, input.libraryResourceId ?? null,
             input.refFournisseur ?? null, input.uniteAchat ?? null,
-            input.coeffConversion ?? null, input.codeProduit ?? null],
+            input.coeffConversion ?? null, input.codeProduit ?? null,
+            (input.code ?? '').trim() || null, commentaire ? 'comment' : 'resource', rang],
         )
       )[0];
       await em.query(
@@ -228,6 +245,7 @@ export class PurchasingService {
     nature?: string; executionLineId?: string | null; codeAnalytiqueId?: string | null;
     refFournisseur?: string | null; uniteAchat?: string | null;
     coeffConversion?: string | number | null; codeProduit?: string | null;
+    code?: string | null;
   }) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
@@ -248,23 +266,57 @@ export class PurchasingService {
         await this.assertCodeAnalytiqueExists(em, patch.codeAnalytiqueId);
       }
 
+      /**
+       * Code saisi au clavier : s'il correspond à un article du catalogue, la ligne se remplit
+       * avec lui — désignation, unité, prix, imputation. C'est la façon la plus rapide de
+       * commander quand on connaît ses références par cœur. Un code inconnu reste accepté : une
+       * commande contient parfois un article qui n'est dans aucun catalogue.
+       */
+      const codeSaisi = patch.code === undefined ? null : (patch.code ?? '').trim();
+      let repris: Record<string, unknown> | null = null;
+      if (codeSaisi && codeSaisi !== (ligne.code ?? '')) {
+        repris = (await em.query(
+          `SELECT r.id, r.code, r.label, r.unit, r.nature, r.unit_cost, r.code_analytique_id,
+                  r.code_produit, r.ref_fournisseur, r.unite_achat,
+                  COALESCE(r.coeff_conversion, 1) AS coeff_conversion
+             FROM resource r
+             JOIN library li ON li.id = r.library_id
+            WHERE r.deleted_at IS NULL AND upper(r.code) = upper($1)
+            ORDER BY (li.scope = 'chantier') DESC
+            LIMIT 1`,
+          [codeSaisi],
+        ))[0] ?? null;
+      }
+
+      const coeffRepris = repris ? new Decimal(String(repris.coeff_conversion ?? 1)) : null;
       const qty = new Decimal(patch.quantity ?? String(ligne.quantity));
-      const price = new Decimal(patch.unitPrice ?? String(ligne.unit_price));
+      const price = new Decimal(
+        patch.unitPrice
+        // Le catalogue chiffre à l'unité d'emploi : le prix d'achat suit le conditionnement.
+        ?? (repris ? new Decimal(String(repris.unit_cost ?? 0)).times(coeffRepris!).toDecimalPlaces(4).toString() : null)
+        ?? String(ligne.unit_price),
+      );
       if (qty.isNegative()) throw new BadRequestException('La quantité ne peut pas être négative.');
       const amount = qty.times(price).toDecimalPlaces(2);
 
       const rows = returningRows<Record<string, unknown>>(
         await em.query(
           `UPDATE purchase_order_line
-              SET designation = COALESCE($2, designation),
-                  nature = COALESCE($3, nature),
-                  quantity = $4, unit_price = $5, amount_ht = $6,
+              SET designation = COALESCE($19, $2, designation),
+                  nature = COALESCE($20, $3, nature),
+                  code = CASE WHEN $21::boolean THEN $22 ELSE code END,
+                  library_resource_id = COALESCE($23, library_resource_id),
+                  quantity = CASE WHEN kind = 'comment' THEN 0 ELSE $4 END,
+                  unit_price = CASE WHEN kind = 'comment' THEN 0 ELSE $5 END,
+                  amount_ht = CASE WHEN kind = 'comment' THEN 0 ELSE $6 END,
                   execution_line_id = CASE WHEN $7::boolean THEN $8 ELSE execution_line_id END,
-                  code_analytique_id = CASE WHEN $9::boolean THEN $10 ELSE code_analytique_id END,
-                  ref_fournisseur = CASE WHEN $11::boolean THEN $12 ELSE ref_fournisseur END,
-                  unite_achat = CASE WHEN $13::boolean THEN $14 ELSE unite_achat END,
-                  coeff_conversion = CASE WHEN $15::boolean THEN $16::numeric ELSE coeff_conversion END,
-                  code_produit = CASE WHEN $17::boolean THEN $18 ELSE code_produit END
+                  ref_fournisseur = COALESCE($24, CASE WHEN $11::boolean THEN $12 ELSE ref_fournisseur END),
+                  unite_achat = COALESCE($25, CASE WHEN $13::boolean THEN $14 ELSE unite_achat END),
+                  coeff_conversion = COALESCE($26::numeric, CASE WHEN $15::boolean THEN $16::numeric ELSE coeff_conversion END),
+                  code_produit = COALESCE($27, CASE WHEN $17::boolean THEN $18 ELSE code_produit END),
+                  code_analytique_id = CASE
+                    WHEN $9::boolean THEN $10
+                    ELSE COALESCE($28, code_analytique_id) END
             WHERE id = $1
         RETURNING *`,
           [
@@ -282,6 +334,16 @@ export class PurchasingService {
             patch.coeffConversion === undefined || patch.coeffConversion === null
               || patch.coeffConversion === '' ? null : String(patch.coeffConversion),
             patch.codeProduit !== undefined, (patch.codeProduit ?? '').trim() || null,
+            // Reprise du catalogue : ces valeurs priment sur celles du corps de la requête.
+            repris ? (repris.label as string) : null,
+            repris ? (repris.nature as string) : null,
+            patch.code !== undefined, codeSaisi || null,
+            repris ? (repris.id as string) : null,
+            repris ? ((repris.ref_fournisseur as string | null) ?? null) : null,
+            repris ? ((repris.unite_achat as string | null) ?? (repris.unit as string | null)) : null,
+            repris ? coeffRepris!.toString() : null,
+            repris ? ((repris.code_produit as string | null) ?? null) : null,
+            repris ? ((repris.code_analytique_id as string | null) ?? null) : null,
           ],
         ),
       );
@@ -350,7 +412,7 @@ export class PurchasingService {
              LEFT JOIN execution_line el ON el.id = l.execution_line_id
              LEFT JOIN analytical_code ac ON ac.id = l.code_analytique_id
              LEFT JOIN nomenclature_resource n ON n.id = l.nomenclature_resource_id
-            WHERE l.order_id = $1 ORDER BY l.created_at ASC`,
+            WHERE l.order_id = $1 ORDER BY l.sort_order ASC, l.created_at ASC`,
           [orderId],
         ),
         em.query(
@@ -381,7 +443,7 @@ export class PurchasingService {
            LEFT JOIN analytical_code ac ON ac.id = l.code_analytique_id
            LEFT JOIN nomenclature_resource n ON n.id = l.nomenclature_resource_id
           WHERE l.order_id = $1
-          ORDER BY l.created_at ASC`,
+          ORDER BY l.sort_order ASC, l.created_at ASC`,
         [orderId],
       );
     });

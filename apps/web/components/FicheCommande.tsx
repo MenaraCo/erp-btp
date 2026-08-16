@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Trash2, Unlock,
+  ArrowLeft, History, Lock, MessageSquarePlus, PackageCheck, ReceiptText, ShieldCheck,
+  Trash2, Unlock,
 } from 'lucide-react';
 import { IconBtn } from '@/components/IconBtn';
 import { apiFetch, ApiError } from '@/lib/api';
@@ -14,6 +15,7 @@ import { teinteChantier } from '@/components/CalendrierMois';
 import { ApproModal } from '@/components/ApproModal';
 import { LigneRapprochement, SaisieRapprochement } from '@/components/SaisieRapprochement';
 import { BibliothequeCommandeModal } from '@/components/BibliothequeCommandeModal';
+import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
 
 interface Ligne {
   id: string;
@@ -27,6 +29,9 @@ interface Ligne {
   execution_line_id: string | null;
   code_analytique_id: string | null;
   ressource_code: string | null;
+  code: string | null;
+  kind: 'resource' | 'comment';
+  sort_order: number;
   unite_achat: string | null;
   coeff_conversion: string | null;
   ref_fournisseur: string | null;
@@ -239,10 +244,11 @@ function InfosLigne({
  * `R` reprend une ressource déjà chiffrée, `L` ouvre une ligne libre — la cohérence entre modules
  * compte plus que l'originalité de chaque écran.
  */
-function MenuAjout({ onRessource, onCatalogue, onLigneLibre }: {
+function MenuAjout({ onRessource, onCatalogue, onLigneLibre, onCommentaire }: {
   onRessource: () => void;
   onCatalogue: () => void;
   onLigneLibre: () => void;
+  onCommentaire: () => void;
 }) {
   const [ouvert, setOuvert] = useState(false);
   const carre = (label: string, titre: string, couleur: string, action: () => void) => (
@@ -281,8 +287,9 @@ function MenuAjout({ onRessource, onCatalogue, onLigneLibre }: {
           {carre('B', 'Piocher dans la bibliothèque générale de l’entreprise (hors budget)',
             '#7c3aed', onCatalogue)}
           {carre('L', 'Ajouter une ligne libre, à remplir dans le tableau', '#64748b', onLigneLibre)}
+          {carre('C', 'Ajouter une ligne de commentaire (sans quantité ni prix)', '#b45309', onCommentaire)}
           <span className="muted" style={{ fontSize: 11 }}>
-            R : budget du chantier · B : bibliothèque générale · L : ligne libre
+            R : budget · B : bibliothèque · L : ligne libre · C : commentaire
           </span>
         </>
       )}
@@ -361,6 +368,12 @@ export function FicheCommande({
     retry: false,
     queryFn: () => apiFetch<Arbre>(`/chantiers/${chantierId}/execution-tree`, { token }),
   });
+  const unites = useQuery({
+    queryKey: ['params-units'],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<Array<{ id: string; abrev: string; label: string }>>('/params/units', { token }),
+  });
   const plan = useQuery({
     queryKey: ['analytical-plan'],
     enabled: Boolean(token),
@@ -369,9 +382,10 @@ export function FicheCommande({
     ),
   });
   const ouvrages = (arbre.data?.marches ?? []).flatMap((m) => aplatir(m.lines));
-  const codes = (plan.data ?? []).flatMap((n) =>
+  // Le sélecteur montre le code seul une fois replié : l'intitulé n'apparaît qu'au déroulé.
+  const codes: CodeAnalytique[] = (plan.data ?? []).flatMap((n) =>
     n.lots.flatMap((l) => l.familles.flatMap((fa) =>
-      fa.codes.map((c) => ({ id: c.id, label: `${c.code} — ${c.label}` })))));
+      fa.codes.map((c) => ({ id: c.id, code: c.code, label: c.label })))));
 
   const rafraichir = () => {
     setErr(null);
@@ -393,6 +407,22 @@ export function FicheCommande({
     }),
     onSuccess: rafraichir,
     onError: (e) => echec(e, 'Ligne non ajoutée.'),
+  });
+  /**
+   * Commentaire : il se pose JUSTE SOUS la ligne visée (rang + 1), là où on l'écrirait à la main
+   * sur un bon de commande papier.
+   */
+  const ajouterCommentaire = useMutation({
+    mutationFn: (apres?: { sortOrder: number }) => apiFetch(`/purchase-orders/${orderId}/lines`, {
+      method: 'POST', token,
+      body: {
+        kind: 'comment',
+        designation: 'Commentaire',
+        ...(apres ? { sortOrder: apres.sortOrder + 1 } : {}),
+      },
+    }),
+    onSuccess: rafraichir,
+    onError: (e) => echec(e, 'Commentaire non ajouté.'),
   });
   // Envoyer, c'est SOUMETTRE : sous les seuils la commande part, au-delà elle passe au visa.
   const envoyer = useMutation({
@@ -709,6 +739,32 @@ export function FicheCommande({
                 // Édition EN PLACE, comme le montage d'un devis : on corrige la cellule qu'on
                 // regarde, sans rouvrir un formulaire au-dessus du tableau.
                 <Fragment key={l.id}>
+                {l.kind === 'comment' ? (
+                  // Un commentaire occupe toute la largeur : ni quantité, ni prix, ni imputation.
+                  <tr>
+                    <td style={{ textAlign: 'center', padding: 0 }}>
+                      <span className="muted" style={{ fontSize: 11 }}>✎</span>
+                    </td>
+                    <td colSpan={7}>
+                      <input
+                        defaultValue={l.designation}
+                        placeholder="Commentaire à l’attention du fournisseur"
+                        onBlur={(e) => e.target.value !== l.designation
+                          && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
+                        style={{ width: '100%', fontStyle: 'italic' }}
+                      />
+                    </td>
+                    <td style={{ textAlign: 'right', paddingRight: 6 }}>
+                      <IconBtn
+                        title="Retirer ce commentaire"
+                        color="var(--danger, #dc2626)"
+                        onClick={() => supprimerLigne.mutate(l.id)}
+                      >
+                        <Trash2 size={13} />
+                      </IconBtn>
+                    </td>
+                  </tr>
+                ) : (
                 <tr>
                   <td style={{ textAlign: 'center', padding: 0 }}>
                     <BoutonInfo
@@ -716,8 +772,16 @@ export function FicheCommande({
                       onClick={() => setLigneOuverte(ligneOuverte === l.id ? null : l.id)}
                     />
                   </td>
-                  <td className="code-cell">
-                    {l.ressource_code ?? l.code_produit ?? <span className="muted">—</span>}
+                  <td>
+                    {/* Le code se tape : s'il existe au catalogue, la ligne se remplit seule. */}
+                    <input
+                      defaultValue={l.code ?? ''}
+                      placeholder="Code"
+                      title="Saisissez un code du catalogue : la ligne se remplit avec l’article"
+                      onBlur={(e) => e.target.value !== (l.code ?? '')
+                        && majLigne.mutate({ id: l.id, patch: { code: e.target.value } })}
+                      style={{ width: '100%', fontFamily: 'var(--mono, ui-monospace)', fontSize: 12 }}
+                    />
                   </td>
                   <td>
                     <input
@@ -727,8 +791,17 @@ export function FicheCommande({
                       style={{ width: '100%' }}
                     />
                   </td>
-                  <td className="muted" style={{ fontSize: 12 }}>
-                    {l.unite_achat ?? l.unite_emploi ?? '—'}
+                  <td>
+                    <select
+                      defaultValue={l.unite_achat ?? ''}
+                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { uniteAchat: e.target.value || null } })}
+                      style={{ width: '100%', fontSize: 12 }}
+                    >
+                      <option value="">—</option>
+                      {(unites.data ?? []).map((u) => (
+                        <option key={u.id} value={u.abrev} title={u.label}>{u.abrev}</option>
+                      ))}
+                    </select>
                   </td>
                   <td>
                     <input
@@ -750,20 +823,21 @@ export function FicheCommande({
                     {euro(l.amount_ht)}
                   </td>
                   <td>
-                    <select
-                      defaultValue={l.code_analytique_id ?? ''}
-                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { codeAnalytiqueId: e.target.value || null } })}
-                      title={l.code_analytique_id ? undefined : 'Obligatoire pour envoyer la commande'}
-                      style={{
-                        width: '100%',
-                        borderColor: l.code_analytique_id ? undefined : 'var(--danger, #dc2626)',
-                      }}
-                    >
-                      <option value="">— À renseigner —</option>
-                      {codes.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-                    </select>
+                    <SelectCodeAnalytique
+                      valeur={l.code_analytique_id}
+                      codes={codes}
+                      obligatoire
+                      onChange={(id) => majLigne.mutate({ id: l.id, patch: { codeAnalytiqueId: id } })}
+                    />
                   </td>
-                  <td style={{ textAlign: 'right', paddingRight: 6 }}>
+                  <td style={{ textAlign: 'right', paddingRight: 6, whiteSpace: 'nowrap' }}>
+                    <IconBtn
+                      title="Ajouter un commentaire sous cette ligne"
+                      color="var(--muted)"
+                      onClick={() => ajouterCommentaire.mutate({ sortOrder: l.sort_order })}
+                    >
+                      <MessageSquarePlus size={13} />
+                    </IconBtn>
                     <IconBtn
                       title="Retirer cette ligne"
                       color="var(--danger, #dc2626)"
@@ -773,6 +847,7 @@ export function FicheCommande({
                     </IconBtn>
                   </td>
                 </tr>
+                )}
                 {ligneOuverte === l.id && (
                   <tr>
                     <td colSpan={9} style={{ background: 'var(--surface)', padding: '10px 14px' }}>
@@ -795,20 +870,24 @@ export function FicheCommande({
                     />
                   </td>
                   <td className="code-cell">
-                    {l.ressource_code ?? l.code_produit ?? <span className="muted">—</span>}
+                    {l.code ?? l.ressource_code ?? <span className="muted">—</span>}
                   </td>
-                  <td>{l.designation}</td>
+                  <td style={l.kind === 'comment' ? { fontStyle: 'italic', color: 'var(--muted)' } : undefined}>
+                    {l.designation}
+                  </td>
                   <td className="muted" style={{ fontSize: 12 }}>
-                    {l.unite_achat ?? l.unite_emploi ?? '—'}
+                    {l.kind === 'comment' ? '' : (l.unite_achat ?? l.unite_emploi ?? '—')}
                   </td>
                   <td style={{ textAlign: 'right' }}>{Number(l.quantity)}</td>
                   <td style={{ textAlign: 'right' }}>{euro(l.unit_price)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                     {euro(l.amount_ht)}
                   </td>
-                  <td>{l.code_analytique
-                    ? <span className="code-cell">{l.code_analytique}</span>
-                    : <span className="muted">À ventiler</span>}</td>
+                  <td>
+                    {l.kind === 'comment' ? '' : (
+                      <SelectCodeAnalytique valeur={l.code_analytique_id} codes={codes} lecture />
+                    )}
+                  </td>
                 </tr>
                 {ligneOuverte === l.id && (
                   <tr>
@@ -832,6 +911,7 @@ export function FicheCommande({
                     onRessource={() => setApproOuvert(true)}
                     onCatalogue={() => setCatalogueOuvert(true)}
                     onLigneLibre={() => ajouterLigne.mutate()}
+                    onCommentaire={() => ajouterCommentaire.mutate(undefined)}
                   />
                 </td>
               </tr>

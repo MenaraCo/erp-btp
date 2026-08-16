@@ -119,7 +119,8 @@ export class ValidationAchatsService {
       const lignes = await em.query(
         `SELECT COUNT(*)::int AS n,
                 COUNT(*) FILTER (WHERE code_analytique_id IS NULL)::int AS sans_code
-           FROM purchase_order_line WHERE order_id = $1`,
+           FROM purchase_order_line
+          WHERE order_id = $1 AND kind <> 'comment'`,
         [orderId],
       );
       if (lignes[0].n === 0) {

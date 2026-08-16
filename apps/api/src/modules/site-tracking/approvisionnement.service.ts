@@ -111,6 +111,11 @@ export class ApprovisionnementService {
         .filter((l) => choisies.size === 0 || choisies.has(l.resourceId));
 
       let inserees = 0;
+      // Les lignes insérées se rangent à la SUITE de celles déjà saisies, dans l'ordre du tableau.
+      let rang = Number((await em.query(
+        `SELECT COALESCE(MAX(sort_order), 0) AS rang FROM purchase_order_line WHERE order_id = $1`,
+        [orderId],
+      ))[0].rang);
       for (const l of lignes) {
         const quantiteEmploi = mode === 'total' ? new Decimal(l.quantiteBudget)
           : mode === 'avancement' ? new Decimal(l.quantiteAvancement).minus(l.quantiteCommandee)
@@ -123,15 +128,17 @@ export class ApprovisionnementService {
         const puAchat = new Decimal(l.puAchat);
         const montant = quantiteAchat.times(puAchat).toDecimalPlaces(2);
 
+        rang += 10;
         await em.query(
           `INSERT INTO purchase_order_line
              (tenant_id, order_id, execution_line_id, nature, designation, quantity, unit_price,
-              amount_ht, code_analytique_id, nomenclature_resource_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [tenantId, orderId, l.executionLineId, l.nature,
-            `${l.code} — ${l.label}${l.uniteAchat ? ` (${l.uniteAchat})` : ''}`,
+              amount_ht, code_analytique_id, nomenclature_resource_id, code,
+              ref_fournisseur, unite_achat, coeff_conversion, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          [tenantId, orderId, l.executionLineId, l.nature, l.label,
             quantiteAchat.toString(), puAchat.toString(), montant.toString(),
-            l.codeAnalytiqueId, l.resourceId],
+            l.codeAnalytiqueId, l.resourceId, l.code,
+            l.refFournisseur, l.uniteAchat, l.coeffConversion, rang],
         );
         inserees += 1;
       }
@@ -187,6 +194,10 @@ export class ApprovisionnementService {
       const parId = new Map(rows.map((r) => [r.id as string, r]));
 
       let inserees = 0;
+      let rang = Number((await em.query(
+        `SELECT COALESCE(MAX(sort_order), 0) AS rang FROM purchase_order_line WHERE order_id = $1`,
+        [orderId],
+      ))[0].rang);
       for (const a of articles) {
         const r = parId.get(a.resourceId);
         if (!r) continue;
@@ -195,17 +206,18 @@ export class ApprovisionnementService {
         // Le catalogue chiffre à l'unité d'EMPLOI : le prix d'achat suit le conditionnement.
         const puAchat = new Decimal(String(r.unit_cost ?? 0)).times(coeff).toDecimalPlaces(4);
         const montant = quantite.times(puAchat).toDecimalPlaces(2);
+        rang += 10;
         await em.query(
           `INSERT INTO purchase_order_line
              (tenant_id, order_id, nature, designation, quantity, unit_price, amount_ht,
               code_analytique_id, library_resource_id, ref_fournisseur, unite_achat,
-              coeff_conversion, code_produit)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-          [tenantId, orderId, r.nature, `${r.code} — ${r.label}`,
+              coeff_conversion, code_produit, code, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          [tenantId, orderId, r.nature, r.label,
             quantite.toString(), puAchat.toString(), montant.toString(),
             r.code_analytique_id ?? null, r.id, r.ref_fournisseur ?? null,
             (r.unite_achat as string | null) ?? (r.unit as string | null), coeff.toString(),
-            r.code_produit ?? null],
+            r.code_produit ?? null, r.code as string, rang],
         );
         inserees += 1;
       }

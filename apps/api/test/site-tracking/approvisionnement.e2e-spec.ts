@@ -94,6 +94,10 @@ describe('Site-tracking — approvisionnement depuis la nomenclature', () => {
     expect(insertion.inserees).toBe(1);
 
     const lignes = (await as('get', `/purchase-orders/${bc.id}/lines`).expect(200)).body;
+    // Le code de la ressource remplit la colonne « Code » : il sert ensuite à retrouver l'article.
+    expect(lignes[0].code).toBe('COLLE');
+    expect(lignes[0].designation).toBe('Colle carrelage');
+    expect(lignes[0].unite_achat).toBe('sac');
     expect(Number(lignes[0].quantity)).toBe(8);       // 200 kg ÷ 25 kg par sac
     expect(Number(lignes[0].unit_price)).toBe(50);
     expect(Number(lignes[0].amount_ht)).toBe(400);    // = 200 kg × 2 €/kg, le budget matière
