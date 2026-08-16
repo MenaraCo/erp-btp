@@ -4,11 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ShoppingCart } from 'lucide-react';
+import { Plus, ShoppingCart } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { STATUT_COMMANDE, statut as resoudreStatut } from '@/lib/statuts';
-import { Alerte, BadgeStatut, LigneVide } from '@/components/ui';
+import { Alerte, Bouton, BadgeStatut, LigneVide } from '@/components/ui';
 import { euro } from '@/lib/format';
 
 interface Commande {
@@ -139,14 +139,15 @@ export default function AchatsChantierPage() {
             <option value="cancelled">Annulée</option>
           </select>
         </div>
-        <button
-          className="btn"
+        <Bouton
+          icone={Plus}
           style={{ marginLeft: 'auto' }}
-          disabled={creer.isPending}
+          chargement={creer.isPending}
+          libelleChargement="Création…"
           onClick={() => { setErr(null); creer.mutate(); }}
         >
-          {creer.isPending ? 'Création…' : '+ Nouveau bon de commande'}
-        </button>
+          Nouveau bon de commande
+        </Bouton>
       </div>
 
       <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
@@ -192,7 +193,7 @@ export default function AchatsChantierPage() {
                 colonnes={7}
                 icone={ShoppingCart}
                 titre="Aucune commande sur ce chantier pour l’instant."
-                indice="« Nouvelle commande » ouvre un brouillon : rien n’est engagé tant qu’il n’est pas envoyé."
+                indice="« Nouveau bon de commande » ouvre un brouillon : rien n’est engagé tant qu’il n’est pas envoyé."
               />
             )}
           </tbody>

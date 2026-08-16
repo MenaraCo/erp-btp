@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PalmtreeIcon, Pencil, Plus, Trash2 } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { LigneVide } from '@/components/ui';
 import { AbsenceModal } from '@/components/AbsenceModal';
 import { IconBtn } from '@/components/IconBtn';
 import { MOTIFS_ABSENCE, couleurAbsence, libelleAbsence } from '@/lib/absences';
@@ -221,11 +222,12 @@ export default function AbsencesPage() {
               </tr>
             ))}
             {lignes.length === 0 && (
-              <tr>
-                <td colSpan={6} className="muted" style={{ padding: 16, textAlign: 'center' }}>
-                  Aucune absence sur cette période.
-                </td>
-              </tr>
+              <LigneVide
+                colonnes={6}
+                icone={PalmtreeIcon}
+                titre="Aucune absence sur cette période."
+                indice="« Poser une absence » enregistre un congé ou un arrêt : les heures prévues du salarié s’effacent d’autant."
+              />
             )}
           </tbody>
         </table>

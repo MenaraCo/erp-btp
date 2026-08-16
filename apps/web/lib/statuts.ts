@@ -30,9 +30,11 @@ export const STATUT_AVANCEMENT: Record<string, Statut> = {
 
 /** Affaire et devis (étude de prix). */
 export const STATUT_AFFAIRE: Record<string, Statut> = {
-  open: { label: 'En cours', ton: 'info' },
+  open: { label: 'En cours', ton: 'neutre' },
   draft: { label: 'Brouillon', ton: 'neutre' },
   sent: { label: 'Envoyé', ton: 'info' },
+  followup: { label: 'Relancé', ton: 'info' },
+  revision: { label: 'Révision', ton: 'attention' },
   won: { label: 'Gagné', ton: 'succes' },
   lost: { label: 'Perdu', ton: 'danger' },
   abandoned: { label: 'Abandonné', ton: 'neutre' },

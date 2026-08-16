@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
+import { STATUT_AFFAIRE, statut } from '@/lib/statuts';
+import { BadgeStatut } from '@/components/ui';
 import { apiFetch, ApiError } from '@/lib/api';
 import { usePermissions } from '@/lib/capabilities';
 
@@ -56,18 +58,7 @@ interface Changelog {
 }
 
 const TYPE_LABELS: Record<string, string> = { principal: 'Principal', lot: 'Lot', avenant: 'Avenant' };
-const STATUS_LABELS: Record<string, string> = {
-  open: 'En cours', sent: 'Envoyé', won: 'Gagné', lost: 'Perdu',
-  followup: 'Relancé', revision: 'Révision',
-};
-const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
-  won:              { bg: '#dcfce7', color: '#15803d' },
-  lost:             { bg: '#fee2e2', color: '#dc2626' },
-  sent:             { bg: '#dbeafe', color: '#1d4ed8' },
-  open:             { bg: '#f1f5f9', color: '#475569' },
-  revision:         { bg: '#fef9c3', color: '#b45309' },
-  followup:         { bg: '#f1f5f9', color: '#475569' },
-};
+
 
 type FilterTab = 'all' | 'open' | 'sent' | 'won' | 'lost';
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
@@ -138,15 +129,7 @@ function fmtDate(iso: string | null | undefined): string {
 
 /* ── Badge statut ── */
 function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_STYLE[status] ?? { bg: '#f1f5f9', color: '#64748b' };
-  return (
-    <span style={{
-      fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10,
-      background: s.bg, color: s.color,
-    }}>
-      {STATUS_LABELS[status] ?? status}
-    </span>
-  );
+  return <BadgeStatut statut={statut(STATUT_AFFAIRE, status)} />;
 }
 
 export default function DevisListPage() {

@@ -3,8 +3,9 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CalendarCheck, Clock, FileText } from 'lucide-react';
+import { AlertTriangle, CalendarCheck, CalendarDays, Clock, FileText } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { LigneVide } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
 
 /**
@@ -230,7 +231,12 @@ export default function PlanningEtudesPage() {
                 </tr>
               ))}
               {lignes.length === 0 && (
-                <tr><td colSpan={9} className="muted">Aucune affaire ne correspond à ce filtre.</td></tr>
+                <LigneVide
+                  colonnes={9}
+                  icone={CalendarDays}
+                  titre="Aucune affaire ne correspond à ce filtre."
+                  indice="Élargissez la période ou effacez les filtres pour retrouver vos affaires."
+                />
               )}
             </tbody>
           </table>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { STATUT_AFFAIRE, statut } from '@/lib/statuts';
 import { createPortal } from 'react-dom';
 import { useMutation } from '@tanstack/react-query';
 import { ChevronDown, Check } from 'lucide-react';
@@ -33,14 +34,21 @@ interface StatusLook {
   text: string;
 }
 
-const LOOK: Record<string, StatusLook> = {
-  open: { label: 'En cours', dot: '#64748b', bg: '#f1f5f9', border: '#cbd5e1', text: '#334155' },
-  sent: { label: 'Envoyé', dot: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8' },
-  won: { label: 'Gagné', dot: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', text: '#15803d' },
-  lost: { label: 'Perdu', dot: '#dc2626', bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' },
-  followup: { label: 'Relancé', dot: '#d97706', bg: '#fffbeb', border: '#fde68a', text: '#b45309' },
-  revision: { label: 'Révision', dot: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', text: '#6d28d9' },
+// Le libellé vient du registre des statuts ; seules les teintes du sélecteur sont propres à ce
+// contrôle (pastille de couleur), pour qu'un statut ne se dise jamais autrement ici qu'ailleurs.
+const TEINTES: Record<string, Omit<StatusLook, 'label'>> = {
+  open: { dot: '#64748b', bg: '#f1f5f9', border: '#cbd5e1', text: '#334155' },
+  sent: { dot: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8' },
+  won: { dot: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', text: '#15803d' },
+  lost: { dot: '#dc2626', bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' },
+  followup: { dot: '#d97706', bg: '#fffbeb', border: '#fde68a', text: '#b45309' },
+  revision: { dot: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', text: '#6d28d9' },
 };
+const LOOK: Record<string, StatusLook> = Object.fromEntries(
+  Object.entries(TEINTES).map(([code, teinte]) => [
+    code, { ...teinte, label: statut(STATUT_AFFAIRE, code).label },
+  ]),
+);
 
 const fallback = (s: string): StatusLook => ({
   label: s, dot: '#94a3b8', bg: '#f8fafc', border: '#e2e8f0', text: '#475569',

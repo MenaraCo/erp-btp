@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
+import { STATUT_AFFAIRE, statut } from '@/lib/statuts';
+import { Badge, BadgeStatut } from '@/components/ui';
 import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
 import { downloadStyledXlsx, SheetCell, StyleKey } from '@/lib/xlsx';
@@ -14,12 +16,7 @@ interface DevisRow {
   totals: DevisTotals | null;
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  won: 'Gagné', lost: 'Perdu', sent: 'Envoyé',
-  open: 'En cours', followup: 'Relancé', revision: 'Révision',
-};
-const badgeClass = (s: string) =>
-  s === 'won' ? 'badge success' : s === 'lost' ? 'badge danger' : s === 'sent' ? 'badge info' : 'badge';
+
 const pv = (d: DevisRow) => Number(d.totals?.pvHt ?? 0);
 const deb = (d: DevisRow) => Number(d.totals?.debourse ?? 0);
 
@@ -170,7 +167,7 @@ export default function DashboardPage() {
                 <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#64748b' }}>
                   {d.totals ? `${d.totals.margeNettePct} %` : '—'}
                 </td>
-                <td><span className={badgeClass(d.status)}>{STATUS_LABEL[d.status] ?? d.status}</span></td>
+                <td><BadgeStatut statut={statut(STATUT_AFFAIRE, d.status)} /></td>
               </tr>
             ))}
           </tbody>
@@ -232,7 +229,7 @@ function Echeances({ affaires }: { affaires: Echeance[] }) {
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <div className="form-section-title" style={{ margin: 0 }}>Prochaines échéances</div>
-        {enRetard > 0 && <span className="badge danger">{enRetard} en retard</span>}
+        {enRetard > 0 && <Badge ton="danger">{enRetard} en retard</Badge>}
       </div>
       {attendues.length === 0 ? (
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
@@ -364,7 +361,7 @@ function exportSynthese(
       { v: d.numero ?? '', s: 'num' },
       { v: `${d.affaire_code} — ${d.affaire_name}`, s: 'text' },
       { v: d.designation ?? '', s: 'text' },
-      { v: STATUS_LABEL[d.status] ?? d.status, s: 'text' },
+      { v: statut(STATUT_AFFAIRE, d.status).label, s: 'text' },
       { v: Number(d.totals?.debourse ?? 0), s: 'money' },
       { v: Number(d.totals?.pvHt ?? 0), s: 'money' },
       { v: Number(d.totals?.margeNette ?? 0), s: 'money' },

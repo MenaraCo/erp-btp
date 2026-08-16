@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
+import { CalendarRange } from 'lucide-react';
+import { LigneVide } from '@/components/ui';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
 
@@ -125,7 +127,12 @@ export default function MensuelPage() {
                   </tr>
                 ))}
                 {rows.length === 0 && (
-                  <tr><td colSpan={7} className="muted" style={{ padding: 16 }}>Aucun mouvement sur la période.</td></tr>
+                  <LigneVide
+                    colonnes={7}
+                    icone={CalendarRange}
+                    titre="Aucun mouvement sur la période."
+                    indice="Les pointages, achats et factures du mois alimentent ce relevé."
+                  />
                 )}
                 {d && (
                   <tr style={{ borderTop: '2px solid var(--border)', fontWeight: 700 }}>
