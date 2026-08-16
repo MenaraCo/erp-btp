@@ -19,7 +19,37 @@ export interface EmployeeInput {
   /** Poste analytique par défaut : c'est là que ses heures s'imputeront. */
   codeAnalytiqueId?: string | null;
   active?: boolean;
+  /* — Administratif : ce qu'on cherche en ouvrant un dossier — */
+  dateEntree?: string | null;
+  dateSortie?: string | null;
+  dateNaissance?: string | null;
+  numeroSecu?: string | null;
+  telephone?: string | null;
+  email?: string | null;
+  adresse?: string | null;
+  codePostal?: string | null;
+  ville?: string | null;
+  qualification?: string | null;
+  /** Dernière visite médicale : périmée, elle interdit le chantier. */
+  dateVisiteMedicale?: string | null;
+  commentaire?: string | null;
 }
+
+/** Champs administratifs : même traitement partout, donc une seule liste. */
+const CHAMPS_ADMIN = [
+  ['dateEntree', 'date_entree'],
+  ['dateSortie', 'date_sortie'],
+  ['dateNaissance', 'date_naissance'],
+  ['numeroSecu', 'numero_secu'],
+  ['telephone', 'telephone'],
+  ['email', 'email'],
+  ['adresse', 'adresse'],
+  ['codePostal', 'code_postal'],
+  ['ville', 'ville'],
+  ['qualification', 'qualification'],
+  ['dateVisiteMedicale', 'date_visite_medicale'],
+  ['commentaire', 'commentaire'],
+] as const;
 
 export interface EmployeeRow {
   id: string;
@@ -34,6 +64,18 @@ export interface EmployeeRow {
   codeAnalytiqueId: string | null;
   codeAnalytique: string | null;
   active: boolean;
+  dateEntree: string | null;
+  dateSortie: string | null;
+  dateNaissance: string | null;
+  numeroSecu: string | null;
+  telephone: string | null;
+  email: string | null;
+  adresse: string | null;
+  codePostal: string | null;
+  ville: string | null;
+  qualification: string | null;
+  dateVisiteMedicale: string | null;
+  commentaire: string | null;
 }
 
 const CONTRACTS: ContractType[] = ['salarie', 'interimaire', 'apprenti'];
@@ -62,6 +104,9 @@ export class EmployeeService {
       const rows = await em.query(
         `SELECT e.id, e.code, e.first_name, e.last_name, e.job_title, e.hourly_cost,
                 e.contract_type, e.agency, e.code_analytique_id, e.active,
+                e.date_entree::text, e.date_sortie::text, e.date_naissance::text,
+                e.numero_secu, e.telephone, e.email, e.adresse, e.code_postal, e.ville,
+                e.qualification, e.date_visite_medicale::text, e.commentaire,
                 a.code AS code_analytique
            FROM employee e
            LEFT JOIN analytical_code a ON a.id = e.code_analytique_id
@@ -84,10 +129,16 @@ export class EmployeeService {
       const rows = await em.query(
         `INSERT INTO employee
            (tenant_id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency,
-            code_analytique_id, active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            code_analytique_id, active,
+            date_entree, date_sortie, date_naissance, numero_secu, telephone, email,
+            adresse, code_postal, ville, qualification, date_visite_medicale, commentaire)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
          RETURNING id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency,
-                   code_analytique_id, active`,
+                   code_analytique_id, active,
+                   date_entree::text, date_sortie::text, date_naissance::text, numero_secu,
+                   telephone, email, adresse, code_postal, ville, qualification,
+                   date_visite_medicale::text, commentaire`,
         [
           tenantId,
           code,
@@ -99,6 +150,7 @@ export class EmployeeService {
           (input.agency ?? '').trim() || null,
           input.codeAnalytiqueId ?? null,
           input.active ?? true,
+          ...CHAMPS_ADMIN.map(([cle]) => texte(input[cle])),
         ],
       );
       return toRow(rows[0]);
@@ -121,10 +173,16 @@ export class EmployeeService {
         `UPDATE employee
             SET first_name = $2, last_name = $3, job_title = $4, hourly_cost = $5,
                 contract_type = $6, agency = $7, code_analytique_id = $8, active = $9,
+                date_entree = $10, date_sortie = $11, date_naissance = $12, numero_secu = $13,
+                telephone = $14, email = $15, adresse = $16, code_postal = $17, ville = $18,
+                qualification = $19, date_visite_medicale = $20, commentaire = $21,
                 updated_at = now()
           WHERE id = $1
           RETURNING id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency,
-                    code_analytique_id, active`,
+                    code_analytique_id, active,
+                    date_entree::text, date_sortie::text, date_naissance::text, numero_secu,
+                    telephone, email, adresse, code_postal, ville, qualification,
+                    date_visite_medicale::text, commentaire`,
         [
           id,
           input.firstName === undefined ? current.first_name : (input.firstName ?? '').trim() || null,
@@ -135,6 +193,9 @@ export class EmployeeService {
           input.agency === undefined ? current.agency : (input.agency ?? '').trim() || null,
           input.codeAnalytiqueId === undefined ? current.code_analytique_id : input.codeAnalytiqueId,
           input.active === undefined ? current.active : input.active,
+          // Un champ absent du corps de la requête n'est pas un champ vidé : on garde l'existant.
+          ...CHAMPS_ADMIN.map(([cle, colonne]) =>
+            input[cle] === undefined ? current[colonne] : texte(input[cle])),
         ],
       );
       return toRow(rows[0]);
@@ -171,6 +232,12 @@ export class EmployeeService {
   }
 }
 
+/** Chaîne nettoyée, ou null : une case vide ne vaut pas une chaîne vide en base. */
+function texte(v: string | null | undefined): string | null {
+  const s = (v ?? '').trim();
+  return s === '' ? null : s;
+}
+
 function check(v: string | number | undefined): string {
   const d = new Decimal(v ?? 0);
   if (d.isNegative()) throw new BadRequestException('Le coût horaire ne peut pas être négatif.');
@@ -185,24 +252,37 @@ function checkContract(v: ContractType | undefined): ContractType {
   return v;
 }
 
-function toRow(r: {
-  id: string; code: string; first_name: string | null; last_name: string;
-  job_title: string | null; hourly_cost: string; contract_type: ContractType;
-  agency: string | null; code_analytique_id: string | null; code_analytique?: string | null;
-  active: boolean;
-}): EmployeeRow {
+type LigneBrute = Record<string, string | boolean | null | undefined>;
+
+function chaine(v: string | boolean | null | undefined): string | null {
+  return v == null ? null : String(v);
+}
+
+function toRow(r: LigneBrute): EmployeeRow {
   return {
-    id: r.id,
-    code: r.code,
-    firstName: r.first_name,
-    lastName: r.last_name,
+    id: String(r.id),
+    code: String(r.code),
+    firstName: chaine(r.first_name),
+    lastName: String(r.last_name),
     fullName: [r.first_name, r.last_name].filter(Boolean).join(' '),
-    jobTitle: r.job_title,
-    hourlyCost: r.hourly_cost,
-    contractType: r.contract_type,
-    agency: r.agency,
-    codeAnalytiqueId: r.code_analytique_id,
-    codeAnalytique: r.code_analytique ?? null,
-    active: r.active,
+    jobTitle: chaine(r.job_title),
+    hourlyCost: String(r.hourly_cost),
+    contractType: r.contract_type as ContractType,
+    agency: chaine(r.agency),
+    codeAnalytiqueId: chaine(r.code_analytique_id),
+    codeAnalytique: chaine(r.code_analytique),
+    active: Boolean(r.active),
+    dateEntree: chaine(r.date_entree),
+    dateSortie: chaine(r.date_sortie),
+    dateNaissance: chaine(r.date_naissance),
+    numeroSecu: chaine(r.numero_secu),
+    telephone: chaine(r.telephone),
+    email: chaine(r.email),
+    adresse: chaine(r.adresse),
+    codePostal: chaine(r.code_postal),
+    ville: chaine(r.ville),
+    qualification: chaine(r.qualification),
+    dateVisiteMedicale: chaine(r.date_visite_medicale),
+    commentaire: chaine(r.commentaire),
   };
 }

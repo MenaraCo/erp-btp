@@ -13,8 +13,10 @@ import { STATUT_RELEVE, statut } from '@/lib/statuts';
 import { Alerte, Badge, BadgeStatut, Bouton, CarteKpi, EtatVide } from '@/components/ui';
 import { Camembert } from '@/components/Graphiques';
 import { Modale } from '@/components/Modale';
+import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
+import { Rubrique as RubriquePaye, RubriqueModal } from '@/components/RubriqueModal';
 
-interface Rubrique { id: string; code: string; label: string; type: string; unite: string; montant_unitaire: string }
+type Rubrique = RubriquePaye;
 interface LigneRubrique {
   id: string;
   rubrique_id: string;
@@ -28,6 +30,8 @@ interface LigneRubrique {
   origine: 'auto' | 'manuel';
   commentaire: string | null;
   chantier_code: string | null;
+  code_analytique_id: string | null;
+  code_analytique: string | null;
 }
 interface Releve {
   salarie: { id: string; code: string; first_name: string | null; last_name: string; job_title: string | null; hourly_cost: string };
@@ -48,6 +52,8 @@ interface Releve {
   }>;
   absences: Array<{ kind: string; heures: string; jours: number }>;
   lignes: LigneRubrique[];
+  /** Lignes sans poste analytique : elles n'entreraient dans aucun tableau de bord. */
+  sansCodeAnalytique: number;
   modifiable: boolean;
 }
 
@@ -75,13 +81,22 @@ export default function RelevePage() {
 
   const [err, setErr] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
-  const [ajout, setAjout] = useState<{ rubriqueId: string; quantite: string; montant: string } | null>(null);
+  const [rubriqueOuverte, setRubriqueOuverte] = useState<Rubrique | null>(null);
+  const [ajout, setAjout] = useState<
+    { rubriqueId: string; quantite: string; montant: string; chantierId: string; codeAnalytiqueId: string | null }
+    | null>(null);
 
   const releve = useQuery({
     queryKey: ['paye-releve', employeeId, mois],
     enabled: Boolean(token),
     retry: false,
     queryFn: () => apiFetch<Releve>(`/paye/releves/${employeeId}?mois=${mois}`, { token }),
+  });
+  const codesAnalytiques = useQuery({
+    queryKey: ['params-codes'],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<CodeAnalytique[]>('/params/codes', { token }),
   });
   const rubriques = useQuery({
     queryKey: ['paye-rubriques', false],
@@ -114,7 +129,10 @@ export default function RelevePage() {
     onSuccess: () => { setErr(null); rafraichir(); }, onError: echoue,
   });
   const ajouterLigne = useMutation({
-    mutationFn: (l: { rubriqueId: string; quantite: string; montantUnitaire: string }) =>
+    mutationFn: (l: {
+      rubriqueId: string; quantite: string; montantUnitaire: string;
+      chantierId: string | null; codeAnalytiqueId: string | null;
+    }) =>
       apiFetch(`/paye/releves/${employeeId}/lignes?mois=${mois}`, { method: 'POST', token, body: l }),
     onSuccess: () => { setErr(null); setAjout(null); rafraichir(); }, onError: echoue,
   });
@@ -233,6 +251,14 @@ export default function RelevePage() {
             </div>
           </div>
 
+          {r.sansCodeAnalytique > 0 && (
+            <Alerte ton="info">
+              {r.sansCodeAnalytique} ligne{r.sansCodeAnalytique > 1 ? 's' : ''} sans poste
+              analytique : {r.sansCodeAnalytique > 1 ? 'elles n’entreront' : 'elle n’entrera'} dans
+              aucun tableau de bord de gestion. Renseignez le code sur la rubrique, ou sur la ligne.
+            </Alerte>
+          )}
+
           <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
               <strong style={{ fontSize: 13 }}>Éléments variables</strong>
@@ -249,6 +275,8 @@ export default function RelevePage() {
                       rubriqueId: rubriques.data?.[0]?.id ?? '',
                       quantite: '1',
                       montant: rubriques.data?.[0]?.montant_unitaire ?? '0',
+                      chantierId: r.heuresParChantier[0]?.chantier_id ?? '',
+                      codeAnalytiqueId: rubriques.data?.[0]?.code_analytique_id ?? null,
                     })}
                     disabled={!rubriques.data?.length}
                   >
@@ -266,6 +294,7 @@ export default function RelevePage() {
                   <th style={{ width: 60 }}>Unité</th>
                   <th style={{ width: 110, textAlign: 'right' }}>PU</th>
                   <th style={{ width: 120, textAlign: 'right' }}>Montant</th>
+                  <th style={{ width: 130 }}>Chantier · poste</th>
                   <th style={{ width: 90 }}>Origine</th>
                   <th style={{ width: 40 }} />
                 </tr>
@@ -273,7 +302,21 @@ export default function RelevePage() {
               <tbody>
                 {r.lignes.map((l) => (
                   <tr key={l.id}>
-                    <td className="code-cell">{l.code}</td>
+                    <td>
+                      {/* Le montant d'une rubrique se corrige ici, là où l'erreur se voit,
+                          sans repasser par le paramétrage. */}
+                      <button
+                        className="btn-ghost code-cell"
+                        title="Ouvrir la rubrique"
+                        style={{ padding: 0 }}
+                        onClick={() => {
+                          const rub = rubriques.data?.find((x) => x.id === l.rubrique_id);
+                          if (rub) setRubriqueOuverte(rub);
+                        }}
+                      >
+                        {l.code}
+                      </button>
+                    </td>
                     <td>
                       {l.label}
                       {l.commentaire && <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>{l.commentaire}</span>}
@@ -282,6 +325,13 @@ export default function RelevePage() {
                     <td className="muted">{l.unite}</td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(l.montant_unitaire)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{euro(l.montant)}</td>
+                    <td style={{ fontSize: 11 }}>
+                      {l.chantier_code ?? <span className="muted">hors chantier</span>}
+                      {' · '}
+                      {l.code_analytique
+                        ? <span className="code-cell">{l.code_analytique}</span>
+                        : <span style={{ color: 'var(--danger)' }}>sans poste</span>}
+                    </td>
                     <td>
                       <Badge ton={l.origine === 'auto' ? 'info' : 'neutre'}>
                         {l.origine === 'auto' ? 'Calculé' : 'Saisi'}
@@ -297,7 +347,7 @@ export default function RelevePage() {
                   </tr>
                 ))}
                 {r.lignes.length === 0 && (
-                  <tr><td colSpan={8} style={{ padding: 0 }}>
+                  <tr><td colSpan={9} style={{ padding: 0 }}>
                     <EtatVide
                       icone={Calculator}
                       titre="Aucun élément variable."
@@ -309,6 +359,13 @@ export default function RelevePage() {
             </table>
           </div>
         </>
+      )}
+
+      {rubriqueOuverte && (
+        <RubriqueModal
+          rubrique={rubriqueOuverte}
+          onClose={() => { setRubriqueOuverte(null); rafraichir(); }}
+        />
       )}
 
       {signature !== null && (
@@ -348,6 +405,7 @@ export default function RelevePage() {
               chargement={ajouterLigne.isPending}
               onClick={() => ajouterLigne.mutate({
                 rubriqueId: ajout.rubriqueId, quantite: ajout.quantite, montantUnitaire: ajout.montant,
+                chantierId: ajout.chantierId || null, codeAnalytiqueId: ajout.codeAnalytiqueId,
               })}
             >
               Ajouter
@@ -360,13 +418,38 @@ export default function RelevePage() {
               value={ajout.rubriqueId}
               onChange={(ev) => {
                 const rub = rubriques.data?.find((x) => x.id === ev.target.value);
-                setAjout({ ...ajout, rubriqueId: ev.target.value, montant: rub?.montant_unitaire ?? ajout.montant });
+                setAjout({
+                  ...ajout,
+                  rubriqueId: ev.target.value,
+                  montant: rub?.montant_unitaire ?? ajout.montant,
+                  // Le poste suit la rubrique choisie : c'est le cas courant, et il reste modifiable.
+                  codeAnalytiqueId: rub?.code_analytique_id ?? ajout.codeAnalytiqueId,
+                });
               }}
             >
               {(rubriques.data ?? []).map((x) => (
                 <option key={x.id} value={x.id}>{x.code} — {x.label}</option>
               ))}
             </select>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div className="field" style={{ flex: 1 }}>
+              <label>Chantier</label>
+              <select value={ajout.chantierId} onChange={(ev) => setAjout({ ...ajout, chantierId: ev.target.value })}>
+                <option value="">Hors chantier</option>
+                {(r?.heuresParChantier ?? []).map((h) => (
+                  <option key={h.chantier_id} value={h.chantier_id}>{h.chantier_code}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field" style={{ flex: 1 }}>
+              <label>Code analytique</label>
+              <SelectCodeAnalytique
+                valeur={ajout.codeAnalytiqueId}
+                codes={codesAnalytiques.data ?? []}
+                onChange={(id) => setAjout({ ...ajout, codeAnalytiqueId: id })}
+              />
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <div className="field" style={{ flex: 1 }}>

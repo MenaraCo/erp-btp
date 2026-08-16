@@ -2,35 +2,32 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
+import { Pencil, Plus, Stethoscope, Trash2, Users } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
+import { Alerte, Badge, Bouton, LigneVide } from '@/components/ui';
+import { Salarie, SalarieModal, visiteAExpirer } from '@/components/SalarieModal';
 
-interface Employee {
-  id: string;
-  code: string;
-  firstName: string | null;
-  lastName: string;
-  fullName: string;
-  jobTitle: string | null;
-  hourlyCost: string;
-  contractType: 'salarie' | 'interimaire' | 'apprenti';
-  active: boolean;
-}
-
-const CONTRATS: Record<Employee['contractType'], string> = {
+const CONTRATS: Record<Salarie['contractType'], string> = {
   salarie: 'Salarié',
   interimaire: 'Intérimaire',
   apprenti: 'Apprenti',
 };
 
+function jour(v: string | null): string {
+  return v ? new Date(v).toLocaleDateString('fr-FR') : '—';
+}
+
 /**
- * Fichier des salariés du suivi de chantiers.
+ * Fichier des salariés.
  *
- * Le pointage s'appuyait sur un nom tapé à la main : deux orthographes créaient deux personnes et
- * le coût horaire était ressaisi — donc parfois faux. La fiche porte le COÛT HORAIRE DE REVIENT
- * (ce que l'heure coûte à l'entreprise), repris automatiquement à la saisie des heures.
+ * La fiche s'ouvre en fenêtre, à la création COMME à la modification : une adresse change, une
+ * visite médicale se refait, un coût horaire est révisé. Auparavant il fallait supprimer puis
+ * recréer — donc perdre le matricule et le lien avec les heures déjà pointées.
+ *
+ * Le <strong>coût horaire</strong> est celui de revient (ce que l'heure coûte à l'entreprise,
+ * charges comprises), pas le salaire brut : c'est lui qui alimente le réalisé main-d'œuvre.
  */
 export default function SalariesPage() {
   const { token } = useAuth();
@@ -38,42 +35,14 @@ export default function SalariesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [tous, setTous] = useState(false);
   const [aSupprimer, setASupprimer] = useState<string | null>(null);
-
-  const [lastName, setLastName] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [jobTitle, setJobTitle] = useState('');
-  const [hourlyCost, setHourlyCost] = useState('');
-  const [contractType, setContractType] = useState<Employee['contractType']>('salarie');
+  const [fiche, setFiche] = useState<Salarie | null | undefined>(undefined);
 
   const liste = useQuery({
     queryKey: ['employees', tous],
     enabled: Boolean(token),
-    queryFn: () => apiFetch<Employee[]>(`/employees${tous ? '?tous=1' : ''}`, { token }),
+    queryFn: () => apiFetch<Salarie[]>(`/employees${tous ? '?tous=1' : ''}`, { token }),
   });
-
   const rafraichir = () => qc.invalidateQueries({ queryKey: ['employees'] });
-
-  const creer = useMutation({
-    mutationFn: () =>
-      apiFetch('/employees', {
-        method: 'POST',
-        token,
-        body: { lastName, firstName, jobTitle, hourlyCost: hourlyCost || '0', contractType },
-      }),
-    onSuccess: () => {
-      setErr(null);
-      setLastName(''); setFirstName(''); setJobTitle(''); setHourlyCost('');
-      rafraichir();
-    },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Création impossible'),
-  });
-
-  const modifier = useMutation({
-    mutationFn: (v: { id: string; patch: Partial<Employee> }) =>
-      apiFetch(`/employees/${v.id}`, { method: 'PATCH', token, body: v.patch }),
-    onSuccess: () => { setErr(null); rafraichir(); },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Modification impossible'),
-  });
 
   const supprimer = useMutation({
     mutationFn: (id: string) => apiFetch<{ deactivated: boolean }>(`/employees/${id}`, { method: 'DELETE', token }),
@@ -87,117 +56,125 @@ export default function SalariesPage() {
     onError: (e) => { setASupprimer(null); setErr(e instanceof ApiError ? e.message : 'Suppression impossible'); },
   });
 
-  const valide = lastName.trim() !== '';
+  const aVisiteExpiree = (liste.data ?? []).filter((e) => e.active && visiteAExpirer(e.dateVisiteMedicale));
 
   return (
     <div>
-      <h1 style={{ marginBottom: 4 }}>Salariés</h1>
-      <p className="muted" style={{ marginTop: 0, maxWidth: 720 }}>
-        Le fichier des personnes qui pointent sur vos chantiers. Le <strong>coût horaire</strong> est
-        celui de revient — ce que l’heure coûte à l’entreprise, charges comprises — et non le salaire
-        brut : c’est lui qui alimente le réalisé main-d’œuvre.
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Users size={20} /> Salariés
+        </h1>
+        <span style={{ marginLeft: 'auto' }}>
+          <Bouton icone={Plus} onClick={() => { setErr(null); setFiche(null); }}>Nouveau salarié</Bouton>
+        </span>
+      </div>
+      <p className="muted" style={{ marginTop: 4, maxWidth: 780 }}>
+        Le fichier des personnes qui pointent sur vos chantiers. Cliquez une ligne pour ouvrir sa
+        fiche : identité, contrat, coordonnées, visite médicale. Le <strong>coût horaire</strong> est
+        celui de revient — ce que l’heure coûte à l’entreprise — et non le salaire brut.
       </p>
 
-      {err && <div className="error" style={{ marginTop: 12 }}>{err}</div>}
+      {err && <Alerte>{err}</Alerte>}
+      {aVisiteExpiree.length > 0 && (
+        <Alerte ton="info">
+          <Stethoscope size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+          {aVisiteExpiree.length} salarié{aVisiteExpiree.length > 1 ? 's ont' : ' a'} une visite
+          médicale de plus de deux ans : {aVisiteExpiree.map((e) => e.lastName).join(', ')}.
+        </Alerte>
+      )}
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <h2 style={{ marginTop: 0 }}>Ajouter un salarié</h2>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Nom</label>
-            <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Dubois" />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Prénom</label>
-            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Marc" />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Qualification</label>
-            <input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="Maçon, chef d’équipe…" />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Coût horaire (€)</label>
-            <input type="number" min={0} step="0.01" value={hourlyCost}
-              onChange={(e) => setHourlyCost(e.target.value)}
-              style={{ width: 110, textAlign: 'right' }} />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Contrat</label>
-            <select value={contractType} onChange={(e) => setContractType(e.target.value as Employee['contractType'])}>
-              {Object.entries(CONTRATS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </div>
-          <button className="btn" disabled={!valide || creer.isPending} onClick={() => creer.mutate()}>
-            {creer.isPending ? 'Ajout…' : '+ Ajouter'}
-          </button>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+        <label className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          <input type="checkbox" checked={tous} onChange={(e) => setTous(e.target.checked)} />
+          Afficher aussi les inactifs
+        </label>
+        <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>
+          {liste.data ? `${liste.data.length} salarié${liste.data.length > 1 ? 's' : ''}` : 'Chargement…'}
+        </span>
       </div>
 
-      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
-          <h2 style={{ margin: 0 }}>
-            {liste.data ? `${liste.data.length} salarié${liste.data.length > 1 ? 's' : ''}` : 'Chargement…'}
-          </h2>
-          <label className="muted" style={{ fontSize: 12, marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            <input type="checkbox" checked={tous} onChange={(e) => setTous(e.target.checked)} />
-            Afficher aussi les inactifs
-          </label>
-        </div>
-        {liste.data && liste.data.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="grid" style={{ margin: 0, minWidth: 720 }}>
-              <thead>
-                <tr>
-                  <th>Code</th><th>Salarié</th><th>Qualification</th><th>Contrat</th>
-                  <th style={{ textAlign: 'right' }}>Coût horaire</th><th>État</th><th />
-                </tr>
-              </thead>
-              <tbody>
-                {liste.data.map((e) => (
-                  <tr key={e.id} style={{ opacity: e.active ? 1 : 0.55 }}>
-                    <td className="code-cell">{e.code}</td>
-                    <td>{e.fullName}</td>
-                    <td className="muted">{e.jobTitle ?? '—'}</td>
-                    <td className="muted">{CONTRATS[e.contractType]}</td>
-                    <td style={{ textAlign: 'right' }}>{euro(Number(e.hourlyCost))}</td>
-                    <td>
-                      <button
-                        className="btn-ghost"
-                        style={{ fontSize: 11 }}
-                        onClick={() => modifier.mutate({ id: e.id, patch: { active: !e.active } })}
-                      >
-                        {e.active ? 'Actif' : 'Inactif'}
-                      </button>
-                    </td>
-                    <td style={{ textAlign: 'right', width: 150 }}>
-                      {/* Confirmation en ligne : la fenêtre système du navigateur est bloquée ici. */}
-                      {aSupprimer === e.id ? (
-                        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                          <button className="btn btn-danger" style={{ padding: '2px 8px', fontSize: 11 }}
-                            disabled={supprimer.isPending}
-                            onClick={() => supprimer.mutate(e.id)}>
-                            Supprimer ?
-                          </button>
-                          <button className="link" type="button" onClick={() => setASupprimer(null)}>✕</button>
-                        </span>
-                      ) : (
-                        <button className="btn-ghost" title="Retirer ce salarié" onClick={() => { setErr(null); setASupprimer(e.id); }}>
-                          <Trash2 size={14} />
+      <div className="card" style={{ marginTop: 8, padding: 0, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="grid" style={{ margin: 0, minWidth: 860 }}>
+            <thead>
+              <tr>
+                <th style={{ width: 90 }}>Matricule</th>
+                <th>Salarié</th>
+                <th style={{ width: 150 }}>Poste</th>
+                <th style={{ width: 90 }}>Qualif.</th>
+                <th style={{ width: 110 }}>Contrat</th>
+                <th style={{ width: 110 }}>Entré le</th>
+                <th style={{ width: 120 }}>Visite méd.</th>
+                <th style={{ width: 110, textAlign: 'right' }}>Coût horaire</th>
+                <th style={{ width: 80 }}>État</th>
+                <th style={{ width: 90 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {(liste.data ?? []).map((e) => (
+                <tr
+                  key={e.id}
+                  style={{ opacity: e.active ? 1 : 0.55, cursor: 'pointer' }}
+                  onClick={() => { setErr(null); setFiche(e); }}
+                  onMouseEnter={(ev) => { ev.currentTarget.style.background = 'var(--surface)'; }}
+                  onMouseLeave={(ev) => { ev.currentTarget.style.background = ''; }}
+                >
+                  <td className="code-cell">{e.code}</td>
+                  <td>
+                    {e.lastName} {e.firstName}
+                    {e.telephone && <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>{e.telephone}</span>}
+                  </td>
+                  <td className="muted">{e.jobTitle ?? '—'}</td>
+                  <td className="muted">{e.qualification ?? '—'}</td>
+                  <td className="muted">{CONTRATS[e.contractType]}</td>
+                  <td className="muted">{jour(e.dateEntree)}</td>
+                  <td style={{ color: visiteAExpirer(e.dateVisiteMedicale) ? 'var(--danger)' : undefined }}>
+                    {jour(e.dateVisiteMedicale)}
+                  </td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {euro(Number(e.hourlyCost))}
+                  </td>
+                  <td><Badge ton={e.active ? 'succes' : 'neutre'}>{e.active ? 'Actif' : 'Inactif'}</Badge></td>
+                  <td style={{ textAlign: 'right' }} onClick={(ev) => ev.stopPropagation()}>
+                    {/* Confirmation en ligne : la fenêtre système du navigateur est bloquée ici. */}
+                    {aSupprimer === e.id ? (
+                      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <button className="btn btn-danger" style={{ padding: '2px 8px', fontSize: 11 }}
+                          disabled={supprimer.isPending}
+                          onClick={() => supprimer.mutate(e.id)}>
+                          Supprimer ?
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {liste.data && liste.data.length === 0 && (
-          <p className="muted" style={{ padding: 16, margin: 0 }}>
-            Aucun salarié pour l’instant. Ajoutez-en un ci-dessus : il sera proposé à la saisie des heures.
-          </p>
-        )}
+                        <button className="link" type="button" onClick={() => setASupprimer(null)}>✕</button>
+                      </span>
+                    ) : (
+                      <>
+                        <button className="btn-ghost" title="Ouvrir la fiche" onClick={() => setFiche(e)}>
+                          <Pencil size={13} />
+                        </button>
+                        <button className="btn-ghost" title="Retirer ce salarié" onClick={() => { setErr(null); setASupprimer(e.id); }}>
+                          <Trash2 size={13} />
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {liste.data && liste.data.length === 0 && (
+                <LigneVide
+                  colonnes={10}
+                  icone={Users}
+                  titre="Aucun salarié pour l’instant."
+                  indice="« Nouveau salarié » ouvre sa fiche ; il sera ensuite proposé à la saisie des heures."
+                />
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      {fiche !== undefined && (
+        <SalarieModal salarie={fiche} onClose={() => { setFiche(undefined); rafraichir(); }} />
+      )}
     </div>
   );
 }

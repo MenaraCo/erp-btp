@@ -200,6 +200,22 @@ export class AnalyticalResultsService {
       if (new Decimal(r.montant ?? 0).isZero()) continue;
       this.dispatch(rows, siteOverhead, r.code_id, 'labor', 'realise', r.montant);
     }
+    // Éléments variables de paye (paniers, déplacements, primes, heures supplémentaires) : ils
+    // sont payés, donc ils sont réalisés. Les laisser dehors afficherait une marge flatteuse —
+    // sur une année, ces lignes pèsent des milliers d'euros par salarié.
+    const paye = await em.query(
+      `SELECT l.code_analytique_id AS code_id, r.nature,
+              SUM(l.montant)::numeric(16,2) AS montant
+         FROM payroll_line l
+         JOIN payroll_rubrique r ON r.id = l.rubrique_id
+        WHERE l.chantier_id = $1
+        GROUP BY l.code_analytique_id, r.nature`,
+      [chantierId],
+    );
+    for (const r of paye) {
+      if (new Decimal(r.montant ?? 0).isZero()) continue;
+      this.dispatch(rows, siteOverhead, r.code_id, r.nature ?? 'labor', 'realise', r.montant);
+    }
   }
 
   /**

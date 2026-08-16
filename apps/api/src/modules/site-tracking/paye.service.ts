@@ -17,6 +17,10 @@ export interface RubriqueInput {
   seuilFin?: string | number | null;
   majoration?: string | number | null;
   actif?: boolean;
+  /** Poste analytique par défaut de la rubrique — sans lui, la dépense sort des tableaux de bord. */
+  codeAnalytiqueId?: string | null;
+  /** Nature analytique : un panier est de la main-d'œuvre, pas un matériau. */
+  nature?: string | null;
 }
 
 export interface LigneManuelleInput {
@@ -24,6 +28,8 @@ export interface LigneManuelleInput {
   quantite: string | number;
   montantUnitaire?: string | number | null;
   chantierId?: string | null;
+  /** Remplace le code de la rubrique : une prime exceptionnelle n'a pas toujours le même poste. */
+  codeAnalytiqueId?: string | null;
   commentaire?: string | null;
 }
 
@@ -78,8 +84,9 @@ export class PayeService {
       const rows = await em.query(
         `INSERT INTO payroll_rubrique
            (tenant_id, code, label, type, unite, montant_unitaire,
-            seuil_debut, seuil_fin, majoration, actif, sort_order)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+            seuil_debut, seuil_fin, majoration, actif, sort_order,
+            code_analytique_id, nature)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
         [
           tenantId, code, input.label.trim(), input.type, input.unite ?? 'jour',
           String(input.montantUnitaire ?? 0),
@@ -87,6 +94,7 @@ export class PayeService {
           input.seuilFin != null ? String(input.seuilFin) : null,
           input.majoration != null ? String(input.majoration) : null,
           input.actif ?? true, rang,
+          input.codeAnalytiqueId ?? null, input.nature ?? 'labor',
         ],
       );
       return rows[0];
@@ -108,6 +116,8 @@ export class PayeService {
            seuil_fin = CASE WHEN $9::boolean THEN $10 ELSE seuil_fin END,
            majoration = CASE WHEN $11::boolean THEN $12 ELSE majoration END,
            actif = COALESCE($13, actif),
+           code_analytique_id = CASE WHEN $14::boolean THEN $15 ELSE code_analytique_id END,
+           nature = COALESCE($16, nature),
            updated_at = now()
          WHERE id = $1 RETURNING *`,
         [
@@ -121,6 +131,8 @@ export class PayeService {
           patch.seuilFin !== undefined, patch.seuilFin != null ? String(patch.seuilFin) : null,
           patch.majoration !== undefined, patch.majoration != null ? String(patch.majoration) : null,
           patch.actif ?? null,
+          patch.codeAnalytiqueId !== undefined, patch.codeAnalytiqueId ?? null,
+          patch.nature ?? null,
         ],
       );
       const ligne = Array.isArray(rows[0]) ? rows[0][0] : rows[0];
@@ -188,12 +200,14 @@ export class PayeService {
       );
 
       const lignes = await em.query(
-        `SELECT l.id, l.rubrique_id, r.code, r.label, r.type, r.unite,
+        `SELECT l.id, l.rubrique_id, r.code, r.label, r.type, r.unite, r.nature,
                 l.quantite, l.montant_unitaire, l.montant, l.origine, l.commentaire,
-                l.chantier_id, c.code AS chantier_code
+                l.chantier_id, c.code AS chantier_code,
+                l.code_analytique_id, ac.code AS code_analytique, ac.label AS code_analytique_label
            FROM payroll_line l
            JOIN payroll_rubrique r ON r.id = l.rubrique_id
            LEFT JOIN chantier c ON c.id = l.chantier_id
+           LEFT JOIN analytical_code ac ON ac.id = l.code_analytique_id
           WHERE l.employee_id = $1 AND l.mois = $2::date
           ORDER BY r.sort_order, r.code`,
         [employeeId, debut],
@@ -206,6 +220,10 @@ export class PayeService {
         heuresParChantier,
         absences,
         lignes,
+        // Une dépense sans poste analytique ne remonte dans aucun tableau de bord : on le dit ici
+        // plutôt que de laisser le trou se découvrir en fin de chantier.
+        sansCodeAnalytique: lignes.filter(
+          (l: Record<string, unknown>) => !l.code_analytique_id).length,
         modifiable: entete.statut === 'brouillon',
       };
     });
@@ -279,19 +297,41 @@ export class PayeService {
         `SELECT * FROM payroll_rubrique WHERE actif = true ORDER BY sort_order, code`,
       );
 
-      // Jours travaillés : un jour compte dès qu'une heure y est pointée, quel que soit le chantier.
-      const jours = Number((await em.query(
-        `SELECT COUNT(DISTINCT work_date)::int AS n FROM timesheet
-          WHERE employee_id = $1 AND hours > 0
-            AND work_date >= $2::date AND work_date < ($2::date + INTERVAL '1 month')`,
+      // Chaque journée est attribuée au chantier où elle s'est majoritairement faite : un panier
+      // par jour, jamais un par chantier visité — sinon la dépense doublerait.
+      const joursParChantier: Array<{ chantier_id: string; jours: number }> = await em.query(
+        `WITH jour AS (
+           SELECT t.work_date, t.chantier_id,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY t.work_date ORDER BY SUM(t.hours) DESC, t.chantier_id
+                  ) AS rang
+             FROM timesheet t
+            WHERE t.employee_id = $1 AND t.hours > 0
+              AND t.work_date >= $2::date AND t.work_date < ($2::date + INTERVAL '1 month')
+            GROUP BY t.work_date, t.chantier_id
+         )
+         SELECT chantier_id, COUNT(*)::int AS jours FROM jour WHERE rang = 1
+          GROUP BY chantier_id ORDER BY COUNT(*) DESC, chantier_id`,
         [employeeId, debut],
-      ))[0]?.n ?? 0);
+      );
+      const heuresParChantier: Array<{ chantier_id: string; heures: string }> = await em.query(
+        `SELECT chantier_id, SUM(hours)::numeric(10,2) AS heures FROM timesheet
+          WHERE employee_id = $1
+            AND work_date >= $2::date AND work_date < ($2::date + INTERVAL '1 month')
+          GROUP BY chantier_id ORDER BY SUM(hours) DESC, chantier_id`,
+        [employeeId, debut],
+      );
 
       const heuresSupParSemaine = await this.heuresSupParSemaine(em, employeeId, debut);
 
       for (const r of rubriques) {
-        if (AUTO_PAR_JOUR.includes(r.type) && jours > 0) {
-          await this.poserLigne(em, tenantId, employeeId, debut, r.id, jours, r.montant_unitaire, 'auto');
+        if (AUTO_PAR_JOUR.includes(r.type)) {
+          for (const j of joursParChantier) {
+            await this.poserLigne(
+              em, tenantId, employeeId, debut, r.id, j.jours, r.montant_unitaire, 'auto',
+              j.chantier_id, null, r.code_analytique_id ?? null,
+            );
+          }
         }
         if (r.type === 'heures_sup') {
           const heures = this.heuresDansLaTranche(heuresSupParSemaine, r);
@@ -301,9 +341,12 @@ export class PayeService {
             const pu = r.majoration != null
               ? new Decimal(String(salarie.hourly_cost)).times(String(r.majoration))
               : new Decimal(String(r.montant_unitaire));
-            await this.poserLigne(
-              em, tenantId, employeeId, debut, r.id, heures.toNumber(), pu.toFixed(4), 'auto',
-            );
+            for (const part of this.ventiler(heures, heuresParChantier)) {
+              await this.poserLigne(
+                em, tenantId, employeeId, debut, r.id, part.quantite.toNumber(), pu.toFixed(4),
+                'auto', part.chantierId, null, r.code_analytique_id ?? null,
+              );
+            }
           }
         }
       }
@@ -321,7 +364,8 @@ export class PayeService {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertModifiable(em, tenantId, employeeId, debut);
       const rubrique = (await em.query(
-        `SELECT id, montant_unitaire FROM payroll_rubrique WHERE id = $1`, [input.rubriqueId],
+        `SELECT id, montant_unitaire, code_analytique_id FROM payroll_rubrique WHERE id = $1`,
+        [input.rubriqueId],
       ))[0];
       if (!rubrique) throw new NotFoundException('Rubrique introuvable.');
 
@@ -330,6 +374,7 @@ export class PayeService {
       const ligne = await this.poserLigne(
         em, tenantId, employeeId, debut, rubrique.id, Number(input.quantite), pu, 'manuel',
         input.chantierId ?? null, input.commentaire ?? null,
+        input.codeAnalytiqueId ?? rubrique.code_analytique_id ?? null,
       );
       await this.rafraichirEntete(em, employeeId, debut, false);
       return ligne;
@@ -351,6 +396,7 @@ export class PayeService {
            montant_unitaire = COALESCE($3, montant_unitaire),
            chantier_id = CASE WHEN $4::boolean THEN $5 ELSE chantier_id END,
            commentaire = CASE WHEN $6::boolean THEN $7 ELSE commentaire END,
+           code_analytique_id = CASE WHEN $8::boolean THEN $9 ELSE code_analytique_id END,
            -- Une ligne retouchée devient manuelle : le prochain calcul ne doit pas l'effacer.
            origine = 'manuel',
            updated_at = now()
@@ -361,6 +407,7 @@ export class PayeService {
           patch.montantUnitaire != null ? String(patch.montantUnitaire) : null,
           patch.chantierId !== undefined, patch.chantierId ?? null,
           patch.commentaire !== undefined, patch.commentaire ?? null,
+          patch.codeAnalytiqueId !== undefined, patch.codeAnalytiqueId ?? null,
         ],
       );
       const ligne = Array.isArray(rows[0]) ? rows[0][0] : rows[0];
@@ -397,6 +444,18 @@ export class PayeService {
       const entete = await this.enteteOuBrouillon(em, tenantId, employeeId, debut);
       if (entete.statut === 'signe') {
         throw new ConflictException('Ce relevé est signé : il ne peut plus être modifié.');
+      }
+      // Même exigence que sur une commande : une dépense sans poste analytique n'apparaît dans
+      // aucun tableau de bord. On la bloque à la validation, pas après coup.
+      const sansCode = Number((await em.query(
+        `SELECT COUNT(*)::int AS n FROM payroll_line
+          WHERE employee_id = $1 AND mois = $2::date AND code_analytique_id IS NULL`,
+        [employeeId, debut],
+      ))[0]?.n ?? 0);
+      if (sansCode > 0) {
+        throw new BadRequestException(
+          `${sansCode} ligne(s) sans code analytique : renseignez-le avant de valider le relevé.`,
+        );
       }
       await this.rafraichirEntete(em, employeeId, debut, false);
       await em.query(
@@ -469,10 +528,13 @@ export class PayeService {
         `SELECT e.code AS matricule, e.last_name, e.first_name, e.contract_type,
                 COALESCE(r.statut, 'brouillon') AS statut,
                 rb.code AS rubrique, rb.label AS rubrique_label, rb.unite,
-                l.quantite, l.montant_unitaire, l.montant
+                l.quantite, l.montant_unitaire, l.montant,
+                ac.code AS code_analytique, c.code AS chantier
            FROM payroll_line l
            JOIN employee e ON e.id = l.employee_id
            JOIN payroll_rubrique rb ON rb.id = l.rubrique_id
+           LEFT JOIN analytical_code ac ON ac.id = l.code_analytique_id
+           LEFT JOIN chantier c ON c.id = l.chantier_id
            LEFT JOIN payroll_releve r ON r.employee_id = l.employee_id AND r.mois = l.mois
           WHERE l.mois = $1::date
           ORDER BY e.last_name, e.first_name, rb.sort_order, rb.code`,
@@ -495,23 +557,25 @@ export class PayeService {
         return s.includes(';') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
       };
       const out: string[] = [
-        'Matricule;Nom;Prénom;Contrat;Mois;Type;Code;Libellé;Unité;Quantité;PU;Montant;Statut',
+        'Matricule;Nom;Prénom;Contrat;Mois;Type;Code;Libellé;Unité;Quantité;PU;Montant;'
+        + 'Chantier;Code analytique;Statut',
       ];
       for (const h of heures) {
         out.push([
           champ(h.matricule), champ(h.last_name), champ(h.first_name), '', mois,
-          'HEURES', 'H', 'Heures travaillées', 'heure', nb(h.heures), '', '', '',
+          'HEURES', 'H', 'Heures travaillées', 'heure', nb(h.heures), '', '', '', '', '',
         ].join(';'));
         out.push([
           champ(h.matricule), champ(h.last_name), champ(h.first_name), '', mois,
-          'HEURES', 'J', 'Jours travaillés', 'jour', nb(h.jours), '', '', '',
+          'HEURES', 'J', 'Jours travaillés', 'jour', nb(h.jours), '', '', '', '', '',
         ].join(';'));
       }
       for (const l of lignes) {
         out.push([
           champ(l.matricule), champ(l.last_name), champ(l.first_name), champ(l.contract_type), mois,
           'RUBRIQUE', champ(l.rubrique), champ(l.rubrique_label), champ(l.unite),
-          nb(l.quantite), nb(l.montant_unitaire), nb(l.montant), champ(l.statut),
+          nb(l.quantite), nb(l.montant_unitaire), nb(l.montant),
+          champ(l.chantier), champ(l.code_analytique), champ(l.statut),
         ].join(';'));
       }
       // BOM : sans lui, Excel lit les accents de travers.
@@ -568,20 +632,46 @@ export class PayeService {
   private async poserLigne(
     em: EntityManager, tenantId: string, employeeId: string, debut: string,
     rubriqueId: string, quantite: number, montantUnitaire: string,
-    origine: 'auto' | 'manuel', chantierId: string | null = null, commentaire: string | null = null,
+    origine: 'auto' | 'manuel', chantierId: string | null = null,
+    commentaire: string | null = null, codeAnalytiqueId: string | null = null,
   ) {
     const montant = new Decimal(quantite).times(montantUnitaire).toFixed(2);
     const rows = await em.query(
       `INSERT INTO payroll_line
          (tenant_id, employee_id, mois, rubrique_id, chantier_id, quantite,
-          montant_unitaire, montant, origine, commentaire)
-       VALUES ($1,$2,$3::date,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          montant_unitaire, montant, origine, commentaire, code_analytique_id)
+       VALUES ($1,$2,$3::date,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
         tenantId, employeeId, debut, rubriqueId, chantierId, String(quantite),
-        montantUnitaire, montant, origine, commentaire,
+        montantUnitaire, montant, origine, commentaire, codeAnalytiqueId,
       ],
     );
     return rows[0];
+  }
+
+  /**
+   * Répartit une quantité entre les chantiers au prorata des heures. Le dernier chantier absorbe
+   * l'arrondi : sans cela, la somme des lignes ne retomberait pas sur le total calculé — et un
+   * relevé dont les lignes ne font pas le total ne se défend pas devant un salarié.
+   */
+  private ventiler(
+    total: Decimal, heures: Array<{ chantier_id: string; heures: string }>,
+  ): Array<{ chantierId: string | null; quantite: Decimal }> {
+    const somme = heures.reduce((s, h) => s.plus(String(h.heures)), new Decimal(0));
+    if (heures.length === 0 || somme.isZero()) {
+      return [{ chantierId: null, quantite: total }];
+    }
+    const parts: Array<{ chantierId: string | null; quantite: Decimal }> = [];
+    let reste = total;
+    heures.forEach((h, i) => {
+      const derniere = i === heures.length - 1;
+      const q = derniere
+        ? reste
+        : new Decimal(total.times(String(h.heures)).div(somme).toFixed(2));
+      if (q.greaterThan(0)) parts.push({ chantierId: h.chantier_id, quantite: q });
+      reste = reste.minus(q);
+    });
+    return parts;
   }
 
   /**

@@ -19,8 +19,9 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
   let chantierId: string;
   let employeeId: string;
   let panierId: string;
-  let hs25Id: string;
   let primeId: string;
+  let codeAnalytiqueId: string;
+  let chantierB: string;
 
   const MOIS = '2026-06';
 
@@ -45,20 +46,30 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
     ({ tenantId, userId } = await entitleUser(app, ds, 'Paye', 'admin', ['site_tracking', 'core']));
 
     chantierId = (await as('post', '/chantiers').send({ name: 'Tour Nord' }).expect(201)).body.id;
+    chantierB = (await as('post', '/chantiers').send({ name: 'Villa Sud' }).expect(201)).body.id;
     employeeId = (await as('post', '/employees')
       .send({ lastName: 'Durand', firstName: 'Paul', hourlyCost: '20' })
       .expect(201)).body.id;
 
+    const lotId = (await as('post', '/params/lots').send({ code: 'MO', label: 'Main d’œuvre' }).expect(201)).body.id;
+    const familleId = (await as('post', '/params/familles')
+      .send({ lotId, code: 'IND', label: 'Indemnités' }).expect(201)).body.id;
+    codeAnalytiqueId = (await as('post', '/params/codes')
+      .send({ familleId, code: '910', label: 'Paniers et déplacements' }).expect(201)).body.id;
+
     panierId = (await as('post', '/paye/rubriques')
-      .send({ code: 'PAN', label: 'Panier repas', type: 'panier', unite: 'jour', montantUnitaire: '11.50' })
-      .expect(201)).body.id;
-    // Tranche 35 → 43 h majorée de 25 % : la majoration porte sur le coût horaire du salarié.
-    hs25Id = (await as('post', '/paye/rubriques')
       .send({
-        code: 'HS25', label: 'Heures sup. 25 %', type: 'heures_sup', unite: 'heure',
-        seuilDebut: '35', seuilFin: '43', majoration: '0.25',
+        code: 'PAN', label: 'Panier repas', type: 'panier', unite: 'jour',
+        montantUnitaire: '11.50', codeAnalytiqueId, nature: 'labor',
       })
       .expect(201)).body.id;
+    // Tranche 35 → 43 h majorée de 25 % : la majoration porte sur le coût horaire du salarié.
+    await as('post', '/paye/rubriques')
+      .send({
+        code: 'HS25', label: 'Heures sup. 25 %', type: 'heures_sup', unite: 'heure',
+        seuilDebut: '35', seuilFin: '43', majoration: '0.25', codeAnalytiqueId,
+      })
+      .expect(201);
     primeId = (await as('post', '/paye/rubriques')
       .send({ code: 'PRIME', label: 'Prime de chantier', type: 'prime', unite: 'forfait' })
       .expect(201)).body.id;
@@ -77,10 +88,15 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
   it('un_jour_travaille_donne_un_panier_quel_que_soit_le_nombre_de_chantiers', async () => {
     const r = (await as('post', `/paye/releves/${employeeId}/calculer?mois=${MOIS}`).expect(201)).body;
 
-    const panier = r.lignes.find((l: { code: string }) => l.code === 'PAN');
-    expect(Number(panier.quantite)).toBe(5);          // cinq jours pointés
-    expect(Number(panier.montant)).toBe(57.5);        // 5 × 11,50 €
+    const paniers = r.lignes.filter((l: { code: string }) => l.code === 'PAN');
+    const panier = paniers[0];
+    expect(paniers.reduce((s: number, l: { quantite: string }) => s + Number(l.quantite), 0)).toBe(5);
+    expect(paniers.reduce((s: number, l: { montant: string }) => s + Number(l.montant), 0)).toBe(57.5);
     expect(panier.origine).toBe('auto');
+    // La dépense sort du calcul DÉJÀ imputée : sans code analytique, elle n'irait dans aucun
+    // tableau de bord, et sans chantier, dans aucun résultat de chantier.
+    expect(panier.code_analytique).toBe('910');
+    expect(panier.chantier_code).toBeTruthy();
     expect(Number(r.entete.heures_travaillees)).toBe(40);
     expect(Number(r.entete.jours_travailles)).toBe(5);
   });
@@ -88,11 +104,11 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
   it('les_heures_sup_se_comptent_par_semaine_dans_la_tranche_de_la_rubrique', async () => {
     const r = (await as('post', `/paye/releves/${employeeId}/calculer?mois=${MOIS}`).expect(201)).body;
 
-    const hs = r.lignes.find((l: { code: string }) => l.code === 'HS25');
-    expect(Number(hs.quantite)).toBe(5);              // 40 h − 35 h de seuil
+    const hs = r.lignes.filter((l: { code: string }) => l.code === 'HS25');
+    expect(hs.reduce((s: number, l: { quantite: string }) => s + Number(l.quantite), 0)).toBe(5);
     // 20 €/h × 25 % = 5 € la majoration, pour 5 heures.
-    expect(Number(hs.montant_unitaire)).toBe(5);
-    expect(Number(hs.montant)).toBe(25);
+    expect(Number(hs[0].montant_unitaire)).toBe(5);
+    expect(hs.reduce((s: number, l: { montant: string }) => s + Number(l.montant), 0)).toBe(25);
   });
 
   it('le_recalcul_efface_ce_qu_il_a_pose_mais_jamais_une_saisie_manuelle', async () => {
@@ -108,6 +124,36 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
     // Et le panier n'a pas été posé deux fois par les deux calculs successifs.
     expect(r.lignes.filter((l: { code: string }) => l.code === 'PAN')).toHaveLength(1);
     expect(Number(r.entete.montant_rubriques)).toBe(232.5); // 57,50 + 25 + 150
+  });
+
+  it('ventile_les_paniers_sur_le_chantier_principal_de_chaque_journee', async () => {
+    // Une journée partagée : 6 h sur Villa Sud, 2 h sur Tour Nord — le panier suit Villa Sud,
+    // et il n'y en a qu'UN, pas un par chantier visité.
+    await as('post', `/chantiers/${chantierB}/timesheets`)
+      .send({ employeeId, date: '2026-06-08', hours: '6', hourlyCost: '20' }).expect(201);
+    await as('post', `/chantiers/${chantierId}/timesheets`)
+      .send({ employeeId, date: '2026-06-08', hours: '2', hourlyCost: '20' }).expect(201);
+
+    const r = (await as('post', `/paye/releves/${employeeId}/calculer?mois=${MOIS}`).expect(201)).body;
+    const paniers = r.lignes.filter((l: { code: string }) => l.code === 'PAN');
+    const total = paniers.reduce((s: number, l: { quantite: string }) => s + Number(l.quantite), 0);
+    expect(total).toBe(6);                       // six journées travaillées, six paniers
+    expect(paniers.every((l: { code_analytique: string | null }) => l.code_analytique === '910')).toBe(true);
+    expect(paniers.every((l: { chantier_code: string | null }) => Boolean(l.chantier_code))).toBe(true);
+    // La prime a été saisie sans poste : l'écran le compte au lieu de la laisser filer hors des
+    // tableaux de bord sans rien dire.
+    expect(r.sansCodeAnalytique).toBe(1);
+  });
+
+  it('refuse_de_valider_un_releve_dont_une_ligne_n_a_pas_de_poste_analytique', async () => {
+    // La prime a été saisie sans poste : elle ne remonterait dans aucun tableau de bord.
+    await as('post', `/paye/releves/${employeeId}/valider?mois=${MOIS}`).expect(400);
+
+    const releve = (await as('get', `/paye/releves/${employeeId}?mois=${MOIS}`).expect(200)).body;
+    const prime = releve.lignes.find((l: { code: string }) => l.code === 'PRIME');
+    await as('patch', `/paye/lignes/${prime.id}`).send({ codeAnalytiqueId }).expect(200);
+    expect((await as('get', `/paye/releves/${employeeId}?mois=${MOIS}`).expect(200)).body
+      .sansCodeAnalytique).toBe(0);
   });
 
   it('un_releve_signe_est_fige_et_seule_une_reouverture_le_rend_modifiable', async () => {
@@ -156,7 +202,7 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
 
     expect(lignes[0]).toContain('Matricule;Nom;Prénom');
     const heures = lignes.find((l) => l.includes('Heures travaillées'));
-    expect(heures).toContain('40,00');           // virgule décimale : un tableur français
+    expect(heures).toContain('48,00');           // virgule décimale : un tableur français
     const prime = lignes.find((l) => l.includes('PRIME'));
     expect(prime).toContain('150,00');
     expect(res.headers['content-disposition']).toContain(`paye-${MOIS}.csv`);
@@ -171,7 +217,7 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
     const r = (await as('get', `/paye/releves?mois=${MOIS}`).expect(200)).body;
     const ligne = r.lignes.find((l: { employee_id: string }) => l.employee_id === employeeId);
     expect(ligne.statut).toBe('brouillon');
-    expect(Number(ligne.heures_pointees)).toBe(40);
+    expect(Number(ligne.heures_pointees)).toBe(48);
     expect(Number(r.totalRubriques)).toBeGreaterThan(0);
   });
 });

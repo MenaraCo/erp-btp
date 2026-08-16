@@ -67,6 +67,15 @@ export class AnalyticsService {
           [chantierId],
         )
       )[0].total;
+      // Éléments variables de paye rattachés au chantier : payés, donc réalisés, par nature.
+      const payeParNature = await em.query(
+        `SELECT r.nature, SUM(l.montant)::numeric(16,2) AS montant
+           FROM payroll_line l
+           JOIN payroll_rubrique r ON r.id = l.rubrique_id
+          WHERE l.chantier_id = $1 GROUP BY r.nature`,
+        [chantierId],
+      );
+      const payeMap = mapBy(payeParNature, 'montant');
 
       const budgetObj = mapBy(budget, 'objectif');
       const budgetPrev = mapBy(budget, 'previsionnel');
@@ -74,7 +83,7 @@ export class AnalyticsService {
       const supplierMap = mapBy(supplier, 'montant');
 
       const results: NatureResult[] = BUDGET_NATURES.map((nature) => {
-        let realise = new Decimal(supplierMap[nature] ?? 0);
+        let realise = new Decimal(supplierMap[nature] ?? 0).plus(payeMap[nature] ?? 0);
         let engageNature = new Decimal(engageMap[nature] ?? 0);
         if (nature === 'labor') {
           realise = realise.plus(new Decimal(laborTimesheets));
