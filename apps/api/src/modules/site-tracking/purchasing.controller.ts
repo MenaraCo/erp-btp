@@ -1,7 +1,17 @@
 import {
   BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res,
+  UploadedFile, UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
+
+/** Fichier téléversé (sous-ensemble de Express.Multer.File — évite la dépendance de types). */
+interface FichierTeleverse {
+  buffer: Buffer;
+  originalname: string;
+  mimetype?: string;
+  size: number;
+}
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { OrderLineInput, PurchasingService } from './purchasing.service';
@@ -10,6 +20,7 @@ import { AchatsRegistreService, FiltreRegistre } from './achats-registre.service
 import { ValidationAchatsService } from './validation-achats.service';
 import { LigneSaisie, RapprochementService } from './rapprochement.service';
 import { CommandePdfService } from './commande-pdf.service';
+import { DocumentsAchatsService, TypeDocument } from './documents-achats.service';
 
 const NATURES = ['labor', 'material', 'equipment', 'subcontract', 'site_overhead'];
 
@@ -38,7 +49,53 @@ export class PurchasingController {
     private readonly validation: ValidationAchatsService,
     private readonly rapprochement: RapprochementService,
     private readonly pdf: CommandePdfService,
+    private readonly documents: DocumentsAchatsService,
   ) {}
+
+  // --- Bons de livraison et factures reçus ---
+
+  /** Dépose un justificatif sur la commande et tente d'en lire les quantités. */
+  @Post('purchase-orders/:orderId/documents')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }))
+  importerDocument(
+    @Param('orderId') orderId: string,
+    @UploadedFile() file: FichierTeleverse,
+    @Query('type') type?: string,
+  ) {
+    if (!file?.buffer) throw new BadRequestException('Fichier manquant.');
+    const attendu: TypeDocument = type === 'invoice' ? 'invoice' : type === 'autre' ? 'autre' : 'delivery';
+    return this.documents.importer(orderId, file, attendu);
+  }
+
+  @Get('purchase-orders/:orderId/documents')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  listeDocuments(@Param('orderId') orderId: string) {
+    return this.documents.liste(orderId);
+  }
+
+  /** Relit un document déjà déposé (après correction des codes, par exemple). */
+  @Post('purchase-documents/:documentId/relire')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  relireDocument(@Param('documentId') documentId: string) {
+    return this.documents.relire(documentId);
+  }
+
+  @Get('purchase-documents/:documentId/contenu')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  async contenuDocument(@Param('documentId') documentId: string, @Res() res: Response) {
+    const doc = await this.documents.contenu(documentId);
+    res.set({
+      'Content-Type': doc.mime,
+      'Content-Disposition': `inline; filename="${doc.nom.replace(/"/g, '')}"`,
+      'Content-Length': String(doc.buffer.length),
+    });
+    res.end(doc.buffer);
+  }
 
   /**
    * Bon de commande en PDF — l'aperçu comme l'envoi lisent CE document.

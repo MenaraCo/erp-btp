@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { apiFetch, ApiError } from '@/lib/api';
+import { apiFetch, apiUpload, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { Modale } from '@/components/Modale';
@@ -59,6 +59,32 @@ export function SaisieRapprochement({
   const [code, setCode] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [err, setErr] = useState<string | null>(null);
+  const [lecture, setLecture] = useState<string | null>(null);
+
+  /**
+   * Import du justificatif reçu : le document est conservé avec la commande, et ce qu'on parvient
+   * à y lire pré-remplit les quantités. Ce qui n'est pas reconnu reste vide — une quantité
+   * inventée dans un rapprochement coûte plus cher qu'une case à saisir.
+   */
+  const importer = useMutation({
+    mutationFn: (fichier: File) => apiUpload<{
+      document: { lecture: string; nomFichier: string };
+      propositions: Array<{ orderLineId: string; quantiteLue: string | null; puLu: string | null }>;
+      message: string;
+    }>(`/purchase-orders/${orderId}/documents?type=${facture ? 'invoice' : 'delivery'}`, fichier, token),
+    onSuccess: (r) => {
+      setLecture(r.message);
+      const q = { ...quantites };
+      const p = { ...prix };
+      for (const proposition of r.propositions) {
+        if (proposition.quantiteLue !== null) q[proposition.orderLineId] = proposition.quantiteLue;
+        if (facture && proposition.puLu) p[proposition.orderLineId] = proposition.puLu;
+      }
+      setQuantites(q);
+      setPrix(p);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Import impossible.'),
+  });
 
   const total = lignes.reduce(
     (t, l) => t + Number(quantites[l.orderLineId] || 0) * Number(facture ? prix[l.orderLineId] || 0 : l.puCommande),
@@ -131,6 +157,35 @@ export function SaisieRapprochement({
     >
       <>
         {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
+
+        <div className="card" style={{ padding: '10px 12px', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <strong style={{ fontSize: 12 }}>
+              {facture ? 'Facture reçue' : 'Bon de livraison reçu'}
+            </strong>
+            <label className="btn btn-secondary" style={{ cursor: 'pointer', margin: 0 }}>
+              Importer le document…
+              <input
+                type="file"
+                accept="application/pdf,image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) { setErr(null); importer.mutate(f); }
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            <span className="muted" style={{ fontSize: 11 }}>
+              {importer.isPending
+                ? 'Lecture du document…'
+                : 'PDF ou photo. Les quantités lisibles seront pré-remplies.'}
+            </span>
+          </div>
+          {lecture && (
+            <div style={{ fontSize: 12, marginTop: 8, color: 'var(--primary)' }}>{lecture}</div>
+          )}
+        </div>
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap' }}>
           <div className="field" style={{ marginBottom: 0 }}>

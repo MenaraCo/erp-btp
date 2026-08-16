@@ -14,6 +14,7 @@ import { AchatsRegistreService } from './achats-registre.service';
 import { ValidationAchatsService } from './validation-achats.service';
 import { RapprochementService } from './rapprochement.service';
 import { CommandePdfService } from './commande-pdf.service';
+import { DocumentsAchatsService } from './documents-achats.service';
 import { PersonnelController } from './personnel.controller';
 import { PlanningController } from './planning.controller';
 import { EmployeeController } from './employee.controller';
@@ -37,7 +38,7 @@ import { AnalyticsController } from './analytics.controller';
     PlanningService,
     PersonnelService, AbsenceService, PurchasingService, ApprovisionnementService,
     AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService,
-    AnalyticsService, LibraryTransferService],
+    DocumentsAchatsService, AnalyticsService, LibraryTransferService],
   controllers: [
     ChantierController,
     TimesheetController,
@@ -52,7 +53,7 @@ import { AnalyticsController } from './analytics.controller';
     EmployeeService,
     PlanningService,
     PersonnelService, AbsenceService, PurchasingService, ApprovisionnementService,
-    AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService,
+    AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService, DocumentsAchatsService,
     AnalyticsService],
 })
 export class SiteTrackingModule {}

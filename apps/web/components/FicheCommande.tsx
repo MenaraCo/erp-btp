@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { Fragment, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, FileText, History, Lock, PackageCheck, ReceiptText, Redo2, Send, ShieldCheck,
-  Undo2, Unlock, X,
+  ArrowLeft, FileText, History, Lock, PackageCheck, Paperclip, ReceiptText, Redo2, Send,
+  ShieldCheck, Undo2, Unlock, X,
 } from 'lucide-react';
 import { apiFetch, apiDownload, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -54,6 +54,14 @@ interface Rapprochement {
   ecartPrixTotal: string;
 }
 interface Fournisseur { id: string; name: string }
+interface DocumentAchat {
+  id: string;
+  type: string;
+  nom_fichier: string;
+  taille: number;
+  lecture_statut: string;
+  created_at: string;
+}
 interface Fiche {
   commande: {
     id: string; code: string; status: string; total_ht: string; validated_at: string | null;
@@ -382,6 +390,11 @@ export function FicheCommande({
     enabled: Boolean(token),
     queryFn: () => apiFetch<EtatValidation>(`/purchase-orders/${orderId}/approval`, { token }),
   });
+  const documents = useQuery({
+    queryKey: ['commande-documents', orderId],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<DocumentAchat[]>(`/purchase-orders/${orderId}/documents`, { token }),
+  });
   const journal = useQuery({
     queryKey: ['commande-journal', orderId],
     enabled: Boolean(token),
@@ -421,7 +434,7 @@ export function FicheCommande({
 
   const rafraichir = () => {
     setErr(null);
-    for (const key of ['commande', 'commande-journal', 'commande-validation', 'commande-rapprochement', 'achats-commandes', 'achats-receptions', 'achats-factures', 'purchasing-summary', 'execution-tree']) {
+    for (const key of ['commande', 'commande-journal', 'commande-validation', 'commande-rapprochement', 'commande-documents', 'achats-commandes', 'achats-receptions', 'achats-factures', 'purchasing-summary', 'execution-tree']) {
       qc.invalidateQueries({ queryKey: [key] });
     }
   };
@@ -1140,6 +1153,37 @@ export function FicheCommande({
         </div>
       )}
 
+      {(documents.data ?? []).length > 0 && (
+        <div className="card" style={{ marginTop: 16, padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Paperclip size={15} /><strong style={{ fontSize: 13 }}>Justificatifs reçus</strong>
+          </div>
+          {(documents.data ?? []).map((d) => (
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, padding: '3px 0' }}>
+              <span className="muted" style={{ minWidth: 130 }}>
+                {new Date(d.created_at).toLocaleDateString('fr-FR')}
+              </span>
+              <span className={`badge ${d.type === 'invoice' ? 'warning' : 'info'}`}>
+                {d.type === 'invoice' ? 'Facture' : d.type === 'delivery' ? 'Livraison' : 'Autre'}
+              </span>
+              <button
+                className="btn btn-ghost"
+                style={{ padding: 0 }}
+                title="Ouvrir le document"
+                onClick={() => apiDownload(`/purchase-documents/${d.id}/contenu`, token, d.nom_fichier)}
+              >
+                {d.nom_fichier}
+              </button>
+              <span className="muted" style={{ fontSize: 11 }}>
+                {Math.round(d.taille / 1024)} Ko
+                {d.lecture_statut === 'sans_texte' && ' · non lu (scan ou photo)'}
+                {d.lecture_statut === 'lu' && ' · lu automatiquement'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {(journal.data ?? []).length > 0 && (
         <div className="card" style={{ marginTop: 16, padding: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -1212,8 +1256,8 @@ export function FicheCommande({
       )}
 
       <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-        L’import des bons de livraison et des factures (avec lecture automatique) arrive à l’étape
-        suivante.
+        Les justificatifs reçus se déposent au moment de la réception ou de la facturation : leur
+        contenu lisible pré-remplit les quantités, et le document reste attaché à la commande.
       </p>
       </div>
 
