@@ -110,6 +110,25 @@ function hasValue(m: Metrics): boolean {
   return ['budgetObjectif', 'engage', 'realise'].some((k) => Number(m[k] ?? 0) !== 0);
 }
 
+/**
+ * Les postes du graphique sont exactement les LIGNES du tableau : les quatre natures, plus
+ * « À ventiler » et les frais de chantier quand ils portent un montant. Les omettre donnerait un
+ * dessin qui ne se réconcilie pas avec le total affiché juste dessous — un graphique faux est
+ * pire qu'un tableau aride.
+ */
+function postesAnalytiques(d: AnalyticalResults): Array<{ label: string; metrics: Metrics }> {
+  const postes: Array<{ label: string; metrics: Metrics }> = d.natures.map((n) => ({
+    label: n.label, metrics: n.metrics,
+  }));
+  if (hasValue(d.aVentiler.metrics)) {
+    postes.push({ label: `${d.aVentiler.code} ${d.aVentiler.label}`, metrics: d.aVentiler.metrics });
+  }
+  if (hasValue(d.siteOverhead.metrics)) {
+    postes.push({ label: d.siteOverhead.label, metrics: d.siteOverhead.metrics });
+  }
+  return postes;
+}
+
 export default function ChantierDetailPage() {
   const { token } = useAuth();
   const params = useParams();
@@ -282,16 +301,16 @@ export default function ChantierDetailPage() {
                 quel poste dérive. Le tableau qui suit garde le détail au centime. */}
             <div style={{ marginBottom: 16 }}>
               <BarresGroupees
-                categories={analytical.data.natures.map((n) => n.label)}
+                categories={postesAnalytiques(analytical.data).map((p) => p.label)}
                 series={[
                   { label: 'Budget objectif', couleur: PALETTE[0] },
                   { label: 'Engagé', couleur: PALETTE[1] },
                   { label: 'Réalisé', couleur: PALETTE[2] },
                 ]}
-                valeurs={analytical.data.natures.map((n) => [
-                  Number(n.metrics.budgetObjectif ?? 0),
-                  Number(n.metrics.engage ?? 0),
-                  Number(n.metrics.realise ?? 0),
+                valeurs={postesAnalytiques(analytical.data).map((p) => [
+                  Number(p.metrics.budgetObjectif ?? 0),
+                  Number(p.metrics.engage ?? 0),
+                  Number(p.metrics.realise ?? 0),
                 ])}
               />
             </div>

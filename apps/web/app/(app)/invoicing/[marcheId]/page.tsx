@@ -4,9 +4,12 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Receipt } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { Camembert, Courbe, PALETTE } from '@/components/Graphiques';
+import { Alerte, EtatVide } from '@/components/ui';
 
 /* ─────────── types ─────────── */
 interface MarcheLine {
@@ -127,7 +130,14 @@ export default function MarcheDetailPage() {
           </p>
 
 
-          {tab === 'situations' && <SituationsTab marcheId={marcheId} lines={m.lines} token={token} />}
+          {tab === 'situations' && (
+            <SituationsTab
+              marcheId={marcheId}
+              lines={m.lines}
+              totalHt={m.marche.total_ht}
+              token={token}
+            />
+          )}
           {tab === 'avenants' && <AvenantsTab marcheId={marcheId} token={token} />}
           {tab === 'dgd' && <DgdTab marcheId={marcheId} token={token} />}
         </>
@@ -137,7 +147,9 @@ export default function MarcheDetailPage() {
 }
 
 /* ═══════════════ Onglet Situations ═══════════════ */
-function SituationsTab({ marcheId, lines, token }: { marcheId: string; lines: MarcheLine[]; token: string | null }) {
+function SituationsTab({ marcheId, lines, totalHt, token }: {
+  marcheId: string; lines: MarcheLine[]; totalHt: string; token: string | null;
+}) {
   const qc = useQueryClient();
   const [pct, setPct] = useState<Record<string, string>>({});
   const [retenue, setRetenue] = useState('5');
@@ -220,9 +232,47 @@ function SituationsTab({ marcheId, lines, token }: { marcheId: string; lines: Ma
   });
 
   const nextNumero = (situations.data?.length ?? 0) + 1;
+  // Le cumul de la DERNIÈRE situation fait foi : c'est lui qui porte l'avancement du marché.
+  const cumulFacture = Number(situations.data?.[situations.data.length - 1]?.cumul_ht ?? 0);
+  const resteAFacturer = Number(totalHt) - cumulFacture;
+  const pctFacture = Number(totalHt) > 0
+    ? Math.round((cumulFacture / Number(totalHt)) * 100) : 0;
 
   return (
     <div>
+      {/* Où en est la facturation de ce marché : la question se pose avant le détail des
+          situations, et un cumul face au total du marché se lit mieux en surface qu'en ligne. */}
+      {situations.data && situations.data.length > 0 && (
+        <div style={{ display: 'grid', gap: 14, marginTop: 16, gridTemplateColumns: 'minmax(260px, 1fr) minmax(320px, 1.4fr)' }}>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Avancement de la facturation</h2>
+            <Camembert
+              parts={[
+                { label: 'Facturé cumulé', valeur: cumulFacture, couleur: PALETTE[0] },
+                { label: 'Reste à facturer', valeur: Math.max(resteAFacturer, 0), couleur: '#cbd5e1' },
+              ]}
+              total={`${pctFacture} %`}
+              titre="facturé"
+            />
+            <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+              {euro(cumulFacture.toFixed(2))} facturés sur {euro(totalHt)} — reste{' '}
+              {euro(Math.max(resteAFacturer, 0).toFixed(2))}
+            </div>
+          </div>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Cumul facturé, situation après situation</h2>
+            <Courbe
+              abscisses={situations.data.map((s) => `S${s.numero}`)}
+              series={[{
+                label: 'Cumul HT facturé',
+                couleur: PALETTE[1],
+                points: situations.data.map((s) => Number(s.cumul_ht)),
+              }]}
+            />
+          </div>
+        </div>
+      )}
+
       {/* liste des situations existantes, dépliables ligne par ligne */}
       <div className="card" style={{ marginTop: 16 }}>
         <h2 style={{ marginTop: 0 }}>Situations {situations.data ? `(${situations.data.length})` : ''}</h2>
@@ -254,7 +304,13 @@ function SituationsTab({ marcheId, lines, token }: { marcheId: string; lines: Ma
               ))}
             </tbody>
           </table>
-        ) : <p className="muted">Aucune situation. Renseignez les avancements ci-dessous et créez la première.</p>}
+        ) : (
+          <EtatVide
+            icone={Receipt}
+            titre="Aucune situation sur ce marché."
+            indice="Renseignez les avancements ci-dessous : la première situation facturera ce qui est fait à ce jour."
+          />
+        )}
       </div>
 
       {/* création enrichie de la situation suivante */}
@@ -264,7 +320,7 @@ function SituationsTab({ marcheId, lines, token }: { marcheId: string; lines: Ma
           Saisissez l'avancement <strong>cumulé</strong> de chaque ligne (0 à 100 %). Le montant de la période est
           la différence avec ce qui a déjà été facturé. Les lignes d'avenant sont incluses.
         </p>
-        {err && <div className="error">{err}</div>}
+        {err && <Alerte>{err}</Alerte>}
         {lines.length === 0 ? (
           <p className="muted">Ce marché n'a pas de lignes facturables.</p>
         ) : (
@@ -510,7 +566,7 @@ function AvenantsTab({ marcheId, token }: { marcheId: string; token: string | nu
 
       <div className="card" style={{ marginTop: 16 }}>
         <h2 style={{ marginTop: 0 }}>Nouvel avenant</h2>
-        {err && <div className="error">{err}</div>}
+        {err && <Alerte>{err}</Alerte>}
         <div className="field" style={{ maxWidth: 360 }}>
           <label>Libellé (optionnel)</label>
           <input value={label} placeholder="Travaux modificatifs…" onChange={(e) => setLabel(e.target.value)} />

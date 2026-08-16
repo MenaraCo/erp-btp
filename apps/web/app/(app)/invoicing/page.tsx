@@ -4,12 +4,13 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Receipt } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
 import { SortHeader, SortState, nextSort, applySort } from '@/components/SortHeader';
 import { IconBtn } from '@/components/IconBtn';
+import { Alerte, EtatVide } from '@/components/ui';
 
 interface Marche {
   id: string;
@@ -36,9 +37,7 @@ export default function InvoicingPage() {
       <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
         {isLoading && <p className="muted" style={{ padding: 16 }}>Chargement…</p>}
         {isError && (
-          <p className="muted" style={{ padding: 16 }}>
-            Module non actif pour cet utilisateur (capacité « invoicing ») ou aucun marché.
-          </p>
+          <Alerte>Module non actif pour cet utilisateur (capacité « invoicing ») ou aucun marché.</Alerte>
         )}
         {data && data.length > 0 && (
           <table className="grid" style={{ margin: 0 }}>
@@ -77,11 +76,17 @@ export default function InvoicingPage() {
           </table>
         )}
         {data && data.length === 0 && (
-          <p className="muted" style={{ padding: 16 }}>
-            Aucun marché. Un marché naît d’une commande acceptée : passez par «&nbsp;
-            <Link href="/acceptation" style={{ color: 'var(--accent)' }}>Acceptation de commande</Link>
-            &nbsp;» pour transformer un devis gagné.
-          </p>
+          <EtatVide
+            icone={Receipt}
+            titre="Aucun marché à facturer."
+            indice={(
+              <>
+                Un marché naît d’une commande acceptée : passez par{' '}
+                <Link href="/acceptation" className="link">Acceptation de commande</Link>{' '}
+                pour transformer un devis gagné.
+              </>
+            )}
+          />
         )}
       </div>
     </div>

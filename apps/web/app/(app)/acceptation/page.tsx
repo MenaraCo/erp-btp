@@ -7,6 +7,7 @@ import { ArrowRight, Building2, Lock, Receipt } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { Alerte, Bouton } from '@/components/ui';
 import { useCapabilities } from '@/lib/capabilities';
 import { ACCEPTANCE_CAPABILITIES } from '@/lib/modules';
 
@@ -231,20 +232,20 @@ function AcceptedTable({ rows }: { rows: AcceptedRow[] }) {
               {euro(a.totalHt)}
             </td>
             <td style={{ textAlign: 'right', paddingRight: 8, whiteSpace: 'nowrap' }}>
-              <button
-                className="btn-secondary"
-                style={{ fontSize: 11, padding: '3px 8px' }}
+              <Bouton
+                variante="secondaire"
+                icone={Building2}
                 onClick={() => router.push(`/chantiers/${a.chantierId}`)}
               >
-                <Building2 size={11} style={{ verticalAlign: 'middle' }} /> Chantier
-              </button>{' '}
-              <button
-                className="btn-secondary"
-                style={{ fontSize: 11, padding: '3px 8px' }}
+                Chantier
+              </Bouton>{' '}
+              <Bouton
+                variante="secondaire"
+                icone={Receipt}
                 onClick={() => router.push(`/invoicing/${a.marcheId}`)}
               >
-                <Receipt size={11} style={{ verticalAlign: 'middle' }} /> Facturation
-              </button>
+                Facturation
+              </Bouton>
             </td>
           </tr>
         ))}
@@ -316,15 +317,15 @@ function AcceptanceModal({
               du devis ; la facturation peut établir ses situations sur ce marché.
             </p>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button className="btn" onClick={() => router.push(`/chantiers/${done.chantierId}`)}>
+              <Bouton onClick={() => router.push(`/chantiers/${done.chantierId}`)}>
                 Ouvrir le chantier
-              </button>
-              <button
-                className="btn-secondary"
+              </Bouton>
+              <Bouton
+                variante="secondaire"
                 onClick={() => router.push(`/invoicing/${done.marcheId}`)}
               >
                 Aller à la facturation
-              </button>
+              </Bouton>
               <button className="link" onClick={onDone}>Fermer</button>
             </div>
           </>
@@ -448,7 +449,7 @@ function AcceptanceModal({
                 </button>
               </div>
             </div>
-            {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
+            {error && <Alerte>{error}</Alerte>}
           </>
         )}
       </div>
