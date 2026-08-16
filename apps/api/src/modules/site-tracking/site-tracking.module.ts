@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TenancyModule } from '../../core/tenancy/tenancy.module';
 import { NumberingModule } from '../../core/numbering/numbering.module';
+import { MailerModule } from '../../core/mailer/mailer.module';
 import { EstimatingModule } from '../estimating/estimating.module';
 import { ChantierService } from './chantier.service';
 import { ChantierController } from './chantier.controller';
@@ -30,7 +31,7 @@ import { AnalyticsController } from './analytics.controller';
  * 3.4 pointages MO, 3.5 chaîne des achats, 3.6 résultats analytiques.
  */
 @Module({
-  imports: [TenancyModule, NumberingModule, EstimatingModule],
+  imports: [TenancyModule, NumberingModule, MailerModule, EstimatingModule],
   providers: [ChantierService, TimesheetService,
     EmployeeService,
     PlanningService,

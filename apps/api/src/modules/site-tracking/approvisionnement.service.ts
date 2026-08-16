@@ -233,6 +233,67 @@ export class ApprovisionnementService {
     });
   }
 
+  /**
+   * Recherche d'articles pour la cellule « Code » d'une commande.
+   *
+   * On cherche d'abord dans la NOMENCLATURE du chantier — ce qui a été chiffré pour lui est le
+   * plus probable — puis dans les catalogues de l'entreprise. Le code reste facultatif : il n'est
+   * pas là pour contraindre la saisie, mais pour rattacher la ligne à une ressource connue, et
+   * pouvoir dire plus tard combien de sacs de colle l'entreprise commande dans l'année.
+   */
+  chercherRessources(chantierId: string | null, q: string, limite = 25) {
+    const tenantId = this.context.requireTenantId();
+    const recherche = `%${(q ?? '').trim()}%`;
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const nomenclature = chantierId ? await em.query(
+        `SELECT n.code, n.label, n.unit, n.nature, n.unite_achat,
+                COALESCE(n.coeff_conversion, 1) AS coeff_conversion,
+                n.unit_cost_objectif AS unit_cost, ac.code AS code_analytique,
+                'chantier' AS origine
+           FROM nomenclature_resource n
+           LEFT JOIN analytical_code ac ON ac.id = n.code_analytique_id
+          WHERE n.chantier_id = $1 AND (n.code ILIKE $2 OR n.label ILIKE $2)
+          ORDER BY n.code LIMIT $3`,
+        [chantierId, recherche, limite],
+      ) : [];
+
+      const catalogue = await em.query(
+        `SELECT r.code, r.label, r.unit, r.nature, r.unite_achat,
+                COALESCE(r.coeff_conversion, 1) AS coeff_conversion,
+                r.unit_cost, ac.code AS code_analytique,
+                CASE WHEN li.scope = 'chantier' THEN 'bibliotheque' ELSE 'etude' END AS origine
+           FROM resource r
+           JOIN library li ON li.id = r.library_id
+           LEFT JOIN analytical_code ac ON ac.id = r.code_analytique_id
+          WHERE r.deleted_at IS NULL AND (r.code ILIKE $1 OR r.label ILIKE $1)
+          ORDER BY (li.scope = 'chantier') DESC, r.code
+          LIMIT $2`,
+        [recherche, limite],
+      );
+
+      // Un même code peut exister des deux côtés : celui du chantier prime, il porte SES prix.
+      const vus = new Set<string>();
+      return [...nomenclature, ...catalogue]
+        .filter((r: { code: string }) => {
+          const cle = r.code.toUpperCase();
+          if (vus.has(cle)) return false;
+          vus.add(cle);
+          return true;
+        })
+        .slice(0, limite)
+        .map((r: Record<string, unknown>) => ({
+          code: r.code as string,
+          label: r.label as string,
+          unite: (r.unite_achat as string | null) ?? (r.unit as string | null),
+          nature: r.nature as string,
+          puAchat: new Decimal(String(r.unit_cost ?? 0))
+            .times(String(r.coeff_conversion ?? 1)).toDecimalPlaces(4).toString(),
+          codeAnalytique: (r.code_analytique as string | null) ?? null,
+          origine: r.origine as string,
+        }));
+    });
+  }
+
   /** Fournisseurs, lots et familles réellement présents sur le chantier — pour les filtres. */
   regroupements(chantierId: string) {
     const tenantId = this.context.requireTenantId();

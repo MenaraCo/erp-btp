@@ -11,6 +11,8 @@ import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { returningRows } from '../../core/database/returning.util';
 import { NumberingService } from '../../core/numbering/numbering.service';
+import { MailerService } from '../../core/mailer/mailer.service';
+import { CommandePdfService } from './commande-pdf.service';
 import {
   assertTransition,
   InvalidPoTransitionError,
@@ -60,6 +62,8 @@ export class PurchasingService {
     // Les codes ne se tapent plus : ils viennent de la numérotation société, comme les affaires
     // et les devis. Un numéro de commande saisi à la main finit toujours par se dupliquer.
     private readonly numbering: NumberingService,
+    private readonly pdf: CommandePdfService,
+    private readonly mailer: MailerService,
   ) {}
 
   // --- DDP (demande de prix) ---
@@ -500,6 +504,90 @@ export class PurchasingService {
       await this.journaliser(em, tenantId, orderId, 'reopened', raison);
       return (await em.query(`SELECT * FROM purchase_order WHERE id = $1`, [orderId]))[0];
     });
+  }
+
+  /**
+   * Expédie le bon de commande au fournisseur, en pièce jointe.
+   *
+   * L'envoi ne remplace pas la validation : une commande part APRÈS avoir été validée (ou visée).
+   * Envoyer un brouillon reviendrait à engager l'entreprise sans que personne l'ait décidé.
+   */
+  async envoyerAuFournisseur(
+    orderId: string,
+    input: { destinataires?: string; copies?: string; sujet?: string; message?: string },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    const commande = await runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT o.id, o.code, o.status, o.total_ht, s.name AS fournisseur, s.email AS fournisseur_email,
+                c.code AS chantier_code, c.name AS chantier_nom
+           FROM purchase_order o
+           LEFT JOIN supplier s ON s.id = o.supplier_id
+           LEFT JOIN chantier c ON c.id = o.chantier_id
+          WHERE o.id = $1`,
+        [orderId],
+      );
+      if (rows.length === 0) throw new NotFoundException(`Unknown purchase order "${orderId}"`);
+      return rows[0];
+    });
+    if (commande.status !== 'validated') {
+      throw new ConflictException(
+        'Cette commande n’est pas validée : elle ne peut pas partir au fournisseur.',
+      );
+    }
+
+    const destinataires = (input.destinataires ?? '').trim() || (commande.fournisseur_email ?? '');
+    if (!destinataires) {
+      throw new BadRequestException(
+        'Aucune adresse : renseignez celle du fournisseur, ou saisissez-la ici.',
+      );
+    }
+
+    const pdf = await this.pdf.generate(orderId);
+    const sujet = (input.sujet ?? '').trim()
+      || `Bon de commande ${commande.code}${commande.chantier_code ? ` — chantier ${commande.chantier_code}` : ''}`;
+    const corps = (input.message ?? '').trim() || [
+      'Bonjour,',
+      '',
+      `Veuillez trouver ci-joint notre bon de commande ${commande.code}`
+      + `${commande.chantier_nom ? ` pour le chantier « ${commande.chantier_nom} »` : ''}.`,
+      '',
+      'Merci de nous confirmer sa bonne réception ainsi que la date de livraison prévue.',
+      '',
+      'Cordialement,',
+    ].join('\n');
+
+    const envoi = await this.mailer.envoyer({
+      destinataires,
+      copies: input.copies ?? null,
+      sujet,
+      corps,
+      piecesJointes: [{ filename: `${commande.code}.pdf`, content: pdf, contentType: 'application/pdf' }],
+      objetType: 'purchase_order',
+      objetId: orderId,
+    });
+
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      // On n'inscrit « envoyée » QUE si elle est réellement partie : une date d'envoi mensongère
+      // ferait croire le fournisseur prévenu.
+      if (envoi.statut === 'sent') {
+        await em.query(
+          `UPDATE purchase_order SET sent_at = now(), sent_to = $2, updated_at = now() WHERE id = $1`,
+          [orderId, destinataires],
+        );
+      }
+      await this.journaliser(
+        em, tenantId, orderId,
+        envoi.statut === 'sent' ? 'emailed' : 'email_pending',
+        `${destinataires}${envoi.statut === 'sent' ? '' : ` — ${envoi.message}`}`,
+      );
+      return { ...envoi, destinataires, sujet };
+    });
+  }
+
+  /** Messages déjà expédiés pour cette commande. */
+  historiqueEmails(orderId: string) {
+    return this.mailer.historique('purchase_order', orderId);
   }
 
   /** Journal d'une commande : validation, annulation, réouverture — avec leur auteur. */

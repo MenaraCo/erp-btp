@@ -251,6 +251,14 @@ export class PurchasingController {
     });
   }
 
+  /** Articles proposés dans la cellule « Code » d'une commande (facultatif, mais utile). */
+  @Get('achats/ressources')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  chercherRessources(@Query('q') q?: string, @Query('chantier') chantierId?: string) {
+    return this.appro.chercherRessources(chantierId ?? null, q ?? '');
+  }
+
   /** Fournisseurs, lots et familles présents sur le chantier — pour commander par paquets. */
   @Get('chantiers/:chantierId/approvisionnement/regroupements')
   @RequiresCapability('purchasing')
@@ -351,6 +359,25 @@ export class PurchasingController {
   @RequiresPermission('rbac.role.manage')
   reopen(@Param('orderId') orderId: string, @Body() body: { motif?: string }) {
     return this.purchasing.reopenOrder(orderId, body?.motif ?? '');
+  }
+
+  /** Expédie le bon de commande au fournisseur, PDF en pièce jointe. */
+  @Post('purchase-orders/:orderId/envoyer')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  envoyerAuFournisseur(
+    @Param('orderId') orderId: string,
+    @Body() body: { destinataires?: string; copies?: string; sujet?: string; message?: string },
+  ) {
+    return this.purchasing.envoyerAuFournisseur(orderId, body ?? {});
+  }
+
+  /** Ce qui a déjà été expédié pour cette commande. */
+  @Get('purchase-orders/:orderId/emails')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  emails(@Param('orderId') orderId: string) {
+    return this.purchasing.historiqueEmails(orderId);
   }
 
   /** Journal d'une commande : validation, annulation, réouverture. */

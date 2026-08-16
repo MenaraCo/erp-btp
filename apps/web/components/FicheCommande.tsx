@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Fragment, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, FileText, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Unlock, X,
+  ArrowLeft, FileText, History, Lock, PackageCheck, ReceiptText, Send, ShieldCheck, Unlock, X,
 } from 'lucide-react';
 import { apiFetch, apiDownload, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -14,10 +14,10 @@ import { ApproModal } from '@/components/ApproModal';
 import { LigneRapprochement, SaisieRapprochement } from '@/components/SaisieRapprochement';
 import { BibliothequeCommandeModal } from '@/components/BibliothequeCommandeModal';
 import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
+import { SelectRessource } from '@/components/SelectRessource';
 import { Modale } from '@/components/Modale';
-import {
-  CELL_CTR, CodeInput, UnitSelect, focusNextCell, infoBtn,
-} from '@/components/GrilleSaisie';
+import { EnvoiCommandeModal } from '@/components/EnvoiCommandeModal';
+import { CELL_CTR, UnitSelect, focusNextCell, infoBtn } from '@/components/GrilleSaisie';
 
 interface Ligne {
   id: string;
@@ -58,6 +58,7 @@ interface Fiche {
     id: string; code: string; status: string; total_ht: string; validated_at: string | null;
     created_at: string; chantier_id: string; chantier_code: string | null; chantier_nom: string | null;
     chantier_couleur: string | null; fournisseur: string | null; reopened_count: number;
+    fournisseur_email: string | null; sent_at: string | null; sent_to: string | null;
     supplier_id: string | null; delivery_address: string | null; delivery_date: string | null;
     delivery_conditions: string | null; payment_terms: string | null; contact: string | null;
     notes: string | null;
@@ -79,8 +80,9 @@ const BADGE: Record<string, string> = {
 };
 const ACTIONS: Record<string, string> = {
   submitted: 'Soumise à validation', approved: 'Approuvée', rejected: 'Refusée',
-  validated: 'Envoyée au fournisseur', cancelled: 'Annulée', reopened: 'Rouverte',
+  validated: 'Validée', cancelled: 'Annulée', reopened: 'Rouverte',
   received: 'Réception enregistrée', invoiced: 'Facture enregistrée',
+  emailed: 'Expédiée par e-mail', email_pending: 'E-mail en attente d’expédition',
 };
 
 interface EtatValidation {
@@ -325,6 +327,7 @@ export function FicheCommande({
   const [ligneOuverte, setLigneOuverte] = useState<string | null>(null);
   const [saisie, setSaisie] = useState<null | 'reception' | 'facture'>(null);
   const [apercu, setApercu] = useState(false);
+  const [envoiOuvert, setEnvoiOuvert] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [ouvrirReouverture, setOuvrirReouverture] = useState(false);
@@ -526,7 +529,27 @@ export function FicheCommande({
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Commande {c.code}</h1>
         <span className={`badge ${BADGE[c.status] ?? 'info'}`}>{STATUTS[c.status] ?? c.status}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 20, fontWeight: 700 }}>{euro(c.total_ht)}</span>
+
+        {/* Le document se relit et se télécharge à TOUT moment : brouillon, envoyée ou soldée. */}
+        <button
+          className="btn btn-secondary"
+          style={{ marginLeft: 'auto' }}
+          title="Relire le bon de commande tel qu'il part au fournisseur"
+          onClick={() => setApercu((a) => !a)}
+        >
+          <FileText size={13} /> {apercu ? 'Masquer l’aperçu' : 'Aperçu PDF'}
+        </button>
+        <button
+          className="btn btn-secondary"
+          title="Télécharger le bon de commande"
+          onClick={() => apiDownload(
+            `/purchase-orders/${orderId}/bon-de-commande.pdf`, token, `${c.code}.pdf`,
+          )}
+        >
+          Télécharger
+        </button>
+
+        <span style={{ fontSize: 20, fontWeight: 700 }}>{euro(c.total_ht)}</span>
       </div>
 
       {auVisa && (
@@ -560,6 +583,29 @@ export function FicheCommande({
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {envoyee && (
+        <div className="card" style={{
+          marginTop: 12, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
+          flexWrap: 'wrap',
+        }}>
+          <Send size={15} />
+          {c.sent_at ? (
+            <span style={{ fontSize: 13 }}>
+              Envoyée au fournisseur le <strong>{jour(c.sent_at)}</strong>
+              {c.sent_to && <> à <strong>{c.sent_to}</strong></>}.
+            </span>
+          ) : (
+            <span style={{ fontSize: 13 }}>
+              Le bon de commande n’a pas encore été expédié. Envoyez-le d’ici : le PDF est joint
+              tout seul, sans rien enregistrer ni rouvrir votre messagerie.
+            </span>
+          )}
+          <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setEnvoiOuvert(true)}>
+            <Send size={13} /> {c.sent_at ? 'Renvoyer' : 'Envoyer au fournisseur'}
+          </button>
         </div>
       )}
 
@@ -723,15 +769,8 @@ export function FicheCommande({
               </span>
             )}
             <button
-              className="btn btn-secondary"
-              style={{ marginLeft: 'auto' }}
-              title="Relire le bon de commande tel qu'il partira au fournisseur"
-              onClick={() => setApercu((a) => !a)}
-            >
-              <FileText size={13} /> {apercu ? 'Masquer l’aperçu' : 'Aperçu PDF'}
-            </button>
-            <button
               className="btn"
+              style={{ marginLeft: 'auto' }}
               disabled={f.lignes.length === 0 || envoyer.isPending}
               title={f.lignes.length === 0
                 ? 'Une commande vide ne s’envoie pas'
@@ -806,12 +845,10 @@ export function FicheCommande({
                   ⓘ
                 </button>
               </span>
-              <CodeInput
-                value={l.code}
+              <SelectRessource
+                valeur={l.code}
+                chantierId={c.chantier_id}
                 readOnly={!brouillon}
-                placeholder="Code"
-                title="Code d’article : s’il existe au catalogue, la ligne se remplit avec lui"
-                style={{ width: '100%' }}
                 onChange={(v) => majLigne.mutate({ id: l.id, patch: { code: v } })}
               />
               <input
@@ -1053,6 +1090,17 @@ export function FicheCommande({
             </div>
           ))}
         </div>
+      )}
+
+      {envoiOuvert && (
+        <EnvoiCommandeModal
+          orderId={orderId}
+          code={c.code}
+          chantier={c.chantier_code}
+          emailFournisseur={c.fournisseur_email}
+          onClose={() => setEnvoiOuvert(false)}
+          onEnvoye={(message) => { setEnvoiOuvert(false); setInfo(message); rafraichir(); }}
+        />
       )}
 
       {saisie && r && (
