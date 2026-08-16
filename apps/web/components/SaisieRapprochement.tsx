@@ -5,6 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
+import { Modale } from '@/components/Modale';
 
 export interface LigneRapprochement {
   orderLineId: string;
@@ -98,22 +99,37 @@ export function SaisieRapprochement({
   const rienASaisir = lignes.every((l) => Number(quantites[l.orderLineId] || 0) <= 0);
 
   return (
-    <div className="modal-overlay" style={overlay} onClick={onClose}>
-      <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <div>
-            <strong style={{ fontSize: 16 }}>
-              {facture ? 'Enregistrer une facture fournisseur' : 'Réceptionner la commande'}
-            </strong>
-            <p className="muted" style={{ margin: '2px 0 0', fontSize: 12 }}>
-              {facture
-                ? 'Quantités et prix facturés, comparés à la commande. Les écarts apparaissent à droite.'
-                : 'Quantités réellement livrées. Ce qui reste attendu restera dû sur la commande.'}
-            </p>
-          </div>
-          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
-        </div>
-
+    <Modale
+      titre={facture ? 'Enregistrer une facture fournisseur' : 'Réceptionner la commande'}
+      sousTitre={facture
+        ? 'Quantités et prix facturés, comparés à la commande. Les écarts apparaissent à droite.'
+        : 'Quantités réellement livrées. Ce qui reste attendu restera dû sur la commande.'}
+      largeur="xl"
+      onClose={onClose}
+      actions={(
+        <>
+          {facture && (
+            <span className="muted" style={{ fontSize: 12, marginRight: 'auto' }}>
+              Écart total :{' '}
+              <strong style={{ color: ecart > 0 ? 'var(--danger, #dc2626)' : undefined }}>
+                {euro(ecart.toFixed(2))}
+              </strong>
+            </span>
+          )}
+          <strong style={{ marginLeft: facture ? undefined : 'auto' }}>{euro(total.toFixed(2))}</strong>
+          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
+          <button
+            className="btn"
+            disabled={rienASaisir || (facture && !code.trim()) || enregistrer.isPending}
+            title={facture && !code.trim() ? 'Le numéro de facture du fournisseur est requis' : undefined}
+            onClick={() => { setErr(null); enregistrer.mutate(); }}
+          >
+            {enregistrer.isPending ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </>
+      )}
+    >
+      <>
         {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 12, flexWrap: 'wrap' }}>
@@ -204,36 +220,7 @@ export function SaisieRapprochement({
           </table>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
-          {facture && (
-            <span className="muted" style={{ fontSize: 12 }}>
-              Écart total :{' '}
-              <strong style={{ color: ecart > 0 ? 'var(--danger, #dc2626)' : undefined }}>
-                {euro(ecart.toFixed(2))}
-              </strong>
-            </span>
-          )}
-          <strong style={{ marginLeft: 'auto' }}>{euro(total.toFixed(2))}</strong>
-          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
-          <button
-            className="btn"
-            disabled={rienASaisir || (facture && !code.trim()) || enregistrer.isPending}
-            title={facture && !code.trim() ? 'Le numéro de facture du fournisseur est requis' : undefined}
-            onClick={() => { setErr(null); enregistrer.mutate(); }}
-          >
-            {enregistrer.isPending ? 'Enregistrement…' : 'Enregistrer'}
-          </button>
-        </div>
-      </div>
-    </div>
+      </>
+    </Modale>
   );
 }
-
-const overlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1100,
-  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px',
-  overflowY: 'auto',
-};
-const panel: React.CSSProperties = {
-  borderRadius: 12, padding: '20px 24px', width: 980, maxWidth: '100%',
-};

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
+import { Modale } from '@/components/Modale';
 
 interface Suggestion {
   resourceId: string;
@@ -140,18 +141,31 @@ export function ApproModal({
     .reduce((t, l) => t + (quantiteRetenue(l) / Number(l.coeffConversion)) * Number(l.puAchat), 0);
 
   return (
-    <div className="modal-overlay" style={overlay} onClick={onClose}>
-      <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div>
-            <strong style={{ fontSize: 16 }}>Insérer des ressources du chantier</strong>
-            <p className="muted" style={{ margin: '2px 0 0', fontSize: 12 }}>
-              Les quantités viennent du budget, converties en unité d’achat.
-            </p>
-          </div>
-          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
-        </div>
-
+    <Modale
+      titre="Insérer des ressources du chantier"
+      sousTitre="Les quantités viennent du budget, converties en unité d’achat."
+      largeur="xl"
+      onClose={onClose}
+      actions={(
+        <>
+          <span className="muted" style={{ fontSize: 12, marginRight: 'auto' }}>
+            {choisies.size > 0
+              ? `${choisies.size} ressource${choisies.size > 1 ? 's' : ''} choisie${choisies.size > 1 ? 's' : ''}`
+              : 'Aucune sélection : tout ce qui est affiché sera inséré'}
+          </span>
+          <strong>{euro(totalRetenu.toFixed(2))}</strong>
+          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
+          <button
+            className="btn"
+            disabled={lignes.length === 0 || inserer.isPending}
+            onClick={() => { setErr(null); inserer.mutate(); }}
+          >
+            {inserer.isPending ? 'Insertion…' : 'Insérer dans la commande'}
+          </button>
+        </>
+      )}
+    >
+      <>
         {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
@@ -268,30 +282,7 @@ export function ApproModal({
           </table>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {choisies.size > 0 ? `${choisies.size} ressource${choisies.size > 1 ? 's' : ''} choisie${choisies.size > 1 ? 's' : ''}` : 'Aucune sélection : tout ce qui est affiché sera inséré'}
-          </span>
-          <strong style={{ marginLeft: 'auto' }}>{euro(totalRetenu.toFixed(2))}</strong>
-          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
-          <button
-            className="btn"
-            disabled={lignes.length === 0 || inserer.isPending}
-            onClick={() => { setErr(null); inserer.mutate(); }}
-          >
-            {inserer.isPending ? 'Insertion…' : 'Insérer dans la commande'}
-          </button>
-        </div>
-      </div>
-    </div>
+      </>
+    </Modale>
   );
 }
-
-const overlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1100,
-  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px',
-  overflowY: 'auto',
-};
-const panel: React.CSSProperties = {
-  borderRadius: 12, padding: '20px 24px', width: 1040, maxWidth: '100%',
-};

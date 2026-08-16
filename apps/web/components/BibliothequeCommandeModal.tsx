@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
+import { Modale } from '@/components/Modale';
 
 interface Library { id: string; code: string; name: string }
 interface Resource {
@@ -98,19 +99,31 @@ export function BibliothequeCommandeModal({
   }, 0);
 
   return (
-    <div className="modal-overlay" style={overlay} onClick={onClose}>
-      <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div>
-            <strong style={{ fontSize: 16 }}>Bibliothèque générale du chantier</strong>
-            <p className="muted" style={{ margin: '2px 0 0', fontSize: 12 }}>
-              Le catalogue de l’entreprise — pour ce qui n’était pas prévu au budget. Les quantités
-              se saisissent à la main : aucun budget ne les dicte ici.
-            </p>
-          </div>
-          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
-        </div>
-
+    <Modale
+      titre="Bibliothèque générale du chantier"
+      sousTitre="Le catalogue de l’entreprise — pour ce qui n’était pas prévu au budget. Les quantités se saisissent à la main : aucun budget ne les dicte ici."
+      largeur="xl"
+      onClose={onClose}
+      actions={(
+        <>
+          <span className="muted" style={{ fontSize: 12, marginRight: 'auto' }}>
+            {choisis.length > 0
+              ? `${choisis.length} article${choisis.length > 1 ? 's' : ''} à insérer`
+              : 'Saisissez une quantité pour choisir un article'}
+          </span>
+          <strong>{euro(total.toFixed(2))}</strong>
+          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
+          <button
+            className="btn"
+            disabled={choisis.length === 0 || inserer.isPending}
+            onClick={() => { setErr(null); inserer.mutate(); }}
+          >
+            {inserer.isPending ? 'Insertion…' : 'Insérer dans la commande'}
+          </button>
+        </>
+      )}
+    >
+      <>
         {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
@@ -195,32 +208,7 @@ export function BibliothequeCommandeModal({
           </table>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {choisis.length > 0
-              ? `${choisis.length} article${choisis.length > 1 ? 's' : ''} à insérer`
-              : 'Saisissez une quantité pour choisir un article'}
-          </span>
-          <strong style={{ marginLeft: 'auto' }}>{euro(total.toFixed(2))}</strong>
-          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
-          <button
-            className="btn"
-            disabled={choisis.length === 0 || inserer.isPending}
-            onClick={() => { setErr(null); inserer.mutate(); }}
-          >
-            {inserer.isPending ? 'Insertion…' : 'Insérer dans la commande'}
-          </button>
-        </div>
-      </div>
-    </div>
+      </>
+    </Modale>
   );
 }
-
-const overlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1100,
-  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px',
-  overflowY: 'auto',
-};
-const panel: React.CSSProperties = {
-  borderRadius: 12, padding: '20px 24px', width: 1000, maxWidth: '100%',
-};

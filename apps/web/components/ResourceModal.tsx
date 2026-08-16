@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
+import { Modale } from '@/components/Modale';
 import { usePreferences, fmtNum, cleanNum } from '@/lib/preferences';
 import { usePermissions } from '@/lib/capabilities';
 
@@ -182,16 +183,32 @@ export function ResourceModal({ libId, resource, onClose }: {
   const unitOptions = units.data ?? [];
 
   return (
-    <div className="modal-overlay" style={overlay} onClick={onClose}>
-      <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <strong style={{ fontSize: 16 }}>
-            {!peutEcrire ? 'Fiche ressource' : isEdit ? 'Modifier la ressource' : 'Nouvelle ressource'}
-          </strong>
-          <button className="btn-ghost btn" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
-        </div>
-
+    <Modale
+      titre={!peutEcrire ? 'Fiche ressource' : isEdit ? 'Modifier la ressource' : 'Nouvelle ressource'}
+      largeur="l"
+      onClose={onClose}
+      actions={(
+        <>
+          {isEdit && peutEcrire && (
+            <button className="btn-danger btn" style={{ marginRight: 'auto' }} disabled={del.isPending}
+              onClick={() => {
+                setErr(null);
+                if (confirm(`Supprimer la ressource « ${resource!.code} » ? Cette action est définitive.`)) del.mutate();
+              }}>
+              {del.isPending ? '…' : 'Supprimer'}
+            </button>
+          )}
+          <button className="btn-secondary btn" onClick={onClose}>{peutEcrire ? 'Annuler' : 'Fermer'}</button>
+          {peutEcrire && (
+            <button className="btn" disabled={!f.code || !f.label || save.isPending}
+              onClick={() => { setErr(null); save.mutate(); }}>
+              {save.isPending ? '…' : isEdit ? 'Modifier' : 'Créer'}
+            </button>
+          )}
+        </>
+      )}
+    >
+      <>
         {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
 
         {/* ── IDENTIFICATION ── */}
@@ -295,35 +312,16 @@ export function ResourceModal({ libId, resource, onClose }: {
           </div>
         </Field>
 
-        {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 20 }}>
-          <div>
-            {isEdit && peutEcrire && (
-              <button className="btn-danger btn" disabled={del.isPending}
-                onClick={() => {
-                  setErr(null);
-                  if (confirm(`Supprimer la ressource « ${resource!.code} » ? Cette action est définitive.`)) del.mutate();
-                }}>
-                {del.isPending ? '…' : 'Supprimer'}
-              </button>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn-secondary btn" onClick={onClose}>{peutEcrire ? 'Annuler' : 'Fermer'}</button>
-            {peutEcrire && (
-              <button className="btn" disabled={!f.code || !f.label || save.isPending}
-                onClick={() => { setErr(null); save.mutate(); }}>
-                {save.isPending ? '…' : isEdit ? 'Modifier' : 'Créer'}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+      </>
+    </Modale>
   );
 }
 
-/* ─────────── sous-composants ─────────── */
+
+/**
+ * Petites briques de formulaire de la fiche — titre de section, champ, grille à deux colonnes.
+ * Elles vivent avec la fiche : c'est SA mise en page, pas celle de toutes les fenêtres.
+ */
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
@@ -347,13 +345,6 @@ function Hint({ children }: { children: React.ReactNode }) {
   return <span className="muted" style={{ fontSize: 10 }}>{children}</span>;
 }
 
-const overlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1000,
-  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto',
-};
-const panel: React.CSSProperties = {
-  borderRadius: 12, padding: '24px 28px', width: 620, maxWidth: '100%',
-};
 const infoBox: React.CSSProperties = {
   background: 'var(--bg-alt, #f1f5f9)', border: '1px solid var(--border)', borderRadius: 6,
   padding: '8px 12px', fontSize: 11, margin: '0 0 12px', fontFamily: 'monospace',

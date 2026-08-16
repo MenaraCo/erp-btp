@@ -8,6 +8,8 @@ import {
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
   CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
   LayoutGrid, ArrowLeft, ArrowLeftRight,
+  AlertTriangle, CalendarRange, Dot, PackageCheck, PalmtreeIcon, ReceiptText, ShieldCheck,
+  ShoppingCart,
 } from 'lucide-react';
 import { contextualGroups, moduleForPath, sortieDuModule } from '@/lib/modules';
 
@@ -29,10 +31,16 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/direction': Gauge,
   '/chantiers': Building2,
   '/personnel': CalendarDays,
-  '/personnel/planning': CalendarDays,
-  '/personnel/conflits': ClipboardCheck,
+  '/personnel/planning': CalendarRange,
+  '/personnel/absences': PalmtreeIcon,
+  '/personnel/conflits': AlertTriangle,
   '/personnel/salaries': Users,
   '/chantiers/bibliotheque': BookOpen,
+  '/chantiers/validation-achats': ShieldCheck,
+  '/achats': ShoppingCart,
+  '/achats/receptions': PackageCheck,
+  '/achats/factures': ReceiptText,
+  '/chantier': Building2,
   '/invoicing': Receipt,
   '/estimating/parametres': Settings,
   '/chantiers/parametres': Settings,
@@ -48,7 +56,9 @@ const CONTEXT_ICONS: Record<string, React.ElementType> = {
   calendrier: CalendarDays,
   pointages: Users,
   'controle-heures': ClipboardCheck,
-  achats: Truck,
+  achats: ShoppingCart,
+  receptions: PackageCheck,
+  factures: ReceiptText,
   avancement: Gauge,
   mensuel: CalendarDays,
   pilotage: LayoutDashboard,
@@ -153,7 +163,9 @@ export function Sidebar() {
           <div className="nav-section">{courant.label}</div>
           {courant.features.map((f) => {
             const active = isActive(f.href, pathname);
-            const Icon = NAV_ICONS[f.href];
+            // Repli : une entrée sans icône déclarée reçoit un repère neutre plutôt que rien —
+            // une ligne nue au milieu d'un menu iconographié se lit comme un oubli.
+            const Icon = NAV_ICONS[f.href] ?? Dot;
             return (
               <div key={f.href} className={f.level ? 'nav-sub' : ''}>
                 <Link
@@ -162,7 +174,7 @@ export function Sidebar() {
                   title={f.label}
                   style={f.level ? { paddingLeft: 22, fontSize: 10.5, color: active ? 'var(--primary)' : '#64748b' } : undefined}
                 >
-                  {Icon && <Icon size={f.level ? 11 : 13} />}
+                  <Icon size={f.level ? 11 : 13} />
                   <span className="nav-label">{f.label}</span>
                 </Link>
               </div>

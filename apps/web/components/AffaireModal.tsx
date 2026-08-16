@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
+import { Modale } from '@/components/Modale';
 
 /* Forme brute de l'affaire renvoyée par l'API (colonnes snake_case). null = création. */
 export interface AffaireInit {
@@ -127,13 +128,20 @@ export function AffaireModal({ affaire, onClose, onSaved }: {
   const canSave = f.name.trim().length > 0 && !save.isPending;
 
   return (
-    <div className="modal-overlay" style={overlay} onClick={onClose}>
-      <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <strong style={{ fontSize: 16 }}>{isEdit ? "Modifier l'affaire" : 'Nouvelle affaire'}</strong>
-          <button className="btn-ghost btn" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
-        </div>
-
+    <Modale
+      titre={isEdit ? "Modifier l'affaire" : 'Nouvelle affaire'}
+      largeur="l"
+      onClose={onClose}
+      actions={(
+        <>
+          <button className="btn-secondary btn" onClick={onClose}>Annuler</button>
+          <button className="btn" disabled={!canSave} onClick={() => { setErr(null); save.mutate(); }}>
+            {save.isPending ? '…' : isEdit ? 'Enregistrer' : "Créer l'affaire"}
+          </button>
+        </>
+      )}
+    >
+      <>
         {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
 
         <SectionTitle>Identification</SectionTitle>
@@ -245,14 +253,8 @@ export function AffaireModal({ affaire, onClose, onSaved }: {
             onChange={(e) => setF({ ...f, notes: e.target.value })} />
         </Field>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
-          <button className="btn-secondary btn" onClick={onClose}>Annuler</button>
-          <button className="btn" disabled={!canSave} onClick={() => { setErr(null); save.mutate(); }}>
-            {save.isPending ? '…' : isEdit ? 'Enregistrer' : "Créer l'affaire"}
-          </button>
-        </div>
-      </div>
-    </div>
+      </>
+    </Modale>
   );
 }
 
@@ -323,10 +325,3 @@ function MultiFromList({ value, options, onChange }: {
   );
 }
 
-const overlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1000,
-  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto',
-};
-const panel: React.CSSProperties = {
-  borderRadius: 12, padding: '22px 26px', width: 640, maxWidth: '100%',
-};

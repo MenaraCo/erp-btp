@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { MOTIFS_ABSENCE } from '@/lib/absences';
+import { Modale } from '@/components/Modale';
 
 interface Option { id: string; label: string }
 
@@ -85,15 +86,23 @@ export function AbsenceModal({
   const valide = Boolean(employeeId && kind && debut && (mode === 'edition' || fin >= debut));
 
   return (
-    <div className="modal-overlay" style={overlay} onClick={onClose}>
-      <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <strong style={{ fontSize: 16 }}>
-            {mode === 'creation' ? 'Poser une absence' : "Modifier l'absence"}
-          </strong>
-          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
-        </div>
-
+    <Modale
+      titre={mode === 'creation' ? 'Poser une absence' : "Modifier l'absence"}
+      onClose={onClose}
+      actions={(
+        <>
+          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
+          <button
+            className="btn"
+            disabled={!valide || enregistrer.isPending}
+            onClick={() => { setErr(null); enregistrer.mutate(); }}
+          >
+            {enregistrer.isPending ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </>
+      )}
+    >
+      <>
         {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -154,26 +163,7 @@ export function AbsenceModal({
           />
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
-          <button
-            className="btn"
-            disabled={!valide || enregistrer.isPending}
-            onClick={() => { setErr(null); enregistrer.mutate(); }}
-          >
-            {enregistrer.isPending ? 'Enregistrement…' : 'Enregistrer'}
-          </button>
-        </div>
-      </div>
-    </div>
+      </>
+    </Modale>
   );
 }
-
-const overlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1100,
-  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '60px 20px',
-  overflowY: 'auto',
-};
-const panel: React.CSSProperties = {
-  borderRadius: 12, padding: '22px 26px', width: 520, maxWidth: '100%',
-};

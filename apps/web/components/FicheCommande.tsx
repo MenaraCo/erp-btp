@@ -14,6 +14,7 @@ import { ApproModal } from '@/components/ApproModal';
 import { LigneRapprochement, SaisieRapprochement } from '@/components/SaisieRapprochement';
 import { BibliothequeCommandeModal } from '@/components/BibliothequeCommandeModal';
 import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
+import { Modale } from '@/components/Modale';
 import {
   CELL_CTR, CodeInput, UnitSelect, focusNextCell, infoBtn,
 } from '@/components/GrilleSaisie';
@@ -189,17 +190,14 @@ function FicheRessourceModal({
 
   const coeff = Number(ligne.coeff_conversion || 0);
   return (
-    <div className="modal-overlay" style={ficheOverlay} onClick={onClose}>
-      <div className="modal-box" style={fichePanel} onClick={(e) => e.stopPropagation()}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div>
-          <strong style={{ fontSize: 15 }}>Fiche ressource</strong>
-          <p className="muted" style={{ margin: '2px 0 0', fontSize: 12 }}>
-            {ligne.code ? `${ligne.code} · ` : ''}{ligne.designation}
-          </p>
-        </div>
-        <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
-      </div>
+    <Modale
+      titre="Fiche ressource"
+      sousTitre={`${ligne.code ? `${ligne.code} · ` : ''}${ligne.designation}`}
+      largeur="l"
+      onClose={onClose}
+      actions={<button className="btn" onClick={onClose}>Fermer</button>}
+    >
+      <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
         <div className="field" style={{ marginBottom: 0 }}>
           <label>Nature</label>
@@ -241,22 +239,10 @@ function FicheRessourceModal({
           && ` · Déboursé budgété : ${Number(ligne.pu_debourse).toFixed(4)} €/${ligne.unite_emploi ?? 'u'}`}
       </p>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-        <button className="btn" onClick={onClose}>Fermer</button>
-      </div>
-      </div>
-    </div>
+      </>
+    </Modale>
   );
 }
-
-const ficheOverlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1100,
-  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '60px 20px',
-  overflowY: 'auto',
-};
-const fichePanel: React.CSSProperties = {
-  borderRadius: 12, padding: '20px 24px', width: 720, maxWidth: '100%',
-};
 
 /**
  * Bouton « + » d'ajout de ligne, calqué sur le montage d'un devis : un déclencheur, deux gestes.

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { Modale } from '@/components/Modale';
 
 export interface CreneauEdite {
   id: string;
@@ -155,15 +156,23 @@ export function CreneauModal({
   const valide = Boolean(employeeId && chantierId && date && (horodate || Number(heures) > 0));
 
   return (
-    <div className="modal-overlay" style={overlay} onClick={onClose}>
-      <div className="modal-box" style={panel} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <strong style={{ fontSize: 16 }}>
-            {mode === 'creation' ? 'Ajouter des heures' : "Modifier l'intervention"}
-          </strong>
-          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
-        </div>
-
+    <Modale
+      titre={mode === 'creation' ? 'Ajouter des heures' : "Modifier l'intervention"}
+      onClose={onClose}
+      actions={(
+        <>
+          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
+          <button
+            className="btn"
+            disabled={!valide || enregistrer.isPending}
+            onClick={() => { setErr(null); enregistrer.mutate(); }}
+          >
+            {enregistrer.isPending ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </>
+      )}
+    >
+      <>
         {err && <div className="error" style={{ marginBottom: 12 }}>{err}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -268,18 +277,8 @@ export function CreneauModal({
           {kind === 'realise' && ' L’ouvrage donne le coût réel de la prestation ; le code analytique, celui du poste.'}
         </p>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button className="btn btn-secondary" onClick={onClose}>Annuler</button>
-          <button
-            className="btn"
-            disabled={!valide || enregistrer.isPending}
-            onClick={() => { setErr(null); enregistrer.mutate(); }}
-          >
-            {enregistrer.isPending ? 'Enregistrement…' : 'Enregistrer'}
-          </button>
-        </div>
-      </div>
-    </div>
+      </>
+    </Modale>
   );
 }
 
@@ -288,12 +287,3 @@ function dureeEnHeures(debut: string, fin: string): string {
   const d = (min(fin) - min(debut)) / 60;
   return d > 0 ? String(Math.round(d * 100) / 100) : '0';
 }
-
-const overlay: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1100,
-  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '60px 20px',
-  overflowY: 'auto',
-};
-const panel: React.CSSProperties = {
-  borderRadius: 12, padding: '22px 26px', width: 560, maxWidth: '100%',
-};
