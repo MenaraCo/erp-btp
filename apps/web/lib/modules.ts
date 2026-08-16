@@ -195,7 +195,10 @@ export const MODULES: AppModule[] = [
     home: '/direction',
     match: ['/direction'],
     capabilities: ['financial.portfolio', 'financial.dashboard'],
-    features: [{ href: '/direction', label: 'Portefeuille' }],
+    features: [
+      { href: '/direction', label: 'Portefeuille' },
+      { href: '/direction/achats', label: 'Consommation achats' },
+    ],
   },
   {
     key: 'achats',
@@ -209,6 +212,7 @@ export const MODULES: AppModule[] = [
       { href: '/achats', label: 'Commandes' },
       { href: '/achats/receptions', label: 'Réceptions' },
       { href: '/achats/factures', label: 'Factures fournisseur' },
+      { href: '/direction/achats', label: 'Consommation (Direction)' },
     ],
   },
   {

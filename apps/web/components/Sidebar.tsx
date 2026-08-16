@@ -7,7 +7,7 @@ import {
   LayoutDashboard, CalendarDays, FolderOpen, FileText, BookOpen,
   Layers, Package, Users, Truck, Building2, Receipt, Settings, HardHat,
   CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
-  LayoutGrid, ArrowLeft, ArrowLeftRight,
+  LayoutGrid, ArrowLeft, ArrowLeftRight, BarChart3,
   AlertTriangle, CalendarRange, Dot, PackageCheck, PalmtreeIcon, ReceiptText, ShieldCheck,
   ShoppingCart,
 } from 'lucide-react';
@@ -29,6 +29,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/suppliers': Truck,
   '/acceptation': ClipboardCheck,
   '/direction': Gauge,
+  '/direction/achats': BarChart3,
   '/chantiers': Building2,
   '/personnel': CalendarDays,
   '/personnel/planning': CalendarRange,

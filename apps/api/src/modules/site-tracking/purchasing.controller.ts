@@ -21,6 +21,7 @@ import { ValidationAchatsService } from './validation-achats.service';
 import { LigneSaisie, RapprochementService } from './rapprochement.service';
 import { CommandePdfService } from './commande-pdf.service';
 import { DocumentsAchatsService, TypeDocument } from './documents-achats.service';
+import { AchatsReportingService, AxeConsommation } from './achats-reporting.service';
 
 const NATURES = ['labor', 'material', 'equipment', 'subcontract', 'site_overhead'];
 
@@ -50,6 +51,7 @@ export class PurchasingController {
     private readonly rapprochement: RapprochementService,
     private readonly pdf: CommandePdfService,
     private readonly documents: DocumentsAchatsService,
+    private readonly reporting: AchatsReportingService,
   ) {}
 
   // --- Bons de livraison et factures reçus ---
@@ -239,6 +241,27 @@ export class PurchasingController {
   @RequiresPermission('site_tracking.read')
   registreFactures(@Query() query: Record<string, string>) {
     return this.registre.factures(filtreDepuis(query));
+  }
+
+  /** Reporting Direction : consommation de toute l'entreprise, regroupée selon un axe. */
+  @Get('achats/reporting')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  reportingAchats(@Query() query: Record<string, string>) {
+    const axes: AxeConsommation[] = [
+      'fournisseur', 'ressource', 'code', 'famille', 'lot', 'chantier', 'nature',
+    ];
+    const axe = axes.includes(query.axe as AxeConsommation)
+      ? (query.axe as AxeConsommation) : 'fournisseur';
+    return this.reporting.consommation(axe, {
+      du: query.du ?? null,
+      au: query.au ?? null,
+      chantierId: query.chantier ?? null,
+      supplierId: query.fournisseur ?? null,
+      nature: query.nature ?? null,
+      codeAnalytiqueId: query.code ?? null,
+      q: query.q ?? null,
+    });
   }
 
   /** Fiche d'une commande : en-tête, lignes, réceptions, factures. */
