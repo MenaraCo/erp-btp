@@ -9,6 +9,7 @@ import { EmployeeService } from './employee.service';
 import { PlanningService } from './planning.service';
 import { PersonnelService } from './personnel.service';
 import { AbsenceService } from './absence.service';
+import { AbsencesPdfService } from './absences-pdf.service';
 import { ApprovisionnementService } from './approvisionnement.service';
 import { AchatsRegistreService } from './achats-registre.service';
 import { ValidationAchatsService } from './validation-achats.service';
@@ -39,7 +40,7 @@ import { AnalyticsController } from './analytics.controller';
   providers: [ChantierService, TimesheetService,
     EmployeeService,
     PlanningService,
-    PersonnelService, AbsenceService, PurchasingService, ApprovisionnementService,
+    PersonnelService, AbsenceService, AbsencesPdfService, PurchasingService, ApprovisionnementService,
     AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService,
     DocumentsAchatsService, AchatsReportingService, PayeService,
     AnalyticsService, LibraryTransferService],
@@ -57,7 +58,7 @@ import { AnalyticsController } from './analytics.controller';
   exports: [ChantierService, TimesheetService,
     EmployeeService,
     PlanningService,
-    PersonnelService, AbsenceService, PurchasingService, ApprovisionnementService,
+    PersonnelService, AbsenceService, AbsencesPdfService, PurchasingService, ApprovisionnementService,
     AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService, DocumentsAchatsService,
     AchatsReportingService, PayeService, AnalyticsService],
 })

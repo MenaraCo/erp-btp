@@ -55,7 +55,7 @@ export class AbsenceService {
   ) {}
 
   /** Absences d'une période, éventuellement d'un seul salarié. */
-  list(debut: string, fin: string, employeeId?: string | null) {
+  list(debut: string, fin: string, employeeId?: string | null, motif?: string | null) {
     const tenantId = this.context.requireTenantId();
     if (!ISO.test(debut ?? '') || !ISO.test(fin ?? '')) {
       throw new BadRequestException('Période attendue au format AAAA-MM-JJ.');
@@ -64,10 +64,11 @@ export class AbsenceService {
       const params: unknown[] = [debut, fin];
       let filtre = '';
       if (employeeId) { params.push(employeeId); filtre = `AND a.employee_id = $${params.length}`; }
+      if (motif) { params.push(motif); filtre += ` AND a.kind = $${params.length}`; }
       const rows = await em.query(
         `SELECT a.id, a.employee_id, a.kind, a.work_date::text AS work_date, a.hours::text AS hours,
                 to_char(a.start_time,'HH24:MI') AS debut, to_char(a.end_time,'HH24:MI') AS fin,
-                a.comment,
+                a.comment, e.code AS matricule,
                 trim(coalesce(e.first_name,'') || ' ' || e.last_name) AS label
            FROM absence a
            JOIN employee e ON e.id = a.employee_id
@@ -78,6 +79,7 @@ export class AbsenceService {
       return rows.map((r: Record<string, unknown>) => ({
         id: r.id as string,
         employeeId: r.employee_id as string,
+        matricule: (r.matricule as string | null) ?? null,
         label: r.label as string,
         kind: r.kind as string,
         date: r.work_date as string,

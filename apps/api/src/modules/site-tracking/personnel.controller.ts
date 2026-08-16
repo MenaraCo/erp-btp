@@ -1,10 +1,12 @@
 import {
-  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query,
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { PersonnelService } from './personnel.service';
 import { AbsenceService, type AbsenceInput } from './absence.service';
+import { AbsencesPdfService } from './absences-pdf.service';
 
 /** Les deux seuls types de créneaux déplaçables : le reste (absences) a ses propres routes. */
 function typeDeCreneau(kind: string): 'realise' | 'prevu' {
@@ -23,6 +25,7 @@ export class PersonnelController {
   constructor(
     private readonly personnel: PersonnelService,
     private readonly absences: AbsenceService,
+    private readonly absencesPdf: AbsencesPdfService,
   ) {}
 
   @Get('occupation')
@@ -119,8 +122,26 @@ export class PersonnelController {
     @Query('debut') debut: string,
     @Query('fin') fin: string,
     @Query('salarie') employeeId?: string,
+    @Query('motif') motif?: string,
   ) {
-    return this.absences.list(debut, fin, employeeId ?? null);
+    return this.absences.list(debut, fin, employeeId ?? null, motif ?? null);
+  }
+
+  /** Relevé d'absences en PDF : le document qu'on classe ou qu'on transmet à la paye. */
+  @Get('absences/export.pdf')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.read')
+  async exporterAbsencesPdf(
+    @Res() res: Response,
+    @Query('debut') debut: string,
+    @Query('fin') fin: string,
+    @Query('salarie') employeeId?: string,
+    @Query('motif') motif?: string,
+  ) {
+    const pdf = await this.absencesPdf.releve(debut, fin, employeeId ?? null, motif ?? null);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="absences-${debut}_${fin}.pdf"`);
+    res.send(pdf);
   }
 
   /** Pose une absence, sur un jour ou sur toute une période (congés d'une semaine). */
