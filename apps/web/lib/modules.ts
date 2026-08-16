@@ -88,10 +88,19 @@ export function contextualGroups(pathname: string): ContextGroup[] {
         features: [
           { href: `/chantiers/${id}`, label: 'Fiche chantier' },
           { href: `/chantiers/${id}/structure`, label: 'Structure & budget' },
-          { href: `/chantiers/${id}/achats`, label: 'Achats' },
           { href: `/chantiers/${id}/avancement`, label: 'Avancement' },
           { href: `/chantiers/${id}/mensuel`, label: 'Gestion mensuelle' },
           { href: `/chantiers/${id}/pilotage`, label: 'Pilotage' },
+        ],
+      },
+      {
+        // Les achats DU chantier ont leurs propres écrans : on ne quitte pas le chantier pour
+        // traiter ses commandes, et rien de ce qu'on y voit ne concerne un autre chantier.
+        title: 'Achats',
+        features: [
+          { href: `/chantiers/${id}/achats`, label: 'Commandes' },
+          { href: `/chantiers/${id}/achats/receptions`, label: 'Réceptions' },
+          { href: `/chantiers/${id}/achats/factures`, label: 'Factures fournisseur' },
         ],
       },
       {

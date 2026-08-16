@@ -76,8 +76,8 @@ export default function AchatsChantierPage() {
     onSuccess: (bc) => {
       setErr(null);
       qc.invalidateQueries({ queryKey: ['achats-commandes'] });
-      // On ouvre la commande créée : c'est là qu'on la remplit.
-      router.push(`/achats/${bc.id}`);
+      // On ouvre la commande créée : c'est là qu'on la remplit — sans quitter le chantier.
+      router.push(`/chantiers/${chantierId}/achats/${bc.id}`);
     },
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Création impossible.'),
   });
@@ -166,7 +166,7 @@ export default function AchatsChantierPage() {
               <tr
                 key={c.id}
                 style={{ cursor: 'pointer' }}
-                onClick={() => router.push(`/achats/${c.id}`)}
+                onClick={() => router.push(`/chantiers/${chantierId}/achats/${c.id}`)}
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
               >
