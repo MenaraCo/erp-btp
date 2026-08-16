@@ -9,7 +9,7 @@ import {
   CreditCard, Gauge, ChevronsLeft, ChevronsRight, UserCog, Upload, ClipboardCheck,
   LayoutGrid, ArrowLeft, ArrowLeftRight,
 } from 'lucide-react';
-import { contextualGroups, moduleForPath } from '@/lib/modules';
+import { contextualGroups, moduleForPath, sortieDuModule } from '@/lib/modules';
 
 const STORAGE_KEY = 'erp-sidebar-collapsed';
 
@@ -103,6 +103,7 @@ function isActive(href: string, pathname: string): boolean {
 export function Sidebar() {
   const pathname = usePathname();
   const courant = moduleForPath(pathname);
+  const sortie = sortieDuModule(courant);
   const contextes = contextualGroups(pathname);
   const vueCourante = useSearchParams().get('vue');
   const [collapsed, setCollapsed] = useState(false);
@@ -130,15 +131,21 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Retour au menu — toujours en tête, c'est la sortie du module. */}
+      {/*
+        Retour — toujours en tête, c'est la sortie du module. Depuis un sous-module (Achats,
+        Gestion du personnel), on remonte à SON espace plutôt qu'au menu de démarrage : sauter
+        deux niveaux d'un coup ferait perdre le fil de là d'où l'on vient.
+      */}
       <Link
-        href="/"
+        href={sortie}
         className={pathname === '/' ? 'active' : ''}
-        title="Revenir au menu de démarrage"
+        title={sortie === '/' ? 'Revenir au menu de démarrage' : 'Revenir à l’espace Chantier'}
         style={{ marginBottom: 4 }}
       >
         {pathname === '/' ? <LayoutGrid size={13} /> : <ArrowLeft size={13} />}
-        <span className="nav-label">{pathname === '/' ? 'Menu de démarrage' : 'Menu'}</span>
+        <span className="nav-label">
+          {pathname === '/' ? 'Menu de démarrage' : sortie === '/' ? 'Menu' : 'Espace Chantier'}
+        </span>
       </Link>
 
       {courant && (

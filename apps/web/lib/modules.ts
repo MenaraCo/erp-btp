@@ -29,6 +29,13 @@ export interface AppModule {
   capabilities?: string[];
   /** Vrai pour les modules hors souscription : jamais grisés. */
   always?: boolean;
+  /**
+   * Module parent, pour ce qui appartient à un espace plus large. Les Achats et la Gestion du
+   * personnel sont des métiers du CHANTIER : ils ont leur espace propre (on ne travaille pas ses
+   * commandes chantier par chantier), mais ils n'ont pas à encombrer le menu de démarrage à côté
+   * de l'Étude de prix. Ils s'ouvrent donc depuis l'espace Chantier.
+   */
+  parent?: string;
   features: ModuleFeature[];
 }
 
@@ -152,9 +159,9 @@ export const MODULES: AppModule[] = [
   {
     key: 'chantiers',
     label: 'Chantier',
-    tagline: 'Budgets, pointages, achats et avancement',
-    home: '/chantiers',
-    match: ['/chantiers'],
+    tagline: 'Chantiers, achats, personnel, matériel et stocks',
+    home: '/chantier',
+    match: ['/chantier', '/chantiers'],
     capabilities: ['site_tracking.budget', 'site_tracking.timesheet'],
     features: [
       { href: '/chantiers', label: 'Chantiers' },
@@ -182,6 +189,7 @@ export const MODULES: AppModule[] = [
   },
   {
     key: 'achats',
+    parent: 'chantiers',
     label: 'Achats',
     tagline: 'Commandes, réceptions et factures fournisseur, tous chantiers confondus',
     home: '/achats',
@@ -195,6 +203,7 @@ export const MODULES: AppModule[] = [
   },
   {
     key: 'personnel',
+    parent: 'chantiers',
     label: 'Gestion du personnel',
     tagline: 'Salariés, heures, planning, congés et absences, tous chantiers confondus',
     home: '/personnel',
@@ -239,6 +248,22 @@ export const MODULES: AppModule[] = [
  * Module auquel appartient une URL. Le préfixe le PLUS LONG gagne : sans cela `/clients` et
  * `/chantiers` se disputeraient les pages, et une sous-page se rattacherait au mauvais module.
  */
+/** Modules du menu de démarrage : ceux qui ne vivent pas dans l'espace d'un autre. */
+export function modulesRacine(): AppModule[] {
+  return MODULES.filter((m) => !m.parent);
+}
+
+/** Sous-modules d'un espace (Achats et Personnel sous Chantier). */
+export function sousModules(key: string): AppModule[] {
+  return MODULES.filter((m) => m.parent === key);
+}
+
+/** Où mène la sortie d'un module : son espace parent, sinon le menu de démarrage. */
+export function sortieDuModule(m: AppModule | null): string {
+  if (!m?.parent) return '/';
+  return MODULES.find((x) => x.key === m.parent)?.home ?? '/';
+}
+
 export function moduleForPath(pathname: string): AppModule | null {
   let best: AppModule | null = null;
   let bestLen = -1;

@@ -154,6 +154,25 @@ export class PurchasingController {
     return this.purchasing.validateOrder(orderId);
   }
 
+  /**
+   * Réouverture d'une commande envoyée — le droit `rbac.role.manage` sert de marqueur
+   * d'administration : seul un administrateur le détient dans les rôles système.
+   */
+  @Post('purchase-orders/:orderId/reopen')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('rbac.role.manage')
+  reopen(@Param('orderId') orderId: string, @Body() body: { motif?: string }) {
+    return this.purchasing.reopenOrder(orderId, body?.motif ?? '');
+  }
+
+  /** Journal d'une commande : validation, annulation, réouverture. */
+  @Get('purchase-orders/:orderId/events')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  events(@Param('orderId') orderId: string) {
+    return this.purchasing.listEvents(orderId);
+  }
+
   @Post('purchase-orders/:orderId/cancel')
   @RequiresCapability('purchasing')
   @RequiresPermission('site_tracking.write')

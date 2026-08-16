@@ -2,9 +2,12 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FileText, ClipboardCheck, HardHat, Receipt, Gauge, Users, Settings } from 'lucide-react';
+import {
+  FileText, ClipboardCheck, HardHat, Receipt, Gauge, Users, Settings,
+  ShoppingCart, Truck, Boxes,
+} from 'lucide-react';
 import { useCapabilities } from '@/lib/capabilities';
-import { AppModule, MODULES, moduleIsOpen } from '@/lib/modules';
+import { AppModule, moduleIsOpen, modulesRacine } from '@/lib/modules';
 
 /**
  * Menu de démarrage — la porte d'entrée de l'application.
@@ -22,6 +25,10 @@ const DECOR: Record<string, { icon: React.ElementType; tint: string }> = {
   estimating: { icon: FileText, tint: '#007aff' },
   acceptation: { icon: ClipboardCheck, tint: '#34c759' },
   chantiers: { icon: HardHat, tint: '#ff9500' },
+  achats: { icon: ShoppingCart, tint: '#0891b2' },
+  personnel: { icon: Users, tint: '#4d7c0f' },
+  materiel: { icon: Truck, tint: '#b45309' },
+  stocks: { icon: Boxes, tint: '#7c3aed' },
   invoicing: { icon: Receipt, tint: '#af52de' },
   direction: { icon: Gauge, tint: '#ff3b30' },
   referentiel: { icon: Users, tint: '#5ac8fa' },
@@ -37,7 +44,7 @@ export default function MenuDemarragePage() {
       <p className="menu-sous">Choisissez un module pour ouvrir son espace de travail.</p>
 
       <div className="grille-tuiles">
-        {MODULES.map((m) => (
+        {modulesRacine().map((m) => (
           <Tuile key={m.key} module={m} ouvert={caps.isLoading || moduleIsOpen(m, caps.has)} />
         ))}
       </div>

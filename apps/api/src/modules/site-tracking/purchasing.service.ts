@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -113,7 +114,9 @@ export class PurchasingService {
         throw new NotFoundException(`Unknown purchase order "${orderId}"`);
       }
       if (order[0].status !== 'draft') {
-        throw new ConflictException('Lines can only be added to a draft order.');
+        throw new ConflictException(
+          'Cette commande est envoyée : elle ne se modifie plus. Un administrateur peut la rouvrir.',
+        );
       }
       if (input.executionLineId != null) {
         await this.assertExecutionLineInChantier(em, input.executionLineId, order[0].chantier_id);
@@ -211,6 +214,82 @@ export class PurchasingService {
     return this.transition(orderId, 'cancelled', false);
   }
 
+  /**
+   * Rouvre une commande envoyée, pour corriger une erreur.
+   *
+   * Réservé à l'administrateur (garde de permission côté contrôleur) et jamais silencieux : le
+   * motif est exigé et le journal garde qui a rouvert quoi. Une commande déjà reçue ou facturée
+   * ne se rouvre PAS : ses lignes servent de référence au rapprochement, les changer après coup
+   * rendrait la comparaison fausse — il faut alors annuler et refaire.
+   */
+  reopenOrder(orderId: string, motif: string) {
+    const tenantId = this.context.requireTenantId();
+    const raison = (motif ?? '').trim();
+    if (raison.length < 3) {
+      throw new BadRequestException('Indiquez le motif de la réouverture.');
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT status FROM purchase_order WHERE id = $1 FOR UPDATE`, [orderId],
+      );
+      if (rows.length === 0) throw new NotFoundException(`Unknown purchase order "${orderId}"`);
+      if (rows[0].status !== 'validated') {
+        throw new ConflictException('Seule une commande envoyée peut être rouverte.');
+      }
+      const attaches = await em.query(
+        `SELECT (SELECT COUNT(*)::int FROM delivery_note WHERE order_id = $1) AS bl,
+                (SELECT COUNT(*)::int FROM supplier_invoice WHERE order_id = $1) AS factures`,
+        [orderId],
+      );
+      if (attaches[0].bl > 0 || attaches[0].factures > 0) {
+        throw new ConflictException(
+          'Cette commande a déjà une réception ou une facture : annulez-la et refaites-en une.',
+        );
+      }
+
+      await em.query(
+        `UPDATE purchase_order
+            SET status = 'draft', validated_at = NULL,
+                reopened_count = reopened_count + 1, updated_at = now()
+          WHERE id = $1`,
+        [orderId],
+      );
+      await this.journaliser(em, tenantId, orderId, 'reopened', raison);
+      return (await em.query(`SELECT * FROM purchase_order WHERE id = $1`, [orderId]))[0];
+    });
+  }
+
+  /** Journal d'une commande : validation, annulation, réouverture — avec leur auteur. */
+  listEvents(orderId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, (em) =>
+      em.query(
+        `SELECT e.id, e.action, e.motif, e.created_at,
+                trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')) AS auteur,
+                u.email AS auteur_email
+           FROM purchase_order_event e
+           LEFT JOIN user_account u ON u.id = e.actor_user_id
+          WHERE e.order_id = $1
+          ORDER BY e.created_at DESC`,
+        [orderId],
+      ),
+    );
+  }
+
+  private journaliser(
+    em: EntityManager,
+    tenantId: string,
+    orderId: string,
+    action: string,
+    motif: string | null = null,
+  ): Promise<unknown> {
+    return em.query(
+      `INSERT INTO purchase_order_event (tenant_id, order_id, action, actor_user_id, motif)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [tenantId, orderId, action, this.context.getUserId() ?? null, motif],
+    );
+  }
+
   private transition(orderId: string, to: PurchaseOrderStatus, setValidatedAt: boolean) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
@@ -230,6 +309,7 @@ export class PurchasingService {
         `UPDATE purchase_order SET status = $1${setValidatedAt ? ', validated_at = now()' : ''}, updated_at = now() WHERE id = $2`,
         [to, orderId],
       );
+      await this.journaliser(em, tenantId, orderId, to === 'validated' ? 'validated' : 'cancelled');
       return (await em.query(`SELECT * FROM purchase_order WHERE id = $1`, [orderId]))[0];
     });
   }

@@ -29,7 +29,7 @@ interface Reponse { lignes: Commande[]; total: number; montantTotal: string; pag
 
 const STATUTS = [
   { value: 'draft', label: 'Brouillon' },
-  { value: 'validated', label: 'Validée' },
+  { value: 'validated', label: 'Envoyée' },
   { value: 'cancelled', label: 'Annulée' },
 ];
 const BADGE: Record<string, string> = { draft: 'info', validated: 'success', cancelled: 'danger' };
