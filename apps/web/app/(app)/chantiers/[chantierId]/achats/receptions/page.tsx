@@ -7,22 +7,20 @@ import { useQuery } from '@tanstack/react-query';
 import { PackageCheck } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { euro } from '@/lib/format';
+import { GroupeReception, TableauReceptions } from '@/components/RegistreGroupe';
 
-interface Reception {
-  id: string;
-  code: string;
-  received_at: string | null;
-  order_id: string;
-  commande: string;
-  fournisseur: string | null;
-}
-interface Reponse { lignes: Reception[]; total: number }
-
-function jour(v: string | null): string {
-  return v ? new Date(v).toLocaleDateString('fr-FR') : '—';
+interface Reponse {
+  lignes: GroupeReception[];
+  total: number;
+  totalBons: number;
+  montantTotal: string;
 }
 
-/** Réceptions de CE chantier : ce qui est arrivé, et pour quelle commande. */
+/**
+ * Réceptions de CE chantier — même tableau que le registre d'entreprise, sans la colonne chantier
+ * (on sait déjà où l'on est) et sans quitter le chantier quand on ouvre une commande.
+ */
 export default function ReceptionsChantierPage() {
   const { token } = useAuth();
   const chantierId = String(useParams().chantierId);
@@ -48,8 +46,8 @@ export default function ReceptionsChantierPage() {
         <PackageCheck size={20} /> Réceptions
       </h1>
       <p className="muted" style={{ marginTop: 0, maxWidth: 800 }}>
-        Les bons de livraison de ce chantier. Une réception s’enregistre depuis la commande
-        concernée ; le rapprochement ligne à ligne arrive à l’étape suivante.
+        Une ligne par commande de ce chantier : ce qui est arrivé, ce qui manque. Une réception
+        s’enregistre depuis la commande concernée.
       </p>
 
       <div className="field" style={{ marginTop: 12, marginBottom: 0, maxWidth: 260 }}>
@@ -61,39 +59,19 @@ export default function ReceptionsChantierPage() {
         />
       </div>
 
-      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
-        <table className="grid" style={{ margin: 0 }}>
-          <thead>
-            <tr>
-              <th style={{ width: 160 }}>N° de BL</th>
-              <th style={{ width: 120 }}>Reçu le</th>
-              <th>Commande</th>
-              <th>Fournisseur</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(r?.lignes ?? []).map((d) => (
-              <tr key={d.id}>
-                <td className="code-cell">{d.code}</td>
-                <td className="muted">{jour(d.received_at)}</td>
-                <td>
-                  <Link href={`/chantiers/${chantierId}/achats/${d.order_id}`} className="link">
-                    {d.commande}
-                  </Link>
-                </td>
-                <td>{d.fournisseur ?? <span className="muted">Non renseigné</span>}</td>
-              </tr>
-            ))}
-            {r && r.lignes.length === 0 && (
-              <tr>
-                <td colSpan={4} className="muted" style={{ padding: 20, textAlign: 'center' }}>
-                  Aucune réception sur ce chantier.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <TableauReceptions
+        lignes={r?.lignes ?? []}
+        lienCommande={(id) => `/chantiers/${chantierId}/achats/${id}`}
+        avecChantier={false}
+        vide="Aucune réception sur ce chantier."
+      />
+
+      {r && r.total > 0 && (
+        <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+          {r.total} commande{r.total > 1 ? 's' : ''} réceptionnée{r.total > 1 ? 's' : ''} ·{' '}
+          {r.totalBons} bon{r.totalBons > 1 ? 's' : ''} de livraison · {euro(r.montantTotal)} reçus
+        </p>
+      )}
     </div>
   );
 }

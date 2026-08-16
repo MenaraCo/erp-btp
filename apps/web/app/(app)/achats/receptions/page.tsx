@@ -1,28 +1,23 @@
 'use client';
 
-import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { PackageCheck } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { euro } from '@/lib/format';
 import { BarreRecherche, Pagination, useRegistre } from '@/components/RegistreAchats';
+import { GroupeReception, TableauReceptions } from '@/components/RegistreGroupe';
 
-interface Reception {
-  id: string;
-  code: string;
-  received_at: string | null;
-  order_id: string;
-  commande: string;
-  chantier_code: string | null;
-  fournisseur: string | null;
-}
-interface Reponse { lignes: Reception[]; total: number; page: number; parPage: number }
-
-function jour(v: string | null): string {
-  return v ? new Date(v).toLocaleDateString('fr-FR') : '—';
+interface Reponse {
+  lignes: GroupeReception[];
+  total: number;
+  totalBons: number;
+  montantTotal: string;
+  page: number;
+  parPage: number;
 }
 
-/** Registre des réceptions : ce qui est arrivé sur les chantiers, et pour quelle commande. */
+/** Registre des réceptions de l'entreprise — une ligne par commande, ses BL dépliables. */
 export default function ReceptionsPage() {
   const { token } = useAuth();
   const { filtres, majFiltres, page, setPage, requete } = useRegistre();
@@ -40,45 +35,24 @@ export default function ReceptionsPage() {
         <PackageCheck size={20} /> Réceptions
       </h1>
       <p className="muted" style={{ marginTop: 0, maxWidth: 820 }}>
-        Les bons de livraison enregistrés, rattachés à leur commande. Le rapprochement ligne à ligne
-        entre commandé et reçu arrive à l’étape suivante du module.
+        Une ligne par commande : ce qui est arrivé, ce qui manque encore. Dépliez pour voir les bons
+        de livraison qui l’ont alimentée.
       </p>
 
       <BarreRecherche filtres={filtres} onChange={majFiltres} total={r?.total ?? 0} />
 
-      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
-        <table className="grid" style={{ margin: 0 }}>
-          <thead>
-            <tr>
-              <th style={{ width: 150 }}>N° de BL</th>
-              <th style={{ width: 110 }}>Reçu le</th>
-              <th>Commande</th>
-              <th>Chantier</th>
-              <th>Fournisseur</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(r?.lignes ?? []).map((d) => (
-              <tr key={d.id}>
-                <td className="code-cell">{d.code}</td>
-                <td className="muted">{jour(d.received_at)}</td>
-                <td>
-                  <Link href={`/achats/${d.order_id}`} className="link">{d.commande}</Link>
-                </td>
-                <td>{d.chantier_code ?? '—'}</td>
-                <td>{d.fournisseur ?? <span className="muted">Non renseigné</span>}</td>
-              </tr>
-            ))}
-            {r && r.lignes.length === 0 && (
-              <tr>
-                <td colSpan={5} className="muted" style={{ padding: 20, textAlign: 'center' }}>
-                  Aucune réception ne correspond à cette recherche.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <TableauReceptions
+        lignes={r?.lignes ?? []}
+        lienCommande={(id) => `/achats/${id}`}
+      />
+
+      {r && r.total > 0 && (
+        <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+          {r.total} commande{r.total > 1 ? 's' : ''} réceptionnée{r.total > 1 ? 's' : ''} ·{' '}
+          {r.totalBons} bon{r.totalBons > 1 ? 's' : ''} de livraison · {euro(r.montantTotal)} reçus
+          (valorisés au prix de la commande)
+        </p>
+      )}
 
       <Pagination page={page} total={r?.total ?? 0} parPage={r?.parPage ?? 25} onPage={setPage} />
     </div>
