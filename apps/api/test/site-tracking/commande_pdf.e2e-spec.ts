@@ -61,6 +61,12 @@ describe('Site-tracking — bon de commande PDF', () => {
     const buffer = res.body as Buffer;
     expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
     expect(buffer.length).toBeGreaterThan(1500);
+
+    // Une commande de deux lignes tient sur UNE page. Compter les pages n'est pas un détail :
+    // un pied de page écrit sous la marge fait ajouter une page vide à chaque passage, et le
+    // document s'ouvre alors sur du vide — ce que la seule signature %PDF- ne révèle pas.
+    const pages = (buffer.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+    expect(pages).toBe(1);
   });
 
   it("l_apercu_est_disponible_AVANT_l_envoi_pour_relire_ce_qui_partira", async () => {

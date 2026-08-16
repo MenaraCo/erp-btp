@@ -1144,11 +1144,40 @@ export function FicheCommande({
             </button>
           </div>
           {pdfUrl ? (
-            <iframe
-              title={`Aperçu du bon de commande ${c.code}`}
-              src={pdfUrl}
-              style={{ flex: 1, width: '100%', border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}
-            />
+            /*
+              `object` plutôt qu'`iframe` : quand le navigateur refuse d'afficher un PDF dans la
+              page (réglage « télécharger les PDF » ou lecteur désactivé), il affiche le contenu
+              de repli au lieu d'un rectangle vide — l'utilisateur comprend ce qui se passe et
+              garde une porte de sortie.
+            */
+            /*
+              Fond OPAQUE porté par un conteneur : sous un thème translucide (Liquid Glass), un
+              lecteur PDF qui ne peint pas laisse voir le fond sombre de la page — d'où l'écran
+              noir. Le blanc doit venir d'un élément plein, pas de l'objet lui-même.
+            */
+            <div style={{
+              flex: 1, minHeight: 0, background: '#fff', border: '1px solid var(--border)',
+              borderRadius: 8, overflow: 'hidden',
+            }}>
+            <object
+              data={pdfUrl}
+              type="application/pdf"
+              aria-label={`Aperçu du bon de commande ${c.code}`}
+              style={{ width: '100%', height: '100%', background: '#fff' }}
+            >
+              <div className="card" style={{
+                height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'center', gap: 10, textAlign: 'center', padding: 24,
+              }}>
+                <FileText size={22} />
+                <p className="muted" style={{ margin: 0, fontSize: 12, maxWidth: 280 }}>
+                  Votre navigateur n’affiche pas les PDF dans la page. Le document est prêt :
+                  ouvrez-le dans un onglet ou téléchargez-le.
+                </p>
+                <a className="btn" href={pdfUrl} target="_blank" rel="noreferrer">Ouvrir le PDF</a>
+              </div>
+            </object>
+            </div>
           ) : (
             <div className="card muted" style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12,

@@ -8,6 +8,8 @@ import { runInTenant } from '../../core/tenancy/tenant-transaction';
 const M = 40;
 const PAGE_W = 595.28 - M * 2;
 const RIGHT = 595.28 - M;
+/** Ligne de pied de page, sous le contenu et au-dessus du bord de la feuille A4. */
+const FOOTER_Y = 806;
 
 /**
  * Édition PDF du bon de commande — le document que le fournisseur reçoit.
@@ -228,9 +230,14 @@ export class CommandePdfService {
       const pages = doc.bufferedPageRange();
       for (let i = 0; i < pages.count; i += 1) {
         doc.switchToPage(pages.start + i);
-        doc.fontSize(7).font('Helvetica').fillColor('#94a3b8')
-          .text(legal, M, 800, { width: PAGE_W, align: 'center' })
-          .text(`Page ${i + 1} / ${pages.count}`, M, 812, { width: PAGE_W, align: 'center' });
+        // Sans annuler la marge basse, écrire près du bord déclenche une pagination : pdfkit
+        // ajoute une page à CHAQUE pied de page, et le document se termine sur des pages vides.
+        doc.page.margins.bottom = 0;
+        doc.moveTo(M, FOOTER_Y - 6).lineTo(RIGHT, FOOTER_Y - 6)
+          .strokeColor('#e2e8f0').lineWidth(0.5).stroke();
+        doc.fontSize(6.5).font('Helvetica').fillColor('#94a3b8');
+        if (legal) doc.text(legal, M, FOOTER_Y, { width: PAGE_W - 70 });
+        doc.text(`Page ${i + 1} / ${pages.count}`, RIGHT - 70, FOOTER_Y, { width: 70, align: 'right' });
       }
 
       doc.end();
