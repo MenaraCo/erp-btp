@@ -17,6 +17,7 @@ describe('Site-tracking — rapprochement des achats', () => {
   let tenantId: string;
   let userId: string;
   let chantierId: string;
+  let codeAnalytiqueId: string;
 
   function as(method: 'get' | 'post' | 'patch', path: string) {
     const s = app.getHttpServer();
@@ -28,11 +29,18 @@ describe('Site-tracking — rapprochement des achats', () => {
   /** Commande envoyée de 10 sacs à 50 € et 4 h de grue à 100 €. */
   async function commandeEnvoyee(): Promise<{ id: string; sacs: string; grue: string }> {
     const bc = (await as('post', `/chantiers/${chantierId}/purchase-orders`).send({}).expect(201)).body;
+    // Le code analytique est exigé à l'envoi : une commande réaliste le porte dès la saisie.
     const sacs = (await as('post', `/purchase-orders/${bc.id}/lines`)
-      .send({ nature: 'material', designation: 'Sacs de colle', quantity: '10', unitPrice: '50' })
+      .send({
+        nature: 'material', designation: 'Sacs de colle', quantity: '10', unitPrice: '50',
+        codeAnalytiqueId,
+      })
       .expect(201)).body;
     const grue = (await as('post', `/purchase-orders/${bc.id}/lines`)
-      .send({ nature: 'equipment', designation: 'Grue', quantity: '4', unitPrice: '100' })
+      .send({
+        nature: 'equipment', designation: 'Grue', quantity: '4', unitPrice: '100',
+        codeAnalytiqueId,
+      })
       .expect(201)).body;
     await as('post', `/purchase-orders/${bc.id}/submit`).expect(201);
     return { id: bc.id, sacs: sacs.id, grue: grue.id };
@@ -43,6 +51,12 @@ describe('Site-tracking — rapprochement des achats', () => {
     app = await buildSocleApp();
     ({ tenantId, userId } = await entitleUser(app, ds, 'Rappro', 'admin', ['site_tracking', 'core']));
     chantierId = (await as('post', '/chantiers').send({ name: 'Tour Nord' }).expect(201)).body.id;
+
+    const lotId = (await as('post', '/params/lots').send({ code: 'GO', label: 'Gros œuvre' }).expect(201)).body.id;
+    const familleId = (await as('post', '/params/familles')
+      .send({ lotId, code: 'MAC', label: 'Maçonnerie' }).expect(201)).body.id;
+    codeAnalytiqueId = (await as('post', '/params/codes')
+      .send({ familleId, code: '280', label: 'Colle' }).expect(201)).body.id;
   });
 
   afterAll(async () => {
@@ -144,10 +158,24 @@ describe('Site-tracking — rapprochement des achats', () => {
     expect(Number(t.ecartPrixTotal)).toBe(0);
   });
 
+  it('refuse_denvoyer_une_commande_dont_une_ligne_na_pas_de_code_analytique', async () => {
+    const bc = (await as('post', `/chantiers/${chantierId}/purchase-orders`).send({}).expect(201)).body;
+    await as('post', `/purchase-orders/${bc.id}/lines`)
+      .send({ nature: 'material', designation: 'Sans code', quantity: '1', unitPrice: '100' })
+      .expect(201);
+
+    // L'ouvrage reste facultatif ; le code analytique, non.
+    const refus = await as('post', `/purchase-orders/${bc.id}/submit`).expect(400);
+    expect(refus.body.message).toMatch(/code analytique/i);
+  });
+
   it('corrige_et_supprime_une_ligne_tant_que_la_commande_est_en_brouillon', async () => {
     const bc = (await as('post', `/chantiers/${chantierId}/purchase-orders`).send({}).expect(201)).body;
     const ligne = (await as('post', `/purchase-orders/${bc.id}/lines`)
-      .send({ nature: 'material', designation: 'À corriger', quantity: '1', unitPrice: '10' })
+      .send({
+        nature: 'material', designation: 'À corriger', quantity: '1', unitPrice: '10',
+        codeAnalytiqueId,
+      })
       .expect(201)).body;
 
     const maj = (await as('patch', `/purchase-order-lines/${ligne.id}`)

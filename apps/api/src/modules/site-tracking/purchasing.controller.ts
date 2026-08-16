@@ -295,6 +295,17 @@ export class PurchasingController {
     return this.purchasing.listLines(orderId);
   }
 
+  /** Insertion d'articles du CATALOGUE d'entreprise (hors budget du chantier). */
+  @Post('purchase-orders/:orderId/lines/bibliotheque')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  insererDepuisBibliotheque(
+    @Param('orderId') orderId: string,
+    @Body() body: { articles?: Array<{ resourceId: string; quantite?: string | number }> },
+  ) {
+    return this.appro.insererDepuisBibliotheque(orderId, body ?? {});
+  }
+
   @Post('purchase-orders/:orderId/validate')
   @RequiresCapability('purchasing')
   @RequiresPermission('site_tracking.write')

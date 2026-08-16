@@ -147,6 +147,80 @@ export class ApprovisionnementService {
     });
   }
 
+  /**
+   * Insère des articles de la BIBLIOTHÈQUE GÉNÉRALE du module chantier.
+   *
+   * À ne pas confondre avec l'approvisionnement depuis la nomenclature : là, on reprend ce qui a
+   * été BUDGÉTÉ sur ce chantier, avec ses quantités et son reste à commander. Ici, on pioche dans
+   * le catalogue de l'entreprise ce qui n'était pas prévu au budget — un consommable, un article
+   * de dernière minute — et la quantité est forcément saisie à la main.
+   */
+  insererDepuisBibliotheque(
+    orderId: string,
+    input: { articles?: Array<{ resourceId: string; quantite?: string | number }> },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    const articles = (input.articles ?? []).filter(
+      (a) => a.resourceId && new Decimal(a.quantite ?? 0).greaterThan(0),
+    );
+    if (articles.length === 0) {
+      throw new BadRequestException('Choisissez au moins un article et sa quantité.');
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const order = await em.query(
+        `SELECT id, status FROM purchase_order WHERE id = $1`, [orderId],
+      );
+      if (order.length === 0) throw new NotFoundException('Commande introuvable.');
+      if (order[0].status !== 'draft') {
+        throw new BadRequestException('Seule une commande en brouillon accepte de nouvelles lignes.');
+      }
+
+      const ids = articles.map((a) => a.resourceId);
+      const rows: Array<Record<string, unknown>> = await em.query(
+        `SELECT r.id, r.code, r.label, r.unit, r.nature, r.unit_cost, r.code_analytique_id,
+                r.code_produit, r.ref_fournisseur, r.unite_achat,
+                COALESCE(r.coeff_conversion, 1) AS coeff_conversion
+           FROM resource r
+          WHERE r.id = ANY($1::uuid[]) AND r.deleted_at IS NULL`,
+        [ids],
+      );
+      const parId = new Map(rows.map((r) => [r.id as string, r]));
+
+      let inserees = 0;
+      for (const a of articles) {
+        const r = parId.get(a.resourceId);
+        if (!r) continue;
+        const coeff = new Decimal(String(r.coeff_conversion ?? 1));
+        const quantite = new Decimal(a.quantite ?? 0);
+        // Le catalogue chiffre à l'unité d'EMPLOI : le prix d'achat suit le conditionnement.
+        const puAchat = new Decimal(String(r.unit_cost ?? 0)).times(coeff).toDecimalPlaces(4);
+        const montant = quantite.times(puAchat).toDecimalPlaces(2);
+        await em.query(
+          `INSERT INTO purchase_order_line
+             (tenant_id, order_id, nature, designation, quantity, unit_price, amount_ht,
+              code_analytique_id, library_resource_id, ref_fournisseur, unite_achat,
+              coeff_conversion, code_produit)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [tenantId, orderId, r.nature, `${r.code} — ${r.label}`,
+            quantite.toString(), puAchat.toString(), montant.toString(),
+            r.code_analytique_id ?? null, r.id, r.ref_fournisseur ?? null,
+            (r.unite_achat as string | null) ?? (r.unit as string | null), coeff.toString(),
+            r.code_produit ?? null],
+        );
+        inserees += 1;
+      }
+
+      await em.query(
+        `UPDATE purchase_order
+            SET total_ht = (SELECT COALESCE(SUM(amount_ht),0) FROM purchase_order_line WHERE order_id = $1),
+                updated_at = now()
+          WHERE id = $1`,
+        [orderId],
+      );
+      return { inserees };
+    });
+  }
+
   /** Fournisseurs, lots et familles réellement présents sur le chantier — pour les filtres. */
   regroupements(chantierId: string) {
     const tenantId = this.context.requireTenantId();

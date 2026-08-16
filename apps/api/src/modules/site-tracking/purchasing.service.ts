@@ -21,6 +21,12 @@ export interface OrderLineInput {
   executionLineId?: string | null;
   /** Ressource du chantier approvisionnée — c'est elle qui donne le reste à commander. */
   nomenclatureResourceId?: string | null;
+  /** Article de catalogue d'origine, s'il y en a un. Sans dépendance : c'est une trace. */
+  libraryResourceId?: string | null;
+  refFournisseur?: string | null;
+  uniteAchat?: string | null;
+  coeffConversion?: string | number | null;
+  codeProduit?: string | null;
   nature: string;
   designation: string;
   quantity: string | number;
@@ -129,11 +135,14 @@ export class PurchasingService {
         await em.query(
           `INSERT INTO purchase_order_line
              (tenant_id, order_id, execution_line_id, nature, designation, quantity, unit_price, amount_ht,
-              code_analytique_id, nomenclature_resource_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+              code_analytique_id, nomenclature_resource_id, library_resource_id,
+              ref_fournisseur, unite_achat, coeff_conversion, code_produit)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
           [tenantId, orderId, input.executionLineId ?? null, input.nature, input.designation,
             qty.toString(), price.toString(), amount.toString(), input.codeAnalytiqueId ?? null,
-            input.nomenclatureResourceId ?? null],
+            input.nomenclatureResourceId ?? null, input.libraryResourceId ?? null,
+            input.refFournisseur ?? null, input.uniteAchat ?? null,
+            input.coeffConversion ?? null, input.codeProduit ?? null],
         )
       )[0];
       await em.query(
@@ -217,6 +226,8 @@ export class PurchasingService {
   updateLine(lineId: string, patch: {
     designation?: string; quantity?: string | number; unitPrice?: string | number;
     nature?: string; executionLineId?: string | null; codeAnalytiqueId?: string | null;
+    refFournisseur?: string | null; uniteAchat?: string | null;
+    coeffConversion?: string | number | null; codeProduit?: string | null;
   }) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
@@ -249,7 +260,11 @@ export class PurchasingService {
                   nature = COALESCE($3, nature),
                   quantity = $4, unit_price = $5, amount_ht = $6,
                   execution_line_id = CASE WHEN $7::boolean THEN $8 ELSE execution_line_id END,
-                  code_analytique_id = CASE WHEN $9::boolean THEN $10 ELSE code_analytique_id END
+                  code_analytique_id = CASE WHEN $9::boolean THEN $10 ELSE code_analytique_id END,
+                  ref_fournisseur = CASE WHEN $11::boolean THEN $12 ELSE ref_fournisseur END,
+                  unite_achat = CASE WHEN $13::boolean THEN $14 ELSE unite_achat END,
+                  coeff_conversion = CASE WHEN $15::boolean THEN $16::numeric ELSE coeff_conversion END,
+                  code_produit = CASE WHEN $17::boolean THEN $18 ELSE code_produit END
             WHERE id = $1
         RETURNING *`,
           [
@@ -259,6 +274,14 @@ export class PurchasingService {
             qty.toString(), price.toString(), amount.toString(),
             patch.executionLineId !== undefined, patch.executionLineId || null,
             patch.codeAnalytiqueId !== undefined, patch.codeAnalytiqueId || null,
+            patch.refFournisseur !== undefined, (patch.refFournisseur ?? '').trim() || null,
+            patch.uniteAchat !== undefined, (patch.uniteAchat ?? '').trim() || null,
+            patch.coeffConversion !== undefined,
+            // Le paramètre est typé `numeric` par Postgres AVANT le CASE : une valeur absente
+            // doit arriver en NULL, pas en chaîne « undefined ».
+            patch.coeffConversion === undefined || patch.coeffConversion === null
+              || patch.coeffConversion === '' ? null : String(patch.coeffConversion),
+            patch.codeProduit !== undefined, (patch.codeProduit ?? '').trim() || null,
           ],
         ),
       );
@@ -317,8 +340,13 @@ export class PurchasingService {
       const [lines, deliveries, invoices] = await Promise.all([
         em.query(
           `SELECT l.*, el.designation AS ouvrage, ac.code AS code_analytique,
-                  n.code AS ressource_code, n.unite_achat
+                  COALESCE(n.code, r.code) AS ressource_code,
+                  COALESCE(l.unite_achat, n.unite_achat) AS unite_achat,
+                  COALESCE(l.coeff_conversion, n.coeff_conversion) AS coeff_conversion,
+                  COALESCE(l.ref_fournisseur, n.ref_fournisseur) AS ref_fournisseur,
+                  n.unit AS unite_emploi, n.unit_cost_objectif AS pu_debourse
              FROM purchase_order_line l
+             LEFT JOIN resource r ON r.id = l.library_resource_id
              LEFT JOIN execution_line el ON el.id = l.execution_line_id
              LEFT JOIN analytical_code ac ON ac.id = l.code_analytique_id
              LEFT JOIN nomenclature_resource n ON n.id = l.nomenclature_resource_id

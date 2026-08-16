@@ -117,10 +117,20 @@ export class ValidationAchatsService {
         throw new ConflictException('Seule une commande en brouillon peut être envoyée.');
       }
       const lignes = await em.query(
-        `SELECT COUNT(*)::int AS n FROM purchase_order_line WHERE order_id = $1`, [orderId],
+        `SELECT COUNT(*)::int AS n,
+                COUNT(*) FILTER (WHERE code_analytique_id IS NULL)::int AS sans_code
+           FROM purchase_order_line WHERE order_id = $1`,
+        [orderId],
       );
       if (lignes[0].n === 0) {
         throw new BadRequestException('Une commande vide ne s’envoie pas.');
+      }
+      // Le code analytique est EXIGÉ, l'ouvrage non : sans lui, la dépense arrive dans les
+      // résultats sans savoir à quel poste l'imputer, et le tableau analytique devient faux.
+      if (lignes[0].sans_code > 0) {
+        throw new BadRequestException(
+          `${lignes[0].sans_code} ligne(s) sans code analytique : renseignez-le avant d’envoyer la commande.`,
+        );
       }
 
       const requis = await this.validateursRequis(em, commande.chantier_id, commande.total_ht);

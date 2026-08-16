@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Trash2, Unlock,
@@ -13,6 +13,7 @@ import { euro } from '@/lib/format';
 import { teinteChantier } from '@/components/CalendrierMois';
 import { ApproModal } from '@/components/ApproModal';
 import { LigneRapprochement, SaisieRapprochement } from '@/components/SaisieRapprochement';
+import { BibliothequeCommandeModal } from '@/components/BibliothequeCommandeModal';
 
 interface Ligne {
   id: string;
@@ -27,6 +28,11 @@ interface Ligne {
   code_analytique_id: string | null;
   ressource_code: string | null;
   unite_achat: string | null;
+  coeff_conversion: string | null;
+  ref_fournisseur: string | null;
+  code_produit: string | null;
+  unite_emploi: string | null;
+  pu_debourse: string | null;
 }
 interface Evenement {
   id: string; action: string; motif: string | null; created_at: string;
@@ -115,12 +121,127 @@ function jour(v: string | null): string {
  * puisque c'est là qu'on vient vérifier ce qui reste à recevoir.
  */
 /**
+ * Bouton « i » : les informations techniques d'une ligne ne méritent pas six colonnes permanentes.
+ * On les replie derrière un déclencheur, et le tableau garde la place pour ce qu'on lit vraiment —
+ * la désignation, la quantité, le prix.
+ */
+function BoutonInfo({ ouvert, onClick }: { ouvert: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={ouvert ? 'Masquer les informations techniques' : 'Informations techniques (référence, conditionnement)'}
+      onClick={onClick}
+      style={{
+        width: 18, height: 18, borderRadius: 9, cursor: 'pointer', lineHeight: 1,
+        border: `1px solid ${ouvert ? 'var(--primary)' : 'var(--border)'}`,
+        background: ouvert ? 'var(--primary)' : 'transparent',
+        color: ouvert ? '#fff' : 'var(--muted)',
+        fontSize: 11, fontWeight: 700, fontStyle: 'italic',
+      }}
+    >
+      i
+    </button>
+  );
+}
+
+/**
+ * Volet technique d'une ligne : référence fournisseur, code produit, conditionnement.
+ *
+ * Éditable en brouillon — y compris sur une ligne venue d'un catalogue : la commande est une
+ * COPIE, et le fournisseur peut avoir changé de référence sans que le catalogue le sache encore.
+ */
+function InfosLigne({
+  ligne,
+  ouvrages,
+  onChange,
+}: {
+  ligne: Ligne;
+  ouvrages: Array<{ id: string; label: string }>;
+  onChange?: (patch: Record<string, string | null>) => void;
+}) {
+  const lecture = !onChange;
+  const champ = (
+    label: string,
+    valeur: string | null,
+    cle: string,
+    placeholder?: string,
+    numerique = false,
+  ) => (
+    <div className="field" style={{ marginBottom: 0 }}>
+      <label>{label}</label>
+      {lecture
+        ? <div style={{ fontSize: 13, padding: '4px 0' }}>{valeur || <span className="muted">—</span>}</div>
+        : (
+          <input
+            type={numerique ? 'number' : 'text'}
+            step={numerique ? '0.0001' : undefined}
+            min={numerique ? 0 : undefined}
+            defaultValue={valeur ?? ''}
+            placeholder={placeholder}
+            onBlur={(e) => e.target.value !== (valeur ?? '') && onChange!({ [cle]: e.target.value || null })}
+          />
+        )}
+    </div>
+  );
+
+  const coeff = Number(ligne.coeff_conversion || 0);
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>
+        FICHE RESSOURCE
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Nature</label>
+          {lecture
+            ? <div style={{ fontSize: 13, padding: '4px 0' }}>{NATURES[ligne.nature] ?? ligne.nature}</div>
+            : (
+              <select
+                defaultValue={ligne.nature}
+                onChange={(e) => onChange!({ nature: e.target.value })}
+              >
+                {NATURES_SAISIE.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
+              </select>
+            )}
+        </div>
+        <div className="field" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+          <label>Ouvrage imputé (facultatif)</label>
+          {lecture
+            ? <div style={{ fontSize: 13, padding: '4px 0' }}>{ligne.ouvrage || <span className="muted">—</span>}</div>
+            : (
+              <select
+                defaultValue={ligne.execution_line_id ?? ''}
+                onChange={(e) => onChange!({ executionLineId: e.target.value || null })}
+              >
+                <option value="">— Non réparti —</option>
+                {ouvrages.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+              </select>
+            )}
+        </div>
+        {champ('Référence fournisseur', ligne.ref_fournisseur, 'refFournisseur', 'Réf. au catalogue du fournisseur')}
+        {champ('Code produit', ligne.code_produit, 'codeProduit', 'Code interne')}
+        {champ('Unité d’achat', ligne.unite_achat, 'uniteAchat', 'sac, palette, ml…')}
+        {champ('Coefficient de conversion', ligne.coeff_conversion, 'coeffConversion', '1', true)}
+      </div>
+      <p className="muted" style={{ fontSize: 11, margin: '8px 0 0' }}>
+        {coeff > 0 && ligne.unite_emploi
+          ? `1 ${ligne.unite_achat ?? 'unité d’achat'} = ${coeff} ${ligne.unite_emploi}`
+          : 'Le coefficient dit ce que contient une unité d’achat (1 sac = 25 kg).'}
+        {ligne.pu_debourse && Number(ligne.pu_debourse) > 0
+          && ` · Déboursé budgété : ${Number(ligne.pu_debourse).toFixed(4)} €/${ligne.unite_emploi ?? 'u'}`}
+      </p>
+    </div>
+  );
+}
+
+/**
  * Bouton « + » d'ajout de ligne, calqué sur le montage d'un devis : un déclencheur, deux gestes.
  * `R` reprend une ressource déjà chiffrée, `L` ouvre une ligne libre — la cohérence entre modules
  * compte plus que l'originalité de chaque écran.
  */
-function MenuAjout({ onRessource, onLigneLibre }: {
+function MenuAjout({ onRessource, onCatalogue, onLigneLibre }: {
   onRessource: () => void;
+  onCatalogue: () => void;
   onLigneLibre: () => void;
 }) {
   const [ouvert, setOuvert] = useState(false);
@@ -155,11 +276,13 @@ function MenuAjout({ onRessource, onLigneLibre }: {
       </button>
       {ouvert && (
         <>
-          {carre('R', 'Reprendre des ressources du chantier (quantités et prix du budget)',
+          {carre('R', 'Reprendre des ressources BUDGÉTÉES sur ce chantier (quantités et reste à commander)',
             '#0891b2', onRessource)}
+          {carre('B', 'Piocher dans la bibliothèque générale de l’entreprise (hors budget)',
+            '#7c3aed', onCatalogue)}
           {carre('L', 'Ajouter une ligne libre, à remplir dans le tableau', '#64748b', onLigneLibre)}
           <span className="muted" style={{ fontSize: 11 }}>
-            R : ressources du chantier · L : ligne libre
+            R : budget du chantier · B : bibliothèque générale · L : ligne libre
           </span>
         </>
       )}
@@ -186,6 +309,8 @@ export function FicheCommande({
   const qc = useQueryClient();
   const [motif, setMotif] = useState('');
   const [approOuvert, setApproOuvert] = useState(false);
+  const [catalogueOuvert, setCatalogueOuvert] = useState(false);
+  const [ligneOuverte, setLigneOuverte] = useState<string | null>(null);
   const [saisie, setSaisie] = useState<null | 'reception' | 'facture'>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [ouvrirReouverture, setOuvrirReouverture] = useState(false);
@@ -522,8 +647,19 @@ export function FicheCommande({
         <div className="card" style={{ marginTop: 16, padding: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <strong style={{ fontSize: 13 }}>Ajouter des lignes</strong>
-            <button className="btn btn-secondary" onClick={() => setApproOuvert(true)}>
-              Depuis la bibliothèque chantier…
+            <button
+              className="btn btn-secondary"
+              title="Reprend ce qui a été BUDGÉTÉ sur ce chantier, avec son reste à commander"
+              onClick={() => setApproOuvert(true)}
+            >
+              Approvisionner le chantier…
+            </button>
+            <button
+              className="btn btn-secondary"
+              title="Catalogue de l’entreprise — pour ce qui n’était pas prévu au budget"
+              onClick={() => setCatalogueOuvert(true)}
+            >
+              Bibliothèque générale…
             </button>
             {info && <span style={{ fontSize: 12, color: 'var(--success, #15803d)' }}>{info}</span>}
             {(v?.requis.length ?? 0) > 0 && (
@@ -556,13 +692,14 @@ export function FicheCommande({
         <table className="grid" style={{ margin: 0 }}>
           <thead>
             <tr>
+              <th style={{ width: 30 }} />
+              <th style={{ width: 120 }}>Code</th>
               <th>Désignation</th>
-              <th style={{ width: 140 }}>Nature</th>
-              <th style={{ width: 200 }}>Ouvrage</th>
-              <th style={{ width: 190 }}>Code analytique</th>
-              <th style={{ width: 100, textAlign: 'right' }}>Qté</th>
+              <th style={{ width: 80 }}>Unité</th>
+              <th style={{ width: 90, textAlign: 'right' }}>Qté</th>
               <th style={{ width: 110, textAlign: 'right' }}>PU</th>
-              <th style={{ width: 130, textAlign: 'right' }}>Montant HT</th>
+              <th style={{ width: 130, textAlign: 'right' }}>Total HT</th>
+              <th style={{ width: 190 }}>Code analytique *</th>
               {brouillon && <th style={{ width: 40 }} />}
             </tr>
           </thead>
@@ -571,44 +708,27 @@ export function FicheCommande({
               brouillon ? (
                 // Édition EN PLACE, comme le montage d'un devis : on corrige la cellule qu'on
                 // regarde, sans rouvrir un formulaire au-dessus du tableau.
-                <tr key={l.id}>
+                <Fragment key={l.id}>
+                <tr>
+                  <td style={{ textAlign: 'center', padding: 0 }}>
+                    <BoutonInfo
+                      ouvert={ligneOuverte === l.id}
+                      onClick={() => setLigneOuverte(ligneOuverte === l.id ? null : l.id)}
+                    />
+                  </td>
+                  <td className="code-cell">
+                    {l.ressource_code ?? l.code_produit ?? <span className="muted">—</span>}
+                  </td>
                   <td>
-                    {l.ressource_code && <span className="code-cell" style={{ marginRight: 6 }}>{l.ressource_code}</span>}
                     <input
                       defaultValue={l.designation}
                       onBlur={(e) => e.target.value.trim() && e.target.value !== l.designation
                         && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
-                      style={{ width: l.ressource_code ? 'calc(100% - 90px)' : '100%' }}
+                      style={{ width: '100%' }}
                     />
                   </td>
-                  <td>
-                    <select
-                      defaultValue={l.nature}
-                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { nature: e.target.value } })}
-                      style={{ width: '100%' }}
-                    >
-                      {NATURES_SAISIE.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      defaultValue={l.execution_line_id ?? ''}
-                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { executionLineId: e.target.value || null } })}
-                      style={{ width: '100%' }}
-                    >
-                      <option value="">— Non réparti —</option>
-                      {ouvrages.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      defaultValue={l.code_analytique_id ?? ''}
-                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { codeAnalytiqueId: e.target.value || null } })}
-                      style={{ width: '100%' }}
-                    >
-                      <option value="">— À ventiler —</option>
-                      {codes.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-                    </select>
+                  <td className="muted" style={{ fontSize: 12 }}>
+                    {l.unite_achat ?? l.unite_emploi ?? '—'}
                   </td>
                   <td>
                     <input
@@ -629,6 +749,20 @@ export function FicheCommande({
                   <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                     {euro(l.amount_ht)}
                   </td>
+                  <td>
+                    <select
+                      defaultValue={l.code_analytique_id ?? ''}
+                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { codeAnalytiqueId: e.target.value || null } })}
+                      title={l.code_analytique_id ? undefined : 'Obligatoire pour envoyer la commande'}
+                      style={{
+                        width: '100%',
+                        borderColor: l.code_analytique_id ? undefined : 'var(--danger, #dc2626)',
+                      }}
+                    >
+                      <option value="">— À renseigner —</option>
+                      {codes.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+                    </select>
+                  </td>
                   <td style={{ textAlign: 'right', paddingRight: 6 }}>
                     <IconBtn
                       title="Retirer cette ligne"
@@ -639,35 +773,64 @@ export function FicheCommande({
                     </IconBtn>
                   </td>
                 </tr>
+                {ligneOuverte === l.id && (
+                  <tr>
+                    <td colSpan={9} style={{ background: 'var(--surface)', padding: '10px 14px' }}>
+                      <InfosLigne
+                        ligne={l}
+                        ouvrages={ouvrages}
+                        onChange={(patch) => majLigne.mutate({ id: l.id, patch })}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ) : (
-                <tr key={l.id}>
-                  <td>
-                    {l.ressource_code && <span className="code-cell" style={{ marginRight: 6 }}>{l.ressource_code}</span>}
-                    {l.designation}
+                <Fragment key={l.id}>
+                <tr>
+                  <td style={{ textAlign: 'center', padding: 0 }}>
+                    <BoutonInfo
+                      ouvert={ligneOuverte === l.id}
+                      onClick={() => setLigneOuverte(ligneOuverte === l.id ? null : l.id)}
+                    />
                   </td>
-                  <td className="muted">{NATURES[l.nature] ?? l.nature}</td>
-                  <td className="muted" style={{ fontSize: 12 }}>{l.ouvrage ?? '—'}</td>
-                  <td>{l.code_analytique
-                    ? <span className="code-cell">{l.code_analytique}</span>
-                    : <span className="muted">À ventiler</span>}</td>
-                  <td style={{ textAlign: 'right' }}>{Number(l.quantity)} {l.unite_achat ?? ''}</td>
+                  <td className="code-cell">
+                    {l.ressource_code ?? l.code_produit ?? <span className="muted">—</span>}
+                  </td>
+                  <td>{l.designation}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>
+                    {l.unite_achat ?? l.unite_emploi ?? '—'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>{Number(l.quantity)}</td>
                   <td style={{ textAlign: 'right' }}>{euro(l.unit_price)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                     {euro(l.amount_ht)}
                   </td>
+                  <td>{l.code_analytique
+                    ? <span className="code-cell">{l.code_analytique}</span>
+                    : <span className="muted">À ventiler</span>}</td>
                 </tr>
+                {ligneOuverte === l.id && (
+                  <tr>
+                    <td colSpan={8} style={{ background: 'var(--surface)', padding: '10px 14px' }}>
+                      <InfosLigne ligne={l} ouvrages={ouvrages} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               )
             ))}
             {f.lignes.length === 0 && (
-              <tr><td colSpan={brouillon ? 8 : 7} className="muted" style={{ padding: 16, textAlign: 'center' }}>
+              <tr><td colSpan={brouillon ? 9 : 8} className="muted" style={{ padding: 16, textAlign: 'center' }}>
                 Cette commande n’a aucune ligne.
               </td></tr>
             )}
             {brouillon && (
               <tr>
-                <td colSpan={8} style={{ padding: '8px 10px' }}>
+                <td colSpan={9} style={{ padding: '8px 10px' }}>
                   <MenuAjout
                     onRessource={() => setApproOuvert(true)}
+                    onCatalogue={() => setCatalogueOuvert(true)}
                     onLigneLibre={() => ajouterLigne.mutate()}
                   />
                 </td>
@@ -823,6 +986,18 @@ export function FicheCommande({
           lignes={r.lignes}
           onClose={() => setSaisie(null)}
           onEnregistre={(message) => { setSaisie(null); setInfo(message); rafraichir(); }}
+        />
+      )}
+
+      {catalogueOuvert && (
+        <BibliothequeCommandeModal
+          orderId={orderId}
+          onClose={() => setCatalogueOuvert(false)}
+          onInsere={(n) => {
+            setCatalogueOuvert(false);
+            setInfo(`${n} article${n > 1 ? 's' : ''} inséré${n > 1 ? 's' : ''} depuis la bibliothèque.`);
+            rafraichir();
+          }}
         />
       )}
 

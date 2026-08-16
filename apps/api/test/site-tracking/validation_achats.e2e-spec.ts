@@ -23,6 +23,7 @@ describe('Site-tracking — validation des achats', () => {
   let conducteurId: string;
   let chantierId: string;
   let autreChantier: string;
+  let codeAnalytiqueId: string;
 
   function as(method: 'get' | 'post' | 'delete', path: string, who = userId) {
     const s = app.getHttpServer();
@@ -33,8 +34,12 @@ describe('Site-tracking — validation des achats', () => {
 
   async function commande(chantier: string, montant: string): Promise<string> {
     const bc = (await as('post', `/chantiers/${chantier}/purchase-orders`).send({}).expect(201)).body;
+    // Le code analytique est exigé à l'envoi : toute commande réaliste le porte.
     await as('post', `/purchase-orders/${bc.id}/lines`)
-      .send({ nature: 'material', designation: 'Lot', quantity: '1', unitPrice: montant })
+      .send({
+        nature: 'material', designation: 'Lot', quantity: '1', unitPrice: montant,
+        codeAnalytiqueId,
+      })
       .expect(201);
     return bc.id;
   }
@@ -56,6 +61,12 @@ describe('Site-tracking — validation des achats', () => {
 
     chantierId = (await as('post', '/chantiers').send({ name: 'Tour Nord' }).expect(201)).body.id;
     autreChantier = (await as('post', '/chantiers').send({ name: 'Villa Sud' }).expect(201)).body.id;
+
+    const lotId = (await as('post', '/params/lots').send({ code: 'GO', label: 'Gros œuvre' }).expect(201)).body.id;
+    const familleId = (await as('post', '/params/familles')
+      .send({ lotId, code: 'MAC', label: 'Maçonnerie' }).expect(201)).body.id;
+    codeAnalytiqueId = (await as('post', '/params/codes')
+      .send({ familleId, code: '280', label: 'Colle' }).expect(201)).body.id;
 
     // Règle SOCIÉTÉ : au-delà de 5 000 €, le directeur approuve.
     await as('post', '/validation-achats/regles')
@@ -88,7 +99,7 @@ describe('Site-tracking — validation des achats', () => {
 
     // Et elle ne se modifie plus tant qu'elle est au visa.
     await as('post', `/purchase-orders/${id}/lines`)
-      .send({ nature: 'material', designation: 'Ajout', quantity: '1', unitPrice: '10' })
+      .send({ nature: 'material', designation: 'Ajout', quantity: '1', unitPrice: '10', codeAnalytiqueId })
       .expect(409);
   });
 
@@ -120,7 +131,7 @@ describe('Site-tracking — validation des achats', () => {
 
     // Corrigée, elle se resoumet.
     await as('post', `/purchase-orders/${id}/lines`)
-      .send({ nature: 'material', designation: 'Remise', quantity: '1', unitPrice: '-2500' })
+      .send({ nature: 'material', designation: 'Remise', quantity: '1', unitPrice: '-2500', codeAnalytiqueId })
       .expect(201);
     expect((await as('post', `/purchase-orders/${id}/submit`).expect(201)).body.statut).toBe('validated');
   });
