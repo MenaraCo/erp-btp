@@ -9,7 +9,7 @@
     "db:local": "node scripts/local-db.mjs",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "test": "jest --passWithNoTests",
-    "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest --config ./test/jest-e2e.json",
+    "test:e2e": "NODE_OPTIONS=\"--experimental-vm-modules --max-old-space-size=6144\" jest --config ./test/jest-e2e.json",
     "seed": "ts-node src/database/seeds/run-seed.ts",
     "seed:demo": "ts-node src/database/seeds/demo-seed.run.ts",
     "showcase": "node scripts/showcase.mjs",
