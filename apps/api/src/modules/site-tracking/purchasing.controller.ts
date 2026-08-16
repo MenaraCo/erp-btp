@@ -3,15 +3,64 @@ import { RequiresCapability } from '../../core/entitlements/requires-capability.
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { OrderLineInput, PurchasingService } from './purchasing.service';
 import { ApprovisionnementService } from './approvisionnement.service';
+import { AchatsRegistreService, FiltreRegistre } from './achats-registre.service';
 
 const NATURES = ['labor', 'material', 'equipment', 'subcontract', 'site_overhead'];
+
+/** Traduit les paramètres d'URL du registre en filtre — un seul endroit qui connaît leurs noms. */
+function filtreDepuis(query: Record<string, string>): FiltreRegistre {
+  return {
+    q: query.q ?? null,
+    chantierId: query.chantier ?? null,
+    supplierId: query.fournisseur ?? null,
+    statut: query.statut ?? null,
+    du: query.du ?? null,
+    au: query.au ?? null,
+    montantMin: query.min ?? null,
+    montantMax: query.max ?? null,
+    page: query.page ? Number(query.page) : 1,
+    parPage: query.parPage ? Number(query.parPage) : undefined,
+  };
+}
 
 @Controller()
 export class PurchasingController {
   constructor(
     private readonly purchasing: PurchasingService,
     private readonly appro: ApprovisionnementService,
+    private readonly registre: AchatsRegistreService,
   ) {}
+
+  // --- Registre d'entreprise : retrouver une pièce, tous chantiers confondus ---
+
+  @Get('achats/commandes')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  registreCommandes(@Query() query: Record<string, string>) {
+    return this.registre.commandes(filtreDepuis(query));
+  }
+
+  @Get('achats/receptions')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  registreReceptions(@Query() query: Record<string, string>) {
+    return this.registre.receptions(filtreDepuis(query));
+  }
+
+  @Get('achats/factures')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  registreFactures(@Query() query: Record<string, string>) {
+    return this.registre.factures(filtreDepuis(query));
+  }
+
+  /** Fiche d'une commande : en-tête, lignes, réceptions, factures. */
+  @Get('purchase-orders/:orderId')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  order(@Param('orderId') orderId: string) {
+    return this.purchasing.getOrder(orderId);
+  }
 
   // DDP
   @Post('chantiers/:chantierId/purchase-requests')

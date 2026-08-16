@@ -141,6 +141,48 @@ export class PurchasingService {
     });
   }
 
+  /**
+   * Fiche complète d'une commande : en-tête, lignes, réceptions et factures.
+   * C'est ce que la page dédiée affiche — une commande ne se lit plus dans une liste dépliée.
+   */
+  getOrder(orderId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(
+        `SELECT o.*, s.name AS fournisseur, s.id AS supplier_id,
+                c.code AS chantier_code, c.name AS chantier_nom, c.color AS chantier_couleur
+           FROM purchase_order o
+           LEFT JOIN supplier s ON s.id = o.supplier_id
+           LEFT JOIN chantier c ON c.id = o.chantier_id
+          WHERE o.id = $1`,
+        [orderId],
+      );
+      if (rows.length === 0) throw new NotFoundException(`Unknown purchase order "${orderId}"`);
+      const [lines, deliveries, invoices] = await Promise.all([
+        em.query(
+          `SELECT l.*, el.designation AS ouvrage, ac.code AS code_analytique,
+                  n.code AS ressource_code, n.unite_achat
+             FROM purchase_order_line l
+             LEFT JOIN execution_line el ON el.id = l.execution_line_id
+             LEFT JOIN analytical_code ac ON ac.id = l.code_analytique_id
+             LEFT JOIN nomenclature_resource n ON n.id = l.nomenclature_resource_id
+            WHERE l.order_id = $1 ORDER BY l.created_at ASC`,
+          [orderId],
+        ),
+        em.query(
+          `SELECT id, code, received_at FROM delivery_note WHERE order_id = $1 ORDER BY created_at ASC`,
+          [orderId],
+        ),
+        em.query(
+          `SELECT id, code, nature, amount_ht, invoice_date FROM supplier_invoice
+            WHERE order_id = $1 ORDER BY created_at ASC`,
+          [orderId],
+        ),
+      ]);
+      return { commande: rows[0], lignes: lines, receptions: deliveries, factures: invoices };
+    });
+  }
+
   /** Lignes d'une commande, avec ce à quoi elles sont imputées (ouvrage, code, ressource). */
   listLines(orderId: string) {
     const tenantId = this.context.requireTenantId();

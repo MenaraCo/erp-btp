@@ -181,6 +181,19 @@ export const MODULES: AppModule[] = [
     features: [{ href: '/direction', label: 'Portefeuille' }],
   },
   {
+    key: 'achats',
+    label: 'Achats',
+    tagline: 'Commandes, réceptions et factures fournisseur, tous chantiers confondus',
+    home: '/achats',
+    match: ['/achats'],
+    capabilities: ['purchasing'],
+    features: [
+      { href: '/achats', label: 'Commandes' },
+      { href: '/achats/receptions', label: 'Réceptions' },
+      { href: '/achats/factures', label: 'Factures fournisseur' },
+    ],
+  },
+  {
     key: 'personnel',
     label: 'Gestion du personnel',
     tagline: 'Salariés, heures, planning, congés et absences, tous chantiers confondus',
