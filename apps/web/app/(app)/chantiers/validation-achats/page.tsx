@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShieldCheck, Trash2 } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { LigneVide } from '@/components/ui';
 import { euro } from '@/lib/format';
 import { IconBtn } from '@/components/IconBtn';
 
@@ -150,13 +151,12 @@ export default function ValidationAchatsPage() {
               </tr>
             ))}
             {lignes.length === 0 && (
-              <tr>
-                <td colSpan={3} className="muted" style={{ padding: 20, textAlign: 'center' }}>
-                  {perimetre
-                    ? 'Aucune règle propre à ce chantier : il suit celles de la société.'
-                    : 'Aucune règle : toutes les commandes partent sans visa.'}
-                </td>
-              </tr>
+              <LigneVide
+                colonnes={3}
+                icone={ShieldCheck}
+                titre="Aucune règle de validation."
+                indice="Sans règle, une commande part dès son envoi : ajoutez un seuil pour exiger un accord au-delà d’un montant."
+              />
             )}
           </tbody>
         </table>

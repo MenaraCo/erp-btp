@@ -7,6 +7,7 @@ import { AlertTriangle, BarChart3 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { Alerte, Bouton, CarteKpi, EtatVide } from '@/components/ui';
 
 type Axe = 'fournisseur' | 'ressource' | 'code' | 'famille' | 'lot' | 'chantier' | 'nature';
 
@@ -137,19 +138,19 @@ export default function ReportingAchatsPage() {
       </p>
 
       {conso.isError && (
-        <p className="muted">Module « Suivi de chantiers » non actif pour cet utilisateur, ou accès refusé.</p>
+        <Alerte>Module « Suivi de chantiers » non actif pour cet utilisateur, ou accès refusé.</Alerte>
       )}
 
       {/* Axes : la même mesure, regardée sous un autre angle. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
         {AXES.map((a) => (
-          <button
+          <Bouton
             key={a.v}
-            className={axe === a.v ? 'btn' : 'btn btn-secondary'}
+            variante={axe === a.v ? 'primaire' : 'secondaire'}
             onClick={() => setAxe(a.v)}
           >
             {a.l}
-          </button>
+          </Bouton>
         ))}
       </div>
 
@@ -192,46 +193,45 @@ export default function ReportingAchatsPage() {
           <label>Au</label>
           <input type="date" value={f.au} onChange={(e) => set({ au: e.target.value })} style={{ width: 145 }} />
         </div>
-        {actif && <button className="btn btn-secondary" onClick={() => setF({ ...VIDE })}>Effacer</button>}
+        {actif && <Bouton variante="secondaire" onClick={() => setF({ ...VIDE })}>Effacer</Bouton>}
       </div>
 
       {t && (
         <div className="card-grid" style={{ marginTop: 14 }}>
-          <div className="card">
-            <h2>Commandé</h2>
-            <div className="stat">{euro(t.commande)}</div>
-            <div className="muted">{t.nbLignes} ligne{t.nbLignes > 1 ? 's' : ''} de commande</div>
-          </div>
-          <div className="card">
-            <h2>Réceptionné</h2>
-            <div className="stat">{euro(t.receptionne)}</div>
-            <div className="muted">reste à recevoir {euro(t.resteARecevoir)}</div>
-          </div>
-          <div className="card">
-            <h2>Facturé</h2>
-            <div className="stat">{euro(t.facture)}</div>
-            {conso.data && conso.data.factureHorsLignes.nombre > 0 && (
-              <div className="muted">
-                + {euro(conso.data.factureHorsLignes.montant)} de factures sans détail de lignes
-              </div>
-            )}
-          </div>
-          <div className="card">
-            <h2>Écart de prix</h2>
-            <div className="stat" style={{ color: Number(t.ecartPrix) > 0 ? '#dc2626' : undefined }}>
-              {euro(t.ecartPrix)}
-            </div>
-            <div className="muted">facturé − commandé, à quantité égale</div>
-          </div>
+          <CarteKpi
+            titre="Commandé"
+            valeur={euro(t.commande)}
+            detail={`${t.nbLignes} ligne${t.nbLignes > 1 ? 's' : ''} de commande`}
+          />
+          <CarteKpi
+            titre="Réceptionné"
+            valeur={euro(t.receptionne)}
+            detail={`reste à recevoir ${euro(t.resteARecevoir)}`}
+          />
+          <CarteKpi
+            titre="Facturé"
+            valeur={euro(t.facture)}
+            detail={conso.data && conso.data.factureHorsLignes.nombre > 0
+              ? `+ ${euro(conso.data.factureHorsLignes.montant)} de factures sans détail de lignes`
+              : undefined}
+          />
+          <CarteKpi
+            titre="Écart de prix"
+            valeur={euro(t.ecartPrix)}
+            ton={Number(t.ecartPrix) > 0 ? 'danger' : undefined}
+            detail="facturé − commandé, à quantité égale"
+          />
         </div>
       )}
 
       <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
         {conso.isLoading && <p className="muted" style={{ padding: 16 }}>Chargement…</p>}
         {conso.data && conso.data.lignes.length === 0 && (
-          <p className="muted" style={{ padding: 16 }}>
-            Aucune commande validée sur ce périmètre.
-          </p>
+          <EtatVide
+            icone={BarChart3}
+            titre="Aucune commande validée sur ce périmètre."
+            indice="Les brouillons et les commandes en attente de validation n’entrent pas dans la consommation."
+          />
         )}
         {conso.data && conso.data.lignes.length > 0 && (
           <div style={{ overflowX: 'auto' }}>

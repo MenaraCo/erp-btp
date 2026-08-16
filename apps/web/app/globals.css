@@ -513,15 +513,23 @@ body.sidebar-collapsed .sidebar-toggle .nav-label {
   border: 0;
 }
 
-/* ── Buttons (uppercase, dense) ── */
+/* ── Boutons ──
+   UNE base commune à toutes les variantes ; une variante ne change que les couleurs.
+   Chaque variante redéclarait auparavant la mise en forme complète : deux boutons voisins
+   finissaient par ne plus avoir la même hauteur ni le même alignement d'icône selon la
+   classe employée. */
 button.btn,
-.btn {
+.btn,
+button.btn-primary,
+.btn-primary,
+button.btn-secondary,
+.btn-secondary,
+button.btn-danger,
+.btn-danger {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: var(--primary);
-  color: var(--primary-ink);
-  border: 1px solid var(--primary);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   padding: 6px 12px;
   font-size: 11px;
@@ -532,33 +540,45 @@ button.btn,
   letter-spacing: 0.3px;
 }
 
-button.btn:hover:not(:disabled),
-.btn:hover:not(:disabled) {
-  background: var(--primary-deep);
-  border-color: var(--primary-deep);
-}
-
 button.btn:disabled,
-.btn:disabled {
+.btn:disabled,
+button.btn-primary:disabled,
+.btn-primary:disabled,
+button.btn-secondary:disabled,
+.btn-secondary:disabled,
+button.btn-danger:disabled,
+.btn-danger:disabled,
+button.btn-ghost:disabled,
+.btn-ghost:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+/* Action principale de l'écran — une seule par écran, en principe.
+   `btn-primary` est un alias : il était employé sans exister, donc sans style du tout. */
+button.btn,
+.btn,
+button.btn-primary,
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-ink);
+  border-color: var(--primary);
+}
+
+button.btn:hover:not(:disabled),
+.btn:hover:not(:disabled),
+button.btn-primary:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-deep);
+  border-color: var(--primary-deep);
+}
+
+/* Action secondaire — annuler, filtrer, revenir. */
 button.btn-secondary,
 .btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   background: var(--panel);
   color: var(--ink);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 6px 12px;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  border-color: var(--border-strong);
 }
 
 button.btn-secondary:hover:not(:disabled),
@@ -567,8 +587,12 @@ button.btn-secondary:hover:not(:disabled),
   border-color: #94a3b8;
 }
 
+/* Action discrète — dans une ligne de tableau, à côté d'un titre. */
 button.btn-ghost,
 .btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: transparent;
   border: none;
   color: var(--muted);
@@ -584,20 +608,16 @@ button.btn-ghost:hover:not(:disabled),
   color: var(--primary);
 }
 
+/* Action destructrice — jamais primaire : elle ne doit pas être le geste réflexe. */
 button.btn-danger,
 .btn-danger {
   background: transparent;
   color: var(--danger);
-  border: 1px solid #fecaca;
-  border-radius: var(--radius-sm);
-  padding: 6px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  border-color: #fecaca;
 }
 
-button.btn-danger:hover:not(:disabled) {
+button.btn-danger:hover:not(:disabled),
+.btn-danger:hover:not(:disabled) {
   background: #fee2e2;
 }
 
@@ -688,10 +708,31 @@ input[type='number'] {
   font-weight: 500;
 }
 
+/* ── Messages ──
+   `.error` était un simple texte rouge de 11 px : noyé dans un écran dense, il passait inaperçu
+   au moment précis où il fallait le lire. Il partage désormais l'encadré des alertes. */
+.alerte,
 .error {
+  display: block;
+  border: 1px solid #fecaca;
+  background: #fee2e2;
   color: var(--danger);
-  font-size: 11px;
-  margin-bottom: 10px;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.alerte.info {
+  border-color: #bfdbfe;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.alerte.succes {
+  border-color: #bbf7d0;
+  background: #dcfce7;
+  color: var(--success);
 }
 
 /* ── Monospace codes (orange) ── */

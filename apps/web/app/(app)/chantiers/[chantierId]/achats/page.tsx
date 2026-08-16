@@ -7,6 +7,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShoppingCart } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
+import { STATUT_COMMANDE, statut as resoudreStatut } from '@/lib/statuts';
+import { Alerte, BadgeStatut, LigneVide } from '@/components/ui';
 import { euro } from '@/lib/format';
 
 interface Commande {
@@ -24,12 +26,6 @@ interface Commande {
 interface Registre { lignes: Commande[]; total: number; montantTotal: string }
 interface Summary { engageTotal: string; realiseTotal: string }
 
-const STATUTS: Record<string, string> = {
-  draft: 'Brouillon', pending_approval: 'À valider', validated: 'Envoyée', cancelled: 'Annulée',
-};
-const BADGE: Record<string, string> = {
-  draft: 'info', pending_approval: 'warning', validated: 'success', cancelled: 'danger',
-};
 
 function jour(v: string | null): string {
   return v ? new Date(v).toLocaleDateString('fr-FR') : '—';
@@ -121,7 +117,7 @@ export default function AchatsChantierPage() {
           Module « Suivi de chantiers » non actif pour cet utilisateur, ou accès refusé.
         </p>
       )}
-      {err && <div className="error" style={{ marginTop: 12 }}>{err}</div>}
+      {err && <Alerte>{err}</Alerte>}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 16 }}>
         <div className="field" style={{ marginBottom: 0 }}>
@@ -178,7 +174,7 @@ export default function AchatsChantierPage() {
                 <td className="code-cell">{c.code}</td>
                 <td>{c.fournisseur ?? <span className="muted">Non renseigné</span>}</td>
                 <td className="muted">{jour(c.valideLe ?? c.creeLe)}</td>
-                <td><span className={`badge ${BADGE[c.statut] ?? 'info'}`}>{STATUTS[c.statut] ?? c.statut}</span></td>
+                <td><BadgeStatut statut={resoudreStatut(STATUT_COMMANDE, c.statut)} /></td>
                 <td style={{ textAlign: 'right' }}>{c.nbLignes}</td>
                 <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                   {euro(c.totalHt)}
@@ -192,11 +188,12 @@ export default function AchatsChantierPage() {
               </tr>
             ))}
             {r && r.lignes.length === 0 && (
-              <tr>
-                <td colSpan={7} className="muted" style={{ padding: 20, textAlign: 'center' }}>
-                  Aucune commande sur ce chantier pour l’instant.
-                </td>
-              </tr>
+              <LigneVide
+                colonnes={7}
+                icone={ShoppingCart}
+                titre="Aucune commande sur ce chantier pour l’instant."
+                indice="« Nouvelle commande » ouvre un brouillon : rien n’est engagé tant qu’il n’est pas envoyé."
+              />
             )}
           </tbody>
         </table>

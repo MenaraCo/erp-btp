@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, PackageCheck, ReceiptText } from 'lucide-react';
 import { euro } from '@/lib/format';
+import { STATUT_AVANCEMENT, statut } from '@/lib/statuts';
+import { BadgeStatut, LigneVide } from './ui';
 
 /* ─────────── formes renvoyées par le registre ─────────── */
 
@@ -135,11 +137,7 @@ export function TableauReceptions({
                 <td style={{ textAlign: 'right' }}>{g.nbBl}</td>
                 <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(g.montantRecu)}</td>
                 <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(g.totalHt)}</td>
-                <td>
-                  <span className={`badge ${g.etat === 'complete' ? 'success' : 'warning'}`}>
-                    {g.etat === 'complete' ? 'Soldée' : 'Partielle'}
-                  </span>
-                </td>
+                <td><BadgeStatut statut={statut(STATUT_AVANCEMENT, g.etat)} /></td>
               </tr>,
               ...(ouvert ? g.bons.map((b) => (
                 <tr key={b.id} style={{ background: 'var(--surface)' }}>
@@ -161,11 +159,12 @@ export function TableauReceptions({
             ];
           })}
           {lignes.length === 0 && (
-            <tr>
-              <td colSpan={colonnes} className="muted" style={{ padding: 20, textAlign: 'center' }}>
-                {vide}
-              </td>
-            </tr>
+            <LigneVide
+              colonnes={colonnes}
+              icone={PackageCheck}
+              titre={vide}
+              indice="Une réception s’enregistre depuis la commande concernée, ligne à ligne."
+            />
           )}
         </tbody>
       </table>
@@ -269,11 +268,12 @@ export function TableauFactures({
             ];
           })}
           {lignes.length === 0 && (
-            <tr>
-              <td colSpan={colonnes} className="muted" style={{ padding: 20, textAlign: 'center' }}>
-                {vide}
-              </td>
-            </tr>
+            <LigneVide
+              colonnes={colonnes}
+              icone={ReceiptText}
+              titre={vide}
+              indice="Une facture fournisseur s’enregistre depuis la commande qu’elle règle."
+            />
           )}
         </tbody>
       </table>

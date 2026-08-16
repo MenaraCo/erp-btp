@@ -10,6 +10,8 @@ import {
 import { apiFetch, apiDownload, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
+import { STATUT_AVANCEMENT, STATUT_COMMANDE, statut } from '@/lib/statuts';
+import { Alerte, Badge, BadgeStatut } from './ui';
 import { teinteChantier } from '@/components/CalendrierMois';
 import { ApproModal } from '@/components/ApproModal';
 import { LigneRapprochement, SaisieRapprochement } from '@/components/SaisieRapprochement';
@@ -81,12 +83,6 @@ const NATURES: Record<string, string> = {
   material: 'Matériaux', equipment: 'Matériel', subcontract: 'Sous-traitance',
   labor: 'Main d’œuvre', site_overhead: 'Frais de chantier',
 };
-const STATUTS: Record<string, string> = {
-  draft: 'Brouillon', pending_approval: 'À valider', validated: 'Envoyée', cancelled: 'Annulée',
-};
-const BADGE: Record<string, string> = {
-  draft: 'info', pending_approval: 'warning', validated: 'success', cancelled: 'danger',
-};
 const ACTIONS: Record<string, string> = {
   submitted: 'Soumise à validation', approved: 'Approuvée', rejected: 'Refusée',
   validated: 'Validée', cancelled: 'Annulée', reopened: 'Rouverte',
@@ -135,12 +131,6 @@ function valeurCourante(ligne: Ligne, cle: string): string | null {
   }
 }
 
-const ETATS: Record<string, string> = {
-  aucune: 'rien', partielle: 'partielle', complete: 'complète',
-};
-const ETAT_BADGE: Record<string, string> = {
-  aucune: 'info', partielle: 'warning', complete: 'success',
-};
 const NATURES_SAISIE = [
   { value: 'material', label: 'Matériaux' },
   { value: 'equipment', label: 'Matériel' },
@@ -600,7 +590,7 @@ export function FicheCommande({
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Commande {c.code}</h1>
-        <span className={`badge ${BADGE[c.status] ?? 'info'}`}>{STATUTS[c.status] ?? c.status}</span>
+        <BadgeStatut statut={statut(STATUT_COMMANDE, c.status)} />
 
         {brouillon && (
           <span style={{ display: 'inline-flex', gap: 4, marginLeft: 8 }}>
@@ -740,7 +730,7 @@ export function FicheCommande({
           )}
         </div>
       )}
-      {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
+      {err && <Alerte>{err}</Alerte>}
 
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 10, fontSize: 13 }}>
         <div>
@@ -1044,13 +1034,11 @@ export function FicheCommande({
             borderBottom: '1px solid var(--border)',
           }}>
             <strong style={{ fontSize: 13 }}>Suivi des livraisons et factures</strong>
-            <span className={`badge ${ETAT_BADGE[r.receptionEtat]}`}>
-              Réception : {ETATS[r.receptionEtat]}
-            </span>
-            <span className={`badge ${ETAT_BADGE[r.factureEtat]}`}>
-              Facturation : {ETATS[r.factureEtat]}
-            </span>
-            {r.soldee && <span className="badge success">Commande soldée</span>}
+            <span className="muted" style={{ fontSize: 12 }}>Réception</span>
+            <BadgeStatut statut={statut(STATUT_AVANCEMENT, r.receptionEtat)} />
+            <span className="muted" style={{ fontSize: 12 }}>Facturation</span>
+            <BadgeStatut statut={statut(STATUT_AVANCEMENT, r.factureEtat)} />
+            {r.soldee && <Badge ton="succes">Commande soldée</Badge>}
             {Number(r.ecartPrixTotal) !== 0 && (
               <span style={{
                 fontSize: 12, fontWeight: 600,
@@ -1163,9 +1151,9 @@ export function FicheCommande({
               <span className="muted" style={{ minWidth: 130 }}>
                 {new Date(d.created_at).toLocaleDateString('fr-FR')}
               </span>
-              <span className={`badge ${d.type === 'invoice' ? 'warning' : 'info'}`}>
+              <Badge ton={d.type === 'invoice' ? 'attention' : 'info'}>
                 {d.type === 'invoice' ? 'Facture' : d.type === 'delivery' ? 'Livraison' : 'Autre'}
-              </span>
+              </Badge>
               <button
                 className="btn btn-ghost"
                 style={{ padding: 0 }}

@@ -8,6 +8,8 @@ import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { teinteChantier } from '@/components/CalendrierMois';
 import { BarreRecherche, Pagination, useRegistre } from '@/components/RegistreAchats';
+import { STATUT_COMMANDE, statut } from '@/lib/statuts';
+import { BadgeStatut, LigneVide } from '@/components/ui';
 
 interface Commande {
   id: string;
@@ -27,15 +29,8 @@ interface Commande {
 }
 interface Reponse { lignes: Commande[]; total: number; montantTotal: string; page: number; parPage: number }
 
-const STATUTS = [
-  { value: 'draft', label: 'Brouillon' },
-  { value: 'pending_approval', label: 'À valider' },
-  { value: 'validated', label: 'Envoyée' },
-  { value: 'cancelled', label: 'Annulée' },
-];
-const BADGE: Record<string, string> = {
-  draft: 'info', pending_approval: 'warning', validated: 'success', cancelled: 'danger',
-};
+// Les libellés viennent du registre des statuts : le filtre et la colonne disent la même chose.
+const STATUTS = Object.entries(STATUT_COMMANDE).map(([value, s]) => ({ value, label: s.label }));
 
 function jour(v: string | null): string {
   return v ? new Date(v).toLocaleDateString('fr-FR') : '—';
@@ -112,11 +107,7 @@ export default function CommandesPage() {
                 </td>
                 <td>{c.fournisseur ?? <span className="muted">Non renseigné</span>}</td>
                 <td className="muted">{jour(c.valideLe ?? c.creeLe)}</td>
-                <td>
-                  <span className={`badge ${BADGE[c.statut] ?? 'info'}`}>
-                    {STATUTS.find((s) => s.value === c.statut)?.label ?? c.statut}
-                  </span>
-                </td>
+                <td><BadgeStatut statut={statut(STATUT_COMMANDE, c.statut)} /></td>
                 <td style={{ textAlign: 'right' }}>{c.nbLignes}</td>
                 <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                   {euro(c.totalHt)}
@@ -130,11 +121,12 @@ export default function CommandesPage() {
               </tr>
             ))}
             {r && r.lignes.length === 0 && (
-              <tr>
-                <td colSpan={8} className="muted" style={{ padding: 20, textAlign: 'center' }}>
-                  Aucune commande ne correspond à cette recherche.
-                </td>
-              </tr>
+              <LigneVide
+                colonnes={8}
+                icone={ShoppingCart}
+                titre="Aucune commande ne correspond à cette recherche."
+                indice="Une commande se crée depuis le chantier concerné, pour qu’elle en porte le budget."
+              />
             )}
           </tbody>
         </table>

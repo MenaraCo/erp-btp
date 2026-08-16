@@ -8,6 +8,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { Alerte, Badge, Bouton, CarteKpi, EtatVide } from '@/components/ui';
 
 /* ─────────── types ─────────── */
 interface PortfolioRow {
@@ -93,26 +94,33 @@ export default function DirectionPage() {
 
       {t && (
         <div className="card-grid" style={{ marginTop: 12 }}>
-          <div className="card"><h2>Vente portefeuille</h2><div className="stat">{euro(t.vente)}</div></div>
-          <div className="card"><h2>Réalisé + engagé</h2><div className="stat">{euro((Number(t.realise) + Number(t.engage)).toFixed(2))}</div></div>
-          <div className="card">
-            <h2>Marge prévisionnelle</h2>
-            <div className="stat" style={{ color: signColor(t.margePrevisionnelle) }}>{euro(t.margePrevisionnelle)}</div>
-            <div className="muted">{pct(t.margePrevisionnellePct)}</div>
-          </div>
-          <div className="card">
-            <h2>Chantiers à risque</h2>
-            <div className="stat" style={{ color: t.aRisque > 0 ? '#dc2626' : undefined }}>
-              {t.aRisque} / {t.chantiers}
-            </div>
-          </div>
+          <CarteKpi titre="Vente portefeuille" valeur={euro(t.vente)} />
+          <CarteKpi
+            titre="Réalisé + engagé"
+            valeur={euro((Number(t.realise) + Number(t.engage)).toFixed(2))}
+          />
+          <CarteKpi
+            titre="Marge prévisionnelle"
+            valeur={euro(t.margePrevisionnelle)}
+            ton={Number(t.margePrevisionnelle) < 0 ? 'danger' : 'succes'}
+            detail={pct(t.margePrevisionnellePct)}
+          />
+          <CarteKpi
+            titre="Chantiers à risque"
+            valeur={`${t.aRisque} / ${t.chantiers}`}
+            ton={t.aRisque > 0 ? 'danger' : undefined}
+          />
         </div>
       )}
 
       <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
         {portfolio.isLoading && <p className="muted" style={{ padding: 16 }}>Chargement…</p>}
         {portfolio.data && portfolio.data.rows.length === 0 && (
-          <p className="muted" style={{ padding: 16 }}>Aucun chantier.</p>
+          <EtatVide
+            icone={AlertTriangle}
+            titre="Aucun chantier à piloter."
+            indice="Un chantier apparaît ici dès qu’une affaire gagnée lui est transférée."
+          />
         )}
         {portfolio.data && portfolio.data.rows.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
@@ -225,7 +233,7 @@ function AlertSettings() {
       <p className="muted" style={{ marginTop: 0 }}>
         Paramètres appliqués à tous les chantiers. Modifiables sans redéploiement ; chaque version est conservée.
       </p>
-      {err && <div className="error">{err}</div>}
+      {err && <Alerte>{err}</Alerte>}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div className="field" style={{ marginBottom: 0 }}>
           <label>Alerte écart au stade (%)</label>
@@ -243,9 +251,9 @@ function AlertSettings() {
             <option value="m2">Budget / CPI</option>
           </select>
         </div>
-        <button
-          className="btn"
-          disabled={save.isPending}
+        <Bouton
+          chargement={save.isPending}
+          libelleChargement="Enregistrement…"
           onClick={() => {
             setErr(null);
             const ecartPct = Number(ecartVal) / 100;
@@ -254,9 +262,9 @@ function AlertSettings() {
             save.mutate({ ecartAlertPct: ecartPct, margeCiblePct: margePct, eacMethod: eacVal });
           }}
         >
-          {save.isPending ? 'Enregistrement…' : 'Enregistrer les seuils'}
-        </button>
-        {saved && <span className="badge success">Enregistré</span>}
+          Enregistrer les seuils
+        </Bouton>
+        {saved && <Badge ton="succes">Enregistré</Badge>}
       </div>
     </div>
   );
