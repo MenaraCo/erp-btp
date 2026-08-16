@@ -18,6 +18,7 @@ import { CommandePdfService } from './commande-pdf.service';
 import { DocumentsAchatsService } from './documents-achats.service';
 import { AchatsReportingService } from './achats-reporting.service';
 import { PayeService } from './paye.service';
+import { RelevePdfService } from './releve-pdf.service';
 import { PayeController } from './paye.controller';
 import { PersonnelController } from './personnel.controller';
 import { PlanningController } from './planning.controller';
@@ -42,7 +43,7 @@ import { AnalyticsController } from './analytics.controller';
     PlanningService,
     PersonnelService, AbsenceService, AbsencesPdfService, PurchasingService, ApprovisionnementService,
     AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService,
-    DocumentsAchatsService, AchatsReportingService, PayeService,
+    DocumentsAchatsService, AchatsReportingService, PayeService, RelevePdfService,
     AnalyticsService, LibraryTransferService],
   controllers: [
     ChantierController,
@@ -60,6 +61,6 @@ import { AnalyticsController } from './analytics.controller';
     PlanningService,
     PersonnelService, AbsenceService, AbsencesPdfService, PurchasingService, ApprovisionnementService,
     AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService, DocumentsAchatsService,
-    AchatsReportingService, PayeService, AnalyticsService],
+    AchatsReportingService, PayeService, RelevePdfService, AnalyticsService],
 })
 export class SiteTrackingModule {}

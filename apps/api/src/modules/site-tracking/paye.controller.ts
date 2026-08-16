@@ -5,6 +5,7 @@ import type { Response } from 'express';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { LigneManuelleInput, PayeService, RubriqueInput } from './paye.service';
+import { RelevePdfService } from './releve-pdf.service';
 
 /** Mois courant, quand l'appelant n'en précise pas — l'écran s'ouvre sur le mois en cours. */
 function moisOuCourant(mois?: string): string {
@@ -13,7 +14,10 @@ function moisOuCourant(mois?: string): string {
 
 @Controller('paye')
 export class PayeController {
-  constructor(private readonly paye: PayeService) {}
+  constructor(
+    private readonly paye: PayeService,
+    private readonly relevePdfService: RelevePdfService,
+  ) {}
 
   /* ── paramétrage des rubriques ── */
 
@@ -80,10 +84,26 @@ export class PayeController {
   @RequiresPermission('site_tracking.write')
   signer(
     @Param('employeeId') employeeId: string,
-    @Body() body: { nom: string },
+    @Body() body: { nom: string; signature?: string | null },
     @Query('mois') mois?: string,
   ) {
-    return this.paye.signer(employeeId, moisOuCourant(mois), body?.nom);
+    return this.paye.signer(employeeId, moisOuCourant(mois), body?.nom, body?.signature ?? null);
+  }
+
+  /** Relevé mensuel en PDF — le document qu'on imprime, remet et classe. */
+  @Get('releves/:employeeId/releve.pdf')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.read')
+  async relevePdf(
+    @Res() res: Response,
+    @Param('employeeId') employeeId: string,
+    @Query('mois') mois?: string,
+  ) {
+    const m = moisOuCourant(mois);
+    const pdf = await this.relevePdfService.generer(employeeId, m);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="releve-${m}.pdf"`);
+    res.send(pdf);
   }
 
   /**

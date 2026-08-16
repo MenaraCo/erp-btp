@@ -4,8 +4,10 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, CheckCircle2, FileSignature, PenLine, Trash2, Unlock } from 'lucide-react';
-import { apiFetch, ApiError } from '@/lib/api';
+import {
+  Calculator, CheckCircle2, FileSignature, FileText, PenLine, Trash2, Unlock,
+} from 'lucide-react';
+import { apiFetch, apiDownload, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { libelleAbsence } from '@/lib/absences';
@@ -13,6 +15,7 @@ import { STATUT_RELEVE, statut } from '@/lib/statuts';
 import { Alerte, Badge, BadgeStatut, Bouton, CarteKpi, EtatVide } from '@/components/ui';
 import { Camembert } from '@/components/Graphiques';
 import { Modale } from '@/components/Modale';
+import { Signature } from '@/components/Signature';
 import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
 import { Rubrique as RubriquePaye, RubriqueModal } from '@/components/RubriqueModal';
 
@@ -81,6 +84,7 @@ export default function RelevePage() {
 
   const [err, setErr] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
+  const [trace, setTrace] = useState<string | null>(null);
   const [rubriqueOuverte, setRubriqueOuverte] = useState<Rubrique | null>(null);
   const [ajout, setAjout] = useState<
     { rubriqueId: string; quantite: string; montant: string; chantierId: string; codeAnalytiqueId: string | null }
@@ -119,10 +123,12 @@ export default function RelevePage() {
     onSuccess: () => { setErr(null); rafraichir(); }, onError: echoue,
   });
   const signer = useMutation({
-    mutationFn: (nom: string) => apiFetch(`/paye/releves/${employeeId}/signer?mois=${mois}`, {
-      method: 'POST', token, body: { nom },
-    }),
-    onSuccess: () => { setErr(null); setSignature(null); rafraichir(); }, onError: echoue,
+    mutationFn: (v: { nom: string; signature: string | null }) =>
+      apiFetch(`/paye/releves/${employeeId}/signer?mois=${mois}`, {
+        method: 'POST', token, body: { nom: v.nom, signature: v.signature },
+      }),
+    onSuccess: () => { setErr(null); setSignature(null); setTrace(null); rafraichir(); },
+    onError: echoue,
   });
   const rouvrir = useMutation({
     mutationFn: () => apiFetch(`/paye/releves/${employeeId}/rouvrir?mois=${mois}`, { method: 'POST', token, body: {} }),
@@ -164,6 +170,16 @@ export default function RelevePage() {
             <span className="muted">{libelleMois(mois)}</span>
 
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Bouton
+                variante="secondaire"
+                icone={FileText}
+                onClick={() => apiDownload(
+                  `/paye/releves/${employeeId}/releve.pdf?mois=${mois}`, token,
+                  `releve-${r.salarie.code}-${mois}.pdf`,
+                )}
+              >
+                Relevé PDF
+              </Bouton>
               {r.modifiable && (
                 <Bouton
                   variante="secondaire"
@@ -378,7 +394,7 @@ export default function RelevePage() {
               icone={PenLine}
               disabled={!signature.trim()}
               chargement={signer.isPending}
-              onClick={() => signer.mutate(signature)}
+              onClick={() => signer.mutate({ nom: signature, signature: trace })}
             >
               Signer
             </Bouton>
@@ -391,6 +407,10 @@ export default function RelevePage() {
           <div className="field">
             <label>Nom du signataire</label>
             <input value={signature} onChange={(ev) => setSignature(ev.target.value)} autoFocus />
+          </div>
+          <div className="field">
+            <label>Signature manuscrite (facultative)</label>
+            <Signature onChange={setTrace} />
           </div>
         </Modale>
       )}

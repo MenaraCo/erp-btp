@@ -472,10 +472,11 @@ export class PayeService {
    * Signature du relevé. Le nom porté sur le document est celui qui signe — comme sur le papier.
    * Un relevé se signe APRÈS validation : on n'atteste pas un document que personne n'a arrêté.
    */
-  async signer(employeeId: string, mois: string, nom: string) {
+  async signer(employeeId: string, mois: string, nom: string, image?: string | null) {
     const tenantId = this.context.requireTenantId();
     const debut = this.premierJour(mois);
     if (!nom?.trim()) throw new BadRequestException('Le nom du signataire est requis.');
+    const signature = this.verifierSignature(image);
     await runInTenant(this.dataSource, tenantId, async (em) => {
       const entete = await this.enteteOuBrouillon(em, tenantId, employeeId, debut);
       if (entete.statut === 'brouillon') {
@@ -486,9 +487,9 @@ export class PayeService {
       }
       await em.query(
         `UPDATE payroll_releve SET statut = 'signe', signe_le = now(), signe_par = $3,
-                                   updated_at = now()
+                                   signature_image = $4, updated_at = now()
           WHERE employee_id = $1 AND mois = $2::date`,
-        [employeeId, debut, nom.trim()],
+        [employeeId, debut, nom.trim(), signature],
       );
     });
     return this.releve(employeeId, mois);
@@ -501,7 +502,7 @@ export class PayeService {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
         `UPDATE payroll_releve
-            SET statut = 'brouillon', signe_le = NULL, signe_par = NULL,
+            SET statut = 'brouillon', signe_le = NULL, signe_par = NULL, signature_image = NULL,
                 valide_le = NULL, valide_par = NULL,
                 commentaire = COALESCE($3, commentaire), updated_at = now()
           WHERE employee_id = $1 AND mois = $2::date
@@ -584,6 +585,23 @@ export class PayeService {
   }
 
   /* ─────────── interne ─────────── */
+
+  /**
+   * Signature manuscrite : une image PNG tracée à l'écran, ou rien. On refuse tout le reste —
+   * accepter n'importe quelle chaîne reviendrait à laisser écrire dans le document ce qu'on veut.
+   */
+  private verifierSignature(image?: string | null): string | null {
+    if (!image) return null;
+    if (!image.startsWith('data:image/png;base64,')) {
+      throw new BadRequestException('Signature attendue au format image PNG.');
+    }
+    // Un tracé au doigt pèse quelques dizaines de kilo-octets ; au-delà, ce n'est plus une
+    // signature, et une base de données n'est pas un entrepôt d'images.
+    if (image.length > 400_000) {
+      throw new BadRequestException('Signature trop lourde (400 Ko maximum).');
+    }
+    return image;
+  }
 
   private verifierTranche(input: Partial<RubriqueInput>): void {
     if (input.seuilDebut != null && input.seuilFin != null

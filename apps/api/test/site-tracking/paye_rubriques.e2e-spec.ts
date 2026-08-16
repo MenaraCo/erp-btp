@@ -208,6 +208,37 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
     expect(res.headers['content-disposition']).toContain(`paye-${MOIS}.csv`);
   });
 
+  it('edite_le_releve_en_pdf_avec_le_cadre_de_signature', async () => {
+    const res = await as('get', `/paye/releves/${employeeId}/releve.pdf?mois=${MOIS}`)
+      .buffer(true)
+      .parse((r, cb) => {
+        const morceaux: Buffer[] = [];
+        r.on('data', (c: Buffer) => morceaux.push(c));
+        r.on('end', () => cb(null, Buffer.concat(morceaux)));
+      })
+      .expect(200);
+
+    const pdf = res.body as Buffer;
+    expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
+    expect(pdf.length).toBeGreaterThan(1500);
+    expect(res.headers['content-type']).toContain('application/pdf');
+  });
+
+  it('refuse_une_signature_qui_n_est_pas_une_image', async () => {
+    // Le relevé a été rouvert par le test précédent : on le revalide pour pouvoir le signer.
+    await as('post', `/paye/releves/${employeeId}/valider?mois=${MOIS}`).expect(201);
+    await as('post', `/paye/releves/${employeeId}/signer?mois=${MOIS}`)
+      .send({ nom: 'Paul Durand', signature: 'javascript:alert(1)' })
+      .expect(400);
+
+    // Un vrai PNG, même minuscule, passe — et se retrouve sur le relevé.
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const signe = (await as('post', `/paye/releves/${employeeId}/signer?mois=${MOIS}`)
+      .send({ nom: 'Paul Durand', signature: png }).expect(201)).body;
+    expect(signe.entete.statut).toBe('signe');
+    expect(signe.entete.signature_image).toBe(png);
+  });
+
   it('refuse_un_mois_mal_formé_plutot_que_de_deviner', async () => {
     await as('get', `/paye/releves/${employeeId}?mois=juin`).expect(400);
     await as('get', '/paye/releves?mois=2026-6').expect(400);
@@ -216,7 +247,9 @@ describe('Suivi de chantiers — éléments variables de paye', () => {
   it('liste_les_releves_du_mois_avec_ce_qui_reste_a_calculer', async () => {
     const r = (await as('get', `/paye/releves?mois=${MOIS}`).expect(200)).body;
     const ligne = r.lignes.find((l: { employee_id: string }) => l.employee_id === employeeId);
-    expect(ligne.statut).toBe('brouillon');
+    // Les tests précédents ont signé ce relevé : l'écran de suivi doit le refléter tel quel.
+    expect(ligne.statut).toBe('signe');
+    expect(ligne.signe_par).toBe('Paul Durand');
     expect(Number(ligne.heures_pointees)).toBe(48);
     expect(Number(r.totalRubriques)).toBeGreaterThan(0);
   });

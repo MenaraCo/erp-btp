@@ -11,6 +11,9 @@ import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { returningRows } from '../../core/database/returning.util';
 
+/** Date ISO : le filtre de période ne doit accepter qu'une date, jamais un fragment de SQL. */
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
 export interface TimesheetInput {
   executionLineId?: string | null;
   /** Salarié du fichier : son nom et son coût horaire sont repris de la fiche. */
@@ -123,14 +126,40 @@ export class TimesheetService {
     });
   }
 
-  list(chantierId: string) {
+  /**
+   * Pointages d'un chantier, éventuellement bornés à une période — l'agenda n'affiche qu'un mois
+   * à la fois, et charger trois ans de pointages pour en montrer trente serait absurde.
+   *
+   * Chaque ligne dit si elle est FIGÉE : imputée au résultat, ou couverte par un relevé de paye
+   * signé. L'écran a besoin de le savoir avant de proposer un crayon qui ne marcherait pas.
+   */
+  list(chantierId: string, debut?: string | null, fin?: string | null) {
     const tenantId = this.context.requireTenantId();
-    return runInTenant(this.dataSource, tenantId, (em) =>
-      em.query(
-        `SELECT * FROM timesheet WHERE chantier_id = $1 ORDER BY work_date ASC, created_at ASC`,
-        [chantierId],
-      ),
-    );
+    return runInTenant(this.dataSource, tenantId, (em) => {
+      const params: unknown[] = [chantierId];
+      let periode = '';
+      if (debut && ISO.test(debut)) { params.push(debut); periode += ` AND t.work_date >= $${params.length}`; }
+      if (fin && ISO.test(fin)) { params.push(fin); periode += ` AND t.work_date <= $${params.length}`; }
+      return em.query(
+        `SELECT t.*, t.work_date::text AS work_date,
+                to_char(t.start_time,'HH24:MI') AS start_time,
+                to_char(t.end_time,'HH24:MI') AS end_time,
+                el.designation AS ouvrage_label, ac.code AS code_analytique,
+                (t.imputed_at IS NOT NULL) AS impute,
+                EXISTS (
+                  SELECT 1 FROM payroll_releve r
+                   WHERE r.employee_id = t.employee_id
+                     AND r.statut = 'signe'
+                     AND r.mois = date_trunc('month', t.work_date)::date
+                ) AS releve_signe
+           FROM timesheet t
+           LEFT JOIN execution_line el ON el.id = t.execution_line_id
+           LEFT JOIN analytical_code ac ON ac.id = t.code_analytique_id
+          WHERE t.chantier_id = $1 ${periode}
+          ORDER BY t.work_date ASC, t.created_at ASC`,
+        params,
+      );
+    });
   }
 
   /** Total valued labour cost (réalisé MO) for a chantier, with per-line breakdown. */
@@ -373,6 +402,19 @@ export class TimesheetService {
       throw new ConflictException(
         'Ce pointage est imputé : ses heures alimentent déjà le résultat du chantier. '
         + 'Saisissez une ligne de correction plutôt que de modifier celle-ci.',
+      );
+    }
+    // Un relevé de paye signé fige le mois du salarié : le corriger après coup ferait mentir un
+    // document qu'il a signé de sa main.
+    const signe = await em.query(
+      `SELECT 1 FROM payroll_releve r
+        WHERE r.employee_id = $1 AND r.statut = 'signe'
+          AND r.mois = date_trunc('month', $2::date)::date`,
+      [t.employee_id, t.work_date],
+    );
+    if (signe.length > 0) {
+      throw new ConflictException(
+        'Le relevé mensuel de ce salarié est signé : rouvrez-le avant de corriger ses heures.',
       );
     }
     return t;

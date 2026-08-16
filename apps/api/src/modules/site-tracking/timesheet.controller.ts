@@ -27,8 +27,12 @@ export class TimesheetController {
   @Get()
   @RequiresCapability('site_tracking.timesheet')
   @RequiresPermission('site_tracking.read')
-  list(@Param('chantierId') chantierId: string) {
-    return this.timesheets.list(chantierId);
+  list(
+    @Param('chantierId') chantierId: string,
+    @Query('debut') debut?: string,
+    @Query('fin') fin?: string,
+  ) {
+    return this.timesheets.list(chantierId, debut ?? null, fin ?? null);
   }
 
   @Get('summary')

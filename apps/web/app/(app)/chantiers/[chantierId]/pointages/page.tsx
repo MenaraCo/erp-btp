@@ -1,64 +1,88 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import {
+  CalendarDays, CalendarRange, ChevronLeft, ChevronRight, List, Lock, Plus, Users,
+} from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { apiFetch, ApiError } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { Alerte, Bouton, CarteKpi, LigneVide } from '@/components/ui';
+import { CalendrierPointages, estFige, PointageJour } from '@/components/CalendrierPointages';
+import { PointageModal } from '@/components/PointageModal';
 
-interface TimesheetEntry {
-  id: string;
-  employee_label: string;
-  work_date: string;
-  hours: string;
-  hourly_cost: string;
-  cost: string;
+interface TimesheetSummary { totalCost: string; totalHours: string }
+
+function iso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-interface Employee {
-  id: string;
-  code: string;
-  fullName: string;
-  jobTitle: string | null;
-  hourlyCost: string;
+function libelleMois(d: string): string {
+  const [a, m] = d.split('-').map(Number);
+  return new Date(a, m - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 }
-interface TimesheetSummary {
-  totalCost: string;
-  totalHours: string;
+/** Bornes chargées : le mois élargi aux semaines entières, ou la semaine du jour d'ancrage. */
+function bornes(ancre: string, vue: 'mois' | 'semaine'): { debut: string; fin: string } {
+  const [a, m, j] = ancre.split('-').map(Number);
+  if (vue === 'semaine') {
+    const base = new Date(a, m - 1, j);
+    const lundi = new Date(base);
+    lundi.setDate(base.getDate() - ((base.getDay() + 6) % 7));
+    const dimanche = new Date(lundi);
+    dimanche.setDate(lundi.getDate() + 6);
+    return { debut: iso(lundi), fin: iso(dimanche) };
+  }
+  const premier = new Date(a, m - 1, 1);
+  const debut = new Date(premier);
+  debut.setDate(1 - ((premier.getDay() + 6) % 7));
+  const fin = new Date(debut);
+  fin.setDate(debut.getDate() + 41);
+  return { debut: iso(debut), fin: iso(fin) };
+}
+function decaler(ancre: string, vue: 'mois' | 'semaine', pas: number): string {
+  const [a, m, j] = ancre.split('-').map(Number);
+  const d = new Date(a, m - 1, j);
+  if (vue === 'semaine') d.setDate(d.getDate() + pas * 7);
+  else d.setMonth(d.getMonth() + pas, 1);
+  return iso(d);
 }
 
-/** Écran Pointages d'un chantier : saisie des heures de main d'œuvre (réalisé MO, cahier §5.5). */
+/**
+ * Pointages d'un chantier — l'agenda des heures réellement faites.
+ *
+ * La saisie se relisait dans une liste à plat : pour vérifier une semaine, il fallait la
+ * reconstituer de tête. Posée sur un calendrier, une journée creuse ou un oubli se voit sans rien
+ * chercher, et un clic sur la case ouvre la saisie du jour.
+ *
+ * Tout se corrige tant que ce n'est pas FIGÉ : imputé au résultat du chantier, ou couvert par un
+ * relevé de paye signé. Ces lignes-là portent un cadenas et s'ouvrent en lecture — on doit
+ * pouvoir vérifier ce qui a été compté même quand il est trop tard pour le changer.
+ */
 export default function PointagesPage() {
   const { token } = useAuth();
-  const qc = useQueryClient();
   const chantierId = String(useParams().chantierId);
 
-  // Salarié choisi dans le fichier : son coût horaire est repris, mais reste forçable
-  // (heure de nuit, intérim facturé autrement).
-  const [employeeId, setEmployeeId] = useState('');
-  const [employee, setEmployee] = useState('');
-  const [date, setDate] = useState('');
-  const [hours, setHours] = useState('');
-  const [hourlyCost, setHourlyCost] = useState('');
-  const [err, setErr] = useState<string | null>(null);
+  const [vue, setVue] = useState<'mois' | 'semaine' | 'liste'>('mois');
+  const [ancre, setAncre] = useState(() => iso(new Date()));
+  const [fenetre, setFenetre] = useState<null | { pointage: PointageJour | null; date: string }>(null);
+
+  const grille = vue === 'liste' ? 'mois' : vue;
+  const periode = useMemo(() => bornes(ancre, grille), [ancre, grille]);
 
   const chantier = useQuery({
     queryKey: ['chantier', chantierId],
     enabled: Boolean(token),
     queryFn: () => apiFetch<{ code: string }>(`/chantiers/${chantierId}`, { token }),
   });
-  // Fichier des salariés : la saisie s'appuie dessus plutôt que sur un nom retapé chaque fois.
-  const salaries = useQuery({
-    queryKey: ['employees'],
-    enabled: Boolean(token),
-    queryFn: () => apiFetch<Employee[]>('/employees', { token }),
-  });
   const list = useQuery({
-    queryKey: ['timesheets', chantierId],
+    queryKey: ['timesheets', chantierId, periode.debut, periode.fin],
     enabled: Boolean(token),
     retry: false,
-    queryFn: () => apiFetch<TimesheetEntry[]>(`/chantiers/${chantierId}/timesheets`, { token }),
+    queryFn: () => apiFetch<PointageJour[]>(
+      `/chantiers/${chantierId}/timesheets?debut=${periode.debut}&fin=${periode.fin}`, { token },
+    ),
   });
   const summary = useQuery({
     queryKey: ['timesheets-summary', chantierId],
@@ -67,136 +91,158 @@ export default function PointagesPage() {
     queryFn: () => apiFetch<TimesheetSummary>(`/chantiers/${chantierId}/timesheets/summary`, { token }),
   });
 
-  const create = useMutation({
-    mutationFn: () =>
-      apiFetch(`/chantiers/${chantierId}/timesheets`, {
-        method: 'POST',
-        token,
-        body: employeeId
-          ? { employeeId, date, hours, hourlyCost: hourlyCost || undefined }
-          : { employee, date, hours, hourlyCost },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['timesheets', chantierId] });
-      qc.invalidateQueries({ queryKey: ['timesheets-summary', chantierId] });
-      setEmployee(''); setDate(''); setHours(''); setHourlyCost('');
-    },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : 'Erreur'),
-  });
-
-  const previewCost =
-    hours && hourlyCost ? Number(hours) * Number(hourlyCost) : null;
+  const lignes = list.data ?? [];
+  const heuresPeriode = lignes.reduce((s, p) => s + Number(p.hours), 0);
+  const coutPeriode = lignes.reduce((s, p) => s + Number(p.cost), 0);
+  const figes = lignes.filter(estFige).length;
+  const salaries = new Set(lignes.map((p) => p.employee_label)).size;
 
   return (
     <div>
       <p className="muted" style={{ marginTop: 0 }}>
         <Link href={`/chantiers/${chantierId}`} className="link">← Chantier {chantier.data?.code ?? ''}</Link>
       </p>
-      <h1 style={{ marginBottom: 4 }}>Pointages</h1>
-      <p className="muted" style={{ marginTop: 0 }}>Saisie des heures de main d’œuvre imputées au chantier.</p>
 
-      {summary.data && (
-        <div className="card-grid" style={{ marginTop: 12 }}>
-          <div className="card"><h2>Heures pointées</h2><div className="stat">{summary.data.totalHours} h</div></div>
-          <div className="card"><h2>Coût main d’œuvre</h2><div className="stat">{euro(summary.data.totalCost)}</div></div>
-        </div>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Users size={20} /> Pointages
+        </h1>
+        <span style={{ marginLeft: 'auto' }}>
+          <Bouton icone={Plus} onClick={() => setFenetre({ pointage: null, date: iso(new Date()) })}>
+            Nouveau pointage
+          </Bouton>
+        </span>
+      </div>
+      <p className="muted" style={{ marginTop: 4, maxWidth: 820 }}>
+        Les heures réellement faites sur ce chantier. Cliquez une case pour saisir la journée, une
+        pastille pour la corriger — tant qu’elle n’est pas figée.
+      </p>
+
       {summary.isError && (
-        <p className="muted">Module « Suivi de chantiers » non actif pour cet utilisateur, ou accès refusé.</p>
+        <Alerte>Module « Suivi de chantiers » non actif pour cet utilisateur, ou accès refusé.</Alerte>
       )}
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2>Nouveau pointage</h2>
-        {err && <div className="error">{err}</div>}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setErr(null);
-            if ((!employeeId && !employee.trim()) || !date || !hours || (!employeeId && !hourlyCost)) {
-              setErr('Renseignez le salarié/équipe, la date, les heures et le coût horaire.');
-              return;
-            }
-            create.mutate();
-          }}
-        >
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Salarié</label>
-              <select
-                value={employeeId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setEmployeeId(id);
-                  // Le coût horaire de la fiche s'affiche d'emblée : on voit ce qui sera compté.
-                  const emp = (salaries.data ?? []).find((x) => x.id === id);
-                  if (emp) setHourlyCost(String(Number(emp.hourlyCost)));
-                }}
-                style={{ width: 200 }}
-              >
-                <option value="">— Nom libre (intérim de passage) —</option>
-                {(salaries.data ?? []).map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.fullName}{e.jobTitle ? ` · ${e.jobTitle}` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 0, display: employeeId ? 'none' : undefined }}>
-              <label>Nom saisi</label>
-              <input value={employee} onChange={(e) => setEmployee(e.target.value)} placeholder="Équipe maçonnerie" style={{ width: 200 }} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: 150 }} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Heures</label>
-              <input type="number" min={0} step="0.25" value={hours} onChange={(e) => setHours(e.target.value)} style={{ width: 90, textAlign: 'right' }} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Coût horaire (€)</label>
-              <input type="number" min={0} step="0.01" value={hourlyCost} onChange={(e) => setHourlyCost(e.target.value)} style={{ width: 110, textAlign: 'right' }} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Coût</label>
-              <div style={{ padding: '6px 0', fontWeight: 600, minWidth: 90, textAlign: 'right' }}>
-                {previewCost !== null ? euro(previewCost) : '—'}
-              </div>
-            </div>
-            <button className="btn" type="submit" disabled={create.isPending}>
-              {create.isPending ? 'Enregistrement…' : 'Ajouter'}
-            </button>
-          </div>
-        </form>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button className="btn-ghost" title="Précédent" onClick={() => setAncre(decaler(ancre, grille, -1))}>
+            <ChevronLeft size={16} />
+          </button>
+          <strong style={{ minWidth: 170, textAlign: 'center', fontSize: 13, textTransform: 'capitalize' }}>
+            {grille === 'mois'
+              ? libelleMois(ancre)
+              : `Semaine du ${new Date(periode.debut).toLocaleDateString('fr-FR')}`}
+          </strong>
+          <button className="btn-ghost" title="Suivant" onClick={() => setAncre(decaler(ancre, grille, 1))}>
+            <ChevronRight size={16} />
+          </button>
+          <button className="btn-ghost" onClick={() => setAncre(iso(new Date()))}>Aujourd’hui</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+          <Bouton variante={vue === 'mois' ? 'primaire' : 'secondaire'} icone={CalendarDays} onClick={() => setVue('mois')}>
+            Mois
+          </Bouton>
+          <Bouton variante={vue === 'semaine' ? 'primaire' : 'secondaire'} icone={CalendarRange} onClick={() => setVue('semaine')}>
+            Semaine
+          </Bouton>
+          <Bouton variante={vue === 'liste' ? 'primaire' : 'secondaire'} icone={List} onClick={() => setVue('liste')}>
+            Liste
+          </Bouton>
+        </div>
       </div>
 
-      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
-        <table className="grid" style={{ margin: 0 }}>
-          <thead>
-            <tr>
-              <th>Salarié / équipe</th>
-              <th>Date</th>
-              <th style={{ textAlign: 'right' }}>Heures</th>
-              <th style={{ textAlign: 'right' }}>Coût horaire</th>
-              <th style={{ textAlign: 'right' }}>Coût</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(list.data ?? []).map((e) => (
-              <tr key={e.id}>
-                <td>{e.employee_label}</td>
-                <td>{new Date(e.work_date).toLocaleDateString('fr-FR')}</td>
-                <td style={{ textAlign: 'right' }}>{e.hours}</td>
-                <td style={{ textAlign: 'right' }}>{euro(e.hourly_cost)}</td>
-                <td style={{ textAlign: 'right', fontWeight: 600 }}>{euro(e.cost)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {list.data && list.data.length === 0 && (
-          <p className="muted" style={{ padding: 16 }}>Aucun pointage. Ajoutez le premier ci-dessus.</p>
+      <div className="card-grid" style={{ marginTop: 14 }}>
+        <CarteKpi
+          titre="Heures sur la période"
+          valeur={heuresPeriode.toLocaleString('fr-FR')}
+          detail={grille === 'mois' ? libelleMois(ancre) : `semaine du ${new Date(periode.debut).toLocaleDateString('fr-FR')}`}
+        />
+        <CarteKpi titre="Coût sur la période" valeur={euro(coutPeriode.toFixed(2))} />
+        <CarteKpi titre="Salariés pointés" valeur={salaries} detail={`${figes} ligne${figes > 1 ? 's' : ''} figée${figes > 1 ? 's' : ''}`} />
+        {summary.data && (
+          <CarteKpi
+            titre="Total chantier"
+            valeur={`${Number(summary.data.totalHours).toLocaleString('fr-FR')} h`}
+            detail={euro(summary.data.totalCost)}
+          />
         )}
       </div>
+
+      <div style={{ marginTop: 14 }}>
+        {vue === 'liste' ? (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <table className="grid" style={{ margin: 0 }}>
+              <thead>
+                <tr>
+                  <th style={{ width: 110 }}>Date</th>
+                  <th>Salarié / équipe</th>
+                  <th>Ouvrage</th>
+                  <th style={{ width: 90 }}>Poste</th>
+                  <th style={{ width: 80, textAlign: 'right' }}>Heures</th>
+                  <th style={{ width: 110, textAlign: 'right' }}>Coût horaire</th>
+                  <th style={{ width: 110, textAlign: 'right' }}>Coût</th>
+                  <th style={{ width: 40 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {lignes.map((p) => (
+                  <tr
+                    key={p.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setFenetre({ pointage: p, date: p.work_date })}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
+                  >
+                    <td className="code-cell">{new Date(p.work_date).toLocaleDateString('fr-FR')}</td>
+                    <td>{p.employee_label}</td>
+                    <td className="muted">{p.ouvrage_label ?? '—'}</td>
+                    <td>{p.code_analytique
+                      ? <span className="code-cell">{p.code_analytique}</span>
+                      : <span className="muted">—</span>}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{Number(p.hours)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(p.hourly_cost)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{euro(p.cost)}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      {estFige(p) && (
+                        <Lock
+                          size={12}
+                          className="muted"
+                          aria-label={p.impute ? 'Imputé au résultat' : 'Relevé de paye signé'}
+                        />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {lignes.length === 0 && (
+                  <LigneVide
+                    colonnes={8}
+                    icone={Users}
+                    titre="Aucun pointage sur cette période."
+                    indice="Cliquez une case du calendrier, ou « Nouveau pointage » : le coût horaire vient de la fiche du salarié."
+                  />
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <CalendrierPointages
+            vue={grille}
+            ancre={ancre}
+            pointages={lignes}
+            onJour={(date) => setFenetre({ pointage: null, date })}
+            onPointage={(p) => setFenetre({ pointage: p, date: p.work_date })}
+          />
+        )}
+      </div>
+
+      {fenetre && (
+        <PointageModal
+          chantierId={chantierId}
+          pointage={fenetre.pointage}
+          date={fenetre.date}
+          onClose={() => setFenetre(null)}
+        />
+      )}
     </div>
   );
 }
