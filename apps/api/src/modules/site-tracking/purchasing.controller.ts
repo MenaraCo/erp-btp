@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Body, Controller, Delete, Get, Param, Post, Query,
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query,
 } from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
@@ -7,6 +7,7 @@ import { OrderLineInput, PurchasingService } from './purchasing.service';
 import { ApprovisionnementService } from './approvisionnement.service';
 import { AchatsRegistreService, FiltreRegistre } from './achats-registre.service';
 import { ValidationAchatsService } from './validation-achats.service';
+import { LigneSaisie, RapprochementService } from './rapprochement.service';
 
 const NATURES = ['labor', 'material', 'equipment', 'subcontract', 'site_overhead'];
 
@@ -33,7 +34,44 @@ export class PurchasingController {
     private readonly appro: ApprovisionnementService,
     private readonly registre: AchatsRegistreService,
     private readonly validation: ValidationAchatsService,
+    private readonly rapprochement: RapprochementService,
   ) {}
+
+  // --- Rapprochement commande / réception / facture ---
+
+  /** Ce qui est commandé, reçu, facturé — et ce qu'il reste, ligne par ligne. */
+  @Get('purchase-orders/:orderId/rapprochement')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  rapprochementCommande(@Param('orderId') orderId: string) {
+    return this.rapprochement.tableau(orderId);
+  }
+
+  /** Réception : les quantités reçues, ligne par ligne. */
+  @Post('purchase-orders/:orderId/receptions')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  receptionner(
+    @Param('orderId') orderId: string,
+    @Body() body: { code?: string; date?: string; lignes?: LigneSaisie[] },
+  ) {
+    return this.rapprochement.receptionner(orderId, {
+      code: body?.code ?? null, date: body?.date ?? null, lignes: body?.lignes ?? [],
+    });
+  }
+
+  /** Facture fournisseur : quantités ET prix facturés, ligne par ligne. */
+  @Post('purchase-orders/:orderId/factures')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  facturer(
+    @Param('orderId') orderId: string,
+    @Body() body: { code?: string; date?: string; lignes?: LigneSaisie[] },
+  ) {
+    return this.rapprochement.facturer(orderId, {
+      code: body?.code ?? '', date: body?.date ?? null, lignes: body?.lignes ?? [],
+    });
+  }
 
   // --- Circuit de validation ---
 
@@ -210,6 +248,44 @@ export class PurchasingController {
     },
   ) {
     return this.appro.insererDepuisNomenclature(orderId, body ?? {});
+  }
+
+  /** En-tête : fournisseur, adresse et date de livraison, conditions. */
+  @Patch('purchase-orders/:orderId')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  majOrder(
+    @Param('orderId') orderId: string,
+    @Body() body: {
+      supplierId?: string | null; deliveryAddress?: string | null; deliveryDate?: string | null;
+      deliveryConditions?: string | null; paymentTerms?: string | null; contact?: string | null;
+      notes?: string | null;
+    },
+  ) {
+    return this.purchasing.updateOrder(orderId, body ?? {});
+  }
+
+  @Patch('purchase-order-lines/:lineId')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  majLigne(
+    @Param('lineId') lineId: string,
+    @Body() body: {
+      designation?: string; quantity?: string | number; unitPrice?: string | number;
+      nature?: string; executionLineId?: string | null; codeAnalytiqueId?: string | null;
+    },
+  ) {
+    if (body?.nature && !NATURES.includes(body.nature)) {
+      throw new BadRequestException(`Nature inconnue : « ${body.nature} ».`);
+    }
+    return this.purchasing.updateLine(lineId, body ?? {});
+  }
+
+  @Delete('purchase-order-lines/:lineId')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  supprimerLigne(@Param('lineId') lineId: string) {
+    return this.purchasing.removeLine(lineId);
   }
 
   @Get('purchase-orders/:orderId/lines')

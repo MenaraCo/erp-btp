@@ -9,6 +9,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
+import { returningRows } from '../../core/database/returning.util';
 import { NumberingService } from '../../core/numbering/numbering.service';
 import {
   assertTransition,
@@ -145,6 +146,157 @@ export class PurchasingService {
   }
 
   /**
+   * Modifie l'en-tête d'une commande : fournisseur, livraison, conditions.
+   *
+   * Ouvert tant que la commande n'est pas partie. Une fois envoyée, l'en-tête fait partie de ce
+   * que le fournisseur a reçu : le changer en douce donnerait deux versions du même document.
+   */
+  updateOrder(
+    orderId: string,
+    patch: {
+      supplierId?: string | null;
+      deliveryAddress?: string | null;
+      deliveryDate?: string | null;
+      deliveryConditions?: string | null;
+      paymentTerms?: string | null;
+      contact?: string | null;
+      notes?: string | null;
+    },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows = await em.query(`SELECT status FROM purchase_order WHERE id = $1`, [orderId]);
+      if (rows.length === 0) throw new NotFoundException(`Unknown purchase order "${orderId}"`);
+      if (rows[0].status !== 'draft') {
+        throw new ConflictException(
+          'Cette commande n’est plus en brouillon : son en-tête ne se modifie plus.',
+        );
+      }
+      if (patch.supplierId) {
+        const s = await em.query(
+          `SELECT id FROM supplier WHERE id = $1 AND deleted_at IS NULL`, [patch.supplierId],
+        );
+        if (s.length === 0) throw new NotFoundException('Fournisseur introuvable.');
+      }
+      if (patch.deliveryDate && !/^\d{4}-\d{2}-\d{2}$/.test(patch.deliveryDate)) {
+        throw new BadRequestException('Date de livraison attendue au format AAAA-MM-JJ.');
+      }
+
+      // COALESCE sur les seuls champs fournis : un formulaire partiel ne doit rien effacer.
+      const texte = (v: string | null | undefined) =>
+        v === undefined ? undefined : ((v ?? '').trim() || null);
+      const rowsMaj = returningRows<Record<string, unknown>>(
+        await em.query(
+          `UPDATE purchase_order
+              SET supplier_id         = COALESCE($2, supplier_id),
+                  delivery_address    = CASE WHEN $3::boolean THEN $4 ELSE delivery_address END,
+                  delivery_date       = CASE WHEN $5::boolean THEN $6::date ELSE delivery_date END,
+                  delivery_conditions = CASE WHEN $7::boolean THEN $8 ELSE delivery_conditions END,
+                  payment_terms       = CASE WHEN $9::boolean THEN $10 ELSE payment_terms END,
+                  contact             = CASE WHEN $11::boolean THEN $12 ELSE contact END,
+                  notes               = CASE WHEN $13::boolean THEN $14 ELSE notes END,
+                  updated_at = now()
+            WHERE id = $1
+        RETURNING *`,
+          [
+            orderId, patch.supplierId ?? null,
+            patch.deliveryAddress !== undefined, texte(patch.deliveryAddress) ?? null,
+            patch.deliveryDate !== undefined, patch.deliveryDate || null,
+            patch.deliveryConditions !== undefined, texte(patch.deliveryConditions) ?? null,
+            patch.paymentTerms !== undefined, texte(patch.paymentTerms) ?? null,
+            patch.contact !== undefined, texte(patch.contact) ?? null,
+            patch.notes !== undefined, texte(patch.notes) ?? null,
+          ],
+        ),
+      );
+      return rowsMaj[0];
+    });
+  }
+
+  /** Corrige une ligne de commande — tant que la commande est en brouillon. */
+  updateLine(lineId: string, patch: {
+    designation?: string; quantity?: string | number; unitPrice?: string | number;
+    nature?: string; executionLineId?: string | null; codeAnalytiqueId?: string | null;
+  }) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const ligne = (await em.query(
+        `SELECT l.*, o.status, o.chantier_id
+           FROM purchase_order_line l JOIN purchase_order o ON o.id = l.order_id
+          WHERE l.id = $1`,
+        [lineId],
+      ))[0];
+      if (!ligne) throw new NotFoundException('Ligne introuvable.');
+      if (ligne.status !== 'draft') {
+        throw new ConflictException('Cette commande n’est plus modifiable.');
+      }
+      if (patch.executionLineId) {
+        await this.assertExecutionLineInChantier(em, patch.executionLineId, ligne.chantier_id);
+      }
+      if (patch.codeAnalytiqueId) {
+        await this.assertCodeAnalytiqueExists(em, patch.codeAnalytiqueId);
+      }
+
+      const qty = new Decimal(patch.quantity ?? String(ligne.quantity));
+      const price = new Decimal(patch.unitPrice ?? String(ligne.unit_price));
+      if (qty.isNegative()) throw new BadRequestException('La quantité ne peut pas être négative.');
+      const amount = qty.times(price).toDecimalPlaces(2);
+
+      const rows = returningRows<Record<string, unknown>>(
+        await em.query(
+          `UPDATE purchase_order_line
+              SET designation = COALESCE($2, designation),
+                  nature = COALESCE($3, nature),
+                  quantity = $4, unit_price = $5, amount_ht = $6,
+                  execution_line_id = CASE WHEN $7::boolean THEN $8 ELSE execution_line_id END,
+                  code_analytique_id = CASE WHEN $9::boolean THEN $10 ELSE code_analytique_id END
+            WHERE id = $1
+        RETURNING *`,
+          [
+            lineId,
+            patch.designation?.trim() || null,
+            patch.nature ?? null,
+            qty.toString(), price.toString(), amount.toString(),
+            patch.executionLineId !== undefined, patch.executionLineId || null,
+            patch.codeAnalytiqueId !== undefined, patch.codeAnalytiqueId || null,
+          ],
+        ),
+      );
+      await this.recalculerTotal(em, ligne.order_id as string);
+      return rows[0];
+    });
+  }
+
+  /** Retire une ligne d'une commande en brouillon. */
+  removeLine(lineId: string): Promise<{ deleted: true }> {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const ligne = (await em.query(
+        `SELECT l.order_id, o.status FROM purchase_order_line l
+           JOIN purchase_order o ON o.id = l.order_id WHERE l.id = $1`,
+        [lineId],
+      ))[0];
+      if (!ligne) throw new NotFoundException('Ligne introuvable.');
+      if (ligne.status !== 'draft') {
+        throw new ConflictException('Cette commande n’est plus modifiable.');
+      }
+      await em.query(`DELETE FROM purchase_order_line WHERE id = $1`, [lineId]);
+      await this.recalculerTotal(em, ligne.order_id as string);
+      return { deleted: true as const };
+    });
+  }
+
+  private recalculerTotal(em: EntityManager, orderId: string): Promise<unknown> {
+    return em.query(
+      `UPDATE purchase_order
+          SET total_ht = (SELECT COALESCE(SUM(amount_ht),0) FROM purchase_order_line WHERE order_id = $1),
+              updated_at = now()
+        WHERE id = $1`,
+      [orderId],
+    );
+  }
+
+  /**
    * Fiche complète d'une commande : en-tête, lignes, réceptions et factures.
    * C'est ce que la page dédiée affiche — une commande ne se lit plus dans une liste dépliée.
    */
@@ -152,7 +304,8 @@ export class PurchasingService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `SELECT o.*, s.name AS fournisseur, s.id AS supplier_id,
+        `SELECT o.*, o.delivery_date::text AS delivery_date,
+                s.name AS fournisseur, s.id AS supplier_id,
                 c.code AS chantier_code, c.name AS chantier_nom, c.color AS chantier_couleur
            FROM purchase_order o
            LEFT JOIN supplier s ON s.id = o.supplier_id

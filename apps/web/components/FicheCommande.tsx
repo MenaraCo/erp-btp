@@ -3,12 +3,16 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Unlock } from 'lucide-react';
+import {
+  ArrowLeft, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Trash2, Unlock,
+} from 'lucide-react';
+import { IconBtn } from '@/components/IconBtn';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { teinteChantier } from '@/components/CalendrierMois';
 import { ApproModal } from '@/components/ApproModal';
+import { LigneRapprochement, SaisieRapprochement } from '@/components/SaisieRapprochement';
 
 interface Ligne {
   id: string;
@@ -19,6 +23,8 @@ interface Ligne {
   amount_ht: string;
   ouvrage: string | null;
   code_analytique: string | null;
+  execution_line_id: string | null;
+  code_analytique_id: string | null;
   ressource_code: string | null;
   unite_achat: string | null;
 }
@@ -26,11 +32,22 @@ interface Evenement {
   id: string; action: string; motif: string | null; created_at: string;
   auteur: string | null; auteur_email: string | null;
 }
+interface Rapprochement {
+  lignes: LigneRapprochement[];
+  receptionEtat: 'aucune' | 'partielle' | 'complete';
+  factureEtat: 'aucune' | 'partielle' | 'complete';
+  soldee: boolean;
+  ecartPrixTotal: string;
+}
+interface Fournisseur { id: string; name: string }
 interface Fiche {
   commande: {
     id: string; code: string; status: string; total_ht: string; validated_at: string | null;
     created_at: string; chantier_id: string; chantier_code: string | null; chantier_nom: string | null;
     chantier_couleur: string | null; fournisseur: string | null; reopened_count: number;
+    supplier_id: string | null; delivery_address: string | null; delivery_date: string | null;
+    delivery_conditions: string | null; payment_terms: string | null; contact: string | null;
+    notes: string | null;
   };
   lignes: Ligne[];
   receptions: Array<{ id: string; code: string; received_at: string | null }>;
@@ -50,6 +67,7 @@ const BADGE: Record<string, string> = {
 const ACTIONS: Record<string, string> = {
   submitted: 'Soumise à validation', approved: 'Approuvée', rejected: 'Refusée',
   validated: 'Envoyée au fournisseur', cancelled: 'Annulée', reopened: 'Rouverte',
+  received: 'Réception enregistrée', invoiced: 'Facture enregistrée',
 };
 
 interface EtatValidation {
@@ -57,6 +75,12 @@ interface EtatValidation {
   manquants: Array<{ validatorId: string; validateur: string; montantMin: string }>;
   peutValider: boolean;
 }
+const ETATS: Record<string, string> = {
+  aucune: 'rien', partielle: 'partielle', complete: 'complète',
+};
+const ETAT_BADGE: Record<string, string> = {
+  aucune: 'info', partielle: 'warning', complete: 'success',
+};
 const NATURES_SAISIE = [
   { value: 'material', label: 'Matériaux' },
   { value: 'equipment', label: 'Matériel' },
@@ -91,6 +115,59 @@ function jour(v: string | null): string {
  * puisque c'est là qu'on vient vérifier ce qui reste à recevoir.
  */
 /**
+ * Bouton « + » d'ajout de ligne, calqué sur le montage d'un devis : un déclencheur, deux gestes.
+ * `R` reprend une ressource déjà chiffrée, `L` ouvre une ligne libre — la cohérence entre modules
+ * compte plus que l'originalité de chaque écran.
+ */
+function MenuAjout({ onRessource, onLigneLibre }: {
+  onRessource: () => void;
+  onLigneLibre: () => void;
+}) {
+  const [ouvert, setOuvert] = useState(false);
+  const carre = (label: string, titre: string, couleur: string, action: () => void) => (
+    <button
+      type="button"
+      title={titre}
+      onClick={() => { action(); setOuvert(false); }}
+      style={{
+        width: 26, height: 22, borderRadius: 4, border: `1px solid ${couleur}`,
+        background: 'transparent', color: couleur, fontSize: 11, fontWeight: 700,
+        cursor: 'pointer', lineHeight: 1,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <button
+        type="button"
+        title="Ajouter une ligne à cette commande"
+        onClick={() => setOuvert((o) => !o)}
+        style={{
+          width: 22, height: 22, borderRadius: 4, border: '1px solid var(--primary)',
+          background: 'transparent', color: 'var(--primary)', fontSize: 15, fontWeight: 700,
+          cursor: 'pointer', lineHeight: 1,
+        }}
+      >
+        +
+      </button>
+      {ouvert && (
+        <>
+          {carre('R', 'Reprendre des ressources du chantier (quantités et prix du budget)',
+            '#0891b2', onRessource)}
+          {carre('L', 'Ajouter une ligne libre, à remplir dans le tableau', '#64748b', onLigneLibre)}
+          <span className="muted" style={{ fontSize: 11 }}>
+            R : ressources du chantier · L : ligne libre
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/**
  * Fiche d'un bon de commande — le SEUL endroit où l'on agit sur une commande.
  *
  * Le même composant sert au registre d'entreprise et à l'intérieur d'un chantier : `retour` dit
@@ -108,16 +185,8 @@ export function FicheCommande({
 
   const qc = useQueryClient();
   const [motif, setMotif] = useState('');
-  const [nature, setNature] = useState('material');
-  const [designation, setDesignation] = useState('');
-  const [quantite, setQuantite] = useState('');
-  const [pu, setPu] = useState('');
-  const [ouvrage, setOuvrage] = useState('');
-  const [codeAnalytique, setCodeAnalytique] = useState('');
   const [approOuvert, setApproOuvert] = useState(false);
-  const [factureCode, setFactureCode] = useState('');
-  const [factureMontant, setFactureMontant] = useState('');
-  const [factureNature, setFactureNature] = useState('material');
+  const [saisie, setSaisie] = useState<null | 'reception' | 'facture'>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [ouvrirReouverture, setOuvrirReouverture] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -126,6 +195,17 @@ export function FicheCommande({
     queryKey: ['commande', orderId],
     enabled: Boolean(token),
     queryFn: () => apiFetch<Fiche>(`/purchase-orders/${orderId}`, { token }),
+  });
+  const rappro = useQuery({
+    queryKey: ['commande-rapprochement', orderId],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<Rapprochement>(`/purchase-orders/${orderId}/rapprochement`, { token }),
+  });
+  const fournisseurs = useQuery({
+    queryKey: ['suppliers-filtre'],
+    enabled: Boolean(token),
+    retry: false,
+    queryFn: () => apiFetch<{ rows: Fournisseur[] }>('/suppliers?sort=name&pageSize=100', { token }),
   });
   const validation = useQuery({
     queryKey: ['commande-validation', orderId],
@@ -170,25 +250,23 @@ export function FicheCommande({
 
   const rafraichir = () => {
     setErr(null);
-    for (const key of ['commande', 'commande-journal', 'commande-validation', 'achats-commandes', 'purchasing-chain', 'purchasing-summary', 'execution-tree']) {
+    for (const key of ['commande', 'commande-journal', 'commande-validation', 'commande-rapprochement', 'achats-commandes', 'achats-receptions', 'achats-factures', 'purchasing-summary', 'execution-tree']) {
       qc.invalidateQueries({ queryKey: [key] });
     }
   };
   const echec = (e: unknown, defaut: string) =>
     setErr(e instanceof ApiError ? e.message : defaut);
 
+  /**
+   * Ligne libre : créée vide et remplie DANS la grille, comme un ouvrage libre au montage d'un
+   * devis. Un formulaire séparé au-dessus du tableau obligeait à viser deux endroits à la fois.
+   */
   const ajouterLigne = useMutation({
     mutationFn: () => apiFetch(`/purchase-orders/${orderId}/lines`, {
       method: 'POST', token,
-      body: {
-        nature, designation, quantity: quantite, unitPrice: pu,
-        executionLineId: ouvrage || null, codeAnalytiqueId: codeAnalytique || null,
-      },
+      body: { nature: 'material', designation: 'Nouvelle ligne', quantity: '1', unitPrice: '0' },
     }),
-    onSuccess: () => {
-      setDesignation(''); setQuantite(''); setPu(''); setOuvrage(''); setCodeAnalytique('');
-      rafraichir();
-    },
+    onSuccess: rafraichir,
     onError: (e) => echec(e, 'Ligne non ajoutée.'),
   });
   // Envoyer, c'est SOUMETTRE : sous les seuils la commande part, au-delà elle passe au visa.
@@ -221,18 +299,22 @@ export function FicheCommande({
     onSuccess: rafraichir,
     onError: (e) => echec(e, 'Annulation impossible.'),
   });
-  const receptionner = useMutation({
-    mutationFn: () => apiFetch(`/purchase-orders/${orderId}/delivery-notes`, { method: 'POST', token, body: {} }),
+  const majEntete = useMutation({
+    mutationFn: (patch: Record<string, string | null>) =>
+      apiFetch(`/purchase-orders/${orderId}`, { method: 'PATCH', token, body: patch }),
     onSuccess: rafraichir,
-    onError: (e) => echec(e, 'Réception impossible.'),
+    onError: (e) => echec(e, 'En-tête non enregistré.'),
   });
-  const enregistrerFacture = useMutation({
-    mutationFn: () => apiFetch(`/purchase-orders/${orderId}/invoices`, {
-      method: 'POST', token,
-      body: { code: factureCode, nature: factureNature, amountHt: factureMontant },
-    }),
-    onSuccess: () => { setFactureCode(''); setFactureMontant(''); rafraichir(); },
-    onError: (e) => echec(e, 'Facture non enregistrée.'),
+  const majLigne = useMutation({
+    mutationFn: (v: { id: string; patch: Record<string, string | null> }) =>
+      apiFetch(`/purchase-order-lines/${v.id}`, { method: 'PATCH', token, body: v.patch }),
+    onSuccess: rafraichir,
+    onError: (e) => echec(e, 'Ligne non modifiée.'),
+  });
+  const supprimerLigne = useMutation({
+    mutationFn: (id: string) => apiFetch(`/purchase-order-lines/${id}`, { method: 'DELETE', token }),
+    onSuccess: rafraichir,
+    onError: (e) => echec(e, 'Ligne non supprimée.'),
   });
 
   const f = fiche.data;
@@ -253,7 +335,7 @@ export function FicheCommande({
   const envoyee = c.status === 'validated';
   const auVisa = c.status === 'pending_approval';
   const v = validation.data;
-  const factureTotal = f.factures.reduce((t, x) => t + Number(x.amount_ht), 0);
+  const r = rappro.data;
 
   return (
     <div>
@@ -358,6 +440,86 @@ export function FicheCommande({
 
       {brouillon && (
         <div className="card" style={{ marginTop: 16, padding: 14 }}>
+          <strong style={{ fontSize: 13 }}>Commande</strong>
+          <p className="muted" style={{ margin: '2px 0 10px', fontSize: 11 }}>
+            Ce que le fournisseur doit lire pour livrer : à qui, où, quand, à quelles conditions.
+            Ces informations partiront sur le bon de commande.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Fournisseur</label>
+              <select
+                value={c.supplier_id ?? ''}
+                onChange={(e) => majEntete.mutate({ supplierId: e.target.value || null })}
+              >
+                <option value="">— Choisir —</option>
+                {(fournisseurs.data?.rows ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Contact</label>
+              <input
+                defaultValue={c.contact ?? ''}
+                placeholder="Interlocuteur chez le fournisseur"
+                onBlur={(e) => e.target.value !== (c.contact ?? '') && majEntete.mutate({ contact: e.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Livraison souhaitée le</label>
+              <input
+                type="date"
+                defaultValue={c.delivery_date ?? ''}
+                onBlur={(e) => e.target.value !== (c.delivery_date ?? '') && majEntete.mutate({ deliveryDate: e.target.value || null })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+              <label>Adresse de livraison</label>
+              <input
+                defaultValue={c.delivery_address ?? ''}
+                placeholder="Chantier, dépôt, autre adresse…"
+                onBlur={(e) => e.target.value !== (c.delivery_address ?? '') && majEntete.mutate({ deliveryAddress: e.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Conditions de livraison</label>
+              <input
+                defaultValue={c.delivery_conditions ?? ''}
+                placeholder="Franco, camion-grue, horaires…"
+                onBlur={(e) => e.target.value !== (c.delivery_conditions ?? '') && majEntete.mutate({ deliveryConditions: e.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Conditions de règlement</label>
+              <input
+                defaultValue={c.payment_terms ?? ''}
+                placeholder="30 jours fin de mois…"
+                onBlur={(e) => e.target.value !== (c.payment_terms ?? '') && majEntete.mutate({ paymentTerms: e.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+              <label>Observations</label>
+              <input
+                defaultValue={c.notes ?? ''}
+                onBlur={(e) => e.target.value !== (c.notes ?? '') && majEntete.mutate({ notes: e.target.value })}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!brouillon && (c.delivery_address || c.delivery_date || c.delivery_conditions) && (
+        <div className="card" style={{ marginTop: 16, padding: '10px 14px', display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 13 }}>
+          {c.delivery_date && <div><span className="muted">Livraison souhaitée : </span>{jour(c.delivery_date)}</div>}
+          {c.delivery_address && <div><span className="muted">Adresse : </span>{c.delivery_address}</div>}
+          {c.delivery_conditions && <div><span className="muted">Conditions : </span>{c.delivery_conditions}</div>}
+          {c.payment_terms && <div><span className="muted">Règlement : </span>{c.payment_terms}</div>}
+        </div>
+      )}
+
+      {brouillon && (
+        <div className="card" style={{ marginTop: 16, padding: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <strong style={{ fontSize: 13 }}>Ajouter des lignes</strong>
             <button className="btn btn-secondary" onClick={() => setApproOuvert(true)}>
@@ -387,52 +549,6 @@ export function FicheCommande({
             </button>
           </div>
 
-          <form
-            style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!designation.trim() || !quantite || !pu) return;
-              ajouterLigne.mutate();
-            }}
-          >
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Nature</label>
-              <select value={nature} onChange={(e) => setNature(e.target.value)} style={{ width: 150 }}>
-                {NATURES_SAISIE.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Désignation</label>
-              <input value={designation} onChange={(e) => setDesignation(e.target.value)} style={{ width: 220 }} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Qté</label>
-              <input type="number" min={0} step="0.01" value={quantite}
-                onChange={(e) => setQuantite(e.target.value)} style={{ width: 80, textAlign: 'right' }} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>PU (€)</label>
-              <input type="number" min={0} step="0.01" value={pu}
-                onChange={(e) => setPu(e.target.value)} style={{ width: 100, textAlign: 'right' }} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Ouvrage</label>
-              <select value={ouvrage} onChange={(e) => setOuvrage(e.target.value)} style={{ width: 200 }}>
-                <option value="">— Non réparti —</option>
-                {ouvrages.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>Code analytique</label>
-              <select value={codeAnalytique} onChange={(e) => setCodeAnalytique(e.target.value)} style={{ width: 190 }}>
-                <option value="">— À ventiler —</option>
-                {codes.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-              </select>
-            </div>
-            <button className="btn btn-secondary" type="submit" disabled={ajouterLigne.isPending}>
-              Ajouter la ligne
-            </button>
-          </form>
         </div>
       )}
 
@@ -441,110 +557,241 @@ export function FicheCommande({
           <thead>
             <tr>
               <th>Désignation</th>
-              <th>Nature</th>
-              <th>Ouvrage</th>
-              <th>Code analytique</th>
+              <th style={{ width: 140 }}>Nature</th>
+              <th style={{ width: 200 }}>Ouvrage</th>
+              <th style={{ width: 190 }}>Code analytique</th>
               <th style={{ width: 100, textAlign: 'right' }}>Qté</th>
               <th style={{ width: 110, textAlign: 'right' }}>PU</th>
               <th style={{ width: 130, textAlign: 'right' }}>Montant HT</th>
+              {brouillon && <th style={{ width: 40 }} />}
             </tr>
           </thead>
           <tbody>
             {f.lignes.map((l) => (
-              <tr key={l.id}>
-                <td>
-                  {l.ressource_code && <span className="code-cell" style={{ marginRight: 6 }}>{l.ressource_code}</span>}
-                  {l.designation}
-                </td>
-                <td className="muted">{NATURES[l.nature] ?? l.nature}</td>
-                <td className="muted" style={{ fontSize: 12 }}>{l.ouvrage ?? '—'}</td>
-                <td>{l.code_analytique
-                  ? <span className="code-cell">{l.code_analytique}</span>
-                  : <span className="muted">À ventiler</span>}</td>
-                <td style={{ textAlign: 'right' }}>{Number(l.quantity)} {l.unite_achat ?? ''}</td>
-                <td style={{ textAlign: 'right' }}>{euro(l.unit_price)}</td>
-                <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                  {euro(l.amount_ht)}
-                </td>
-              </tr>
+              brouillon ? (
+                // Édition EN PLACE, comme le montage d'un devis : on corrige la cellule qu'on
+                // regarde, sans rouvrir un formulaire au-dessus du tableau.
+                <tr key={l.id}>
+                  <td>
+                    {l.ressource_code && <span className="code-cell" style={{ marginRight: 6 }}>{l.ressource_code}</span>}
+                    <input
+                      defaultValue={l.designation}
+                      onBlur={(e) => e.target.value.trim() && e.target.value !== l.designation
+                        && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
+                      style={{ width: l.ressource_code ? 'calc(100% - 90px)' : '100%' }}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      defaultValue={l.nature}
+                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { nature: e.target.value } })}
+                      style={{ width: '100%' }}
+                    >
+                      {NATURES_SAISIE.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      defaultValue={l.execution_line_id ?? ''}
+                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { executionLineId: e.target.value || null } })}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="">— Non réparti —</option>
+                      {ouvrages.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      defaultValue={l.code_analytique_id ?? ''}
+                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { codeAnalytiqueId: e.target.value || null } })}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="">— À ventiler —</option>
+                      {codes.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="number" min={0} step="0.01" defaultValue={Number(l.quantity)}
+                      onBlur={(e) => Number(e.target.value) !== Number(l.quantity)
+                        && majLigne.mutate({ id: l.id, patch: { quantity: e.target.value } })}
+                      style={{ width: '100%', textAlign: 'right' }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number" min={0} step="0.01" defaultValue={Number(l.unit_price)}
+                      onBlur={(e) => Number(e.target.value) !== Number(l.unit_price)
+                        && majLigne.mutate({ id: l.id, patch: { unitPrice: e.target.value } })}
+                      style={{ width: '100%', textAlign: 'right' }}
+                    />
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                    {euro(l.amount_ht)}
+                  </td>
+                  <td style={{ textAlign: 'right', paddingRight: 6 }}>
+                    <IconBtn
+                      title="Retirer cette ligne"
+                      color="var(--danger, #dc2626)"
+                      onClick={() => supprimerLigne.mutate(l.id)}
+                    >
+                      <Trash2 size={13} />
+                    </IconBtn>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={l.id}>
+                  <td>
+                    {l.ressource_code && <span className="code-cell" style={{ marginRight: 6 }}>{l.ressource_code}</span>}
+                    {l.designation}
+                  </td>
+                  <td className="muted">{NATURES[l.nature] ?? l.nature}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{l.ouvrage ?? '—'}</td>
+                  <td>{l.code_analytique
+                    ? <span className="code-cell">{l.code_analytique}</span>
+                    : <span className="muted">À ventiler</span>}</td>
+                  <td style={{ textAlign: 'right' }}>{Number(l.quantity)} {l.unite_achat ?? ''}</td>
+                  <td style={{ textAlign: 'right' }}>{euro(l.unit_price)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                    {euro(l.amount_ht)}
+                  </td>
+                </tr>
+              )
             ))}
             {f.lignes.length === 0 && (
-              <tr><td colSpan={7} className="muted" style={{ padding: 16, textAlign: 'center' }}>
+              <tr><td colSpan={brouillon ? 8 : 7} className="muted" style={{ padding: 16, textAlign: 'center' }}>
                 Cette commande n’a aucune ligne.
               </td></tr>
+            )}
+            {brouillon && (
+              <tr>
+                <td colSpan={8} style={{ padding: '8px 10px' }}>
+                  <MenuAjout
+                    onRessource={() => setApproOuvert(true)}
+                    onLigneLibre={() => ajouterLigne.mutate()}
+                  />
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
-        <div className="card" style={{ flex: '1 1 300px', padding: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <PackageCheck size={15} /><strong style={{ fontSize: 13 }}>Réceptions</strong>
-          </div>
-          {f.receptions.length === 0
-            ? <span className="muted" style={{ fontSize: 12 }}>Rien de reçu pour l’instant.</span>
-            : f.receptions.map((d) => (
-              <div key={d.id} style={{ fontSize: 12, padding: '2px 0' }}>
-                <span className="code-cell">{d.code}</span>
-                <span className="muted"> · {jour(d.received_at)}</span>
-              </div>
-            ))}
-          {envoyee && (
-            <button
-              className="btn btn-secondary"
-              style={{ marginTop: 10 }}
-              disabled={receptionner.isPending}
-              onClick={() => receptionner.mutate()}
-              title="Enregistre un bon de livraison ; son numéro suit la numérotation société"
-            >
-              {receptionner.isPending ? 'Enregistrement…' : 'Réceptionner'}
-            </button>
-          )}
-        </div>
-        <div className="card" style={{ flex: '1 1 300px', padding: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <ReceiptText size={15} /><strong style={{ fontSize: 13 }}>Factures</strong>
-            {f.factures.length > 0 && (
-              <span style={{ marginLeft: 'auto', fontWeight: 600 }}>{euro(factureTotal.toFixed(2))}</span>
+      {!brouillon && r && (
+        <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', flexWrap: 'wrap',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            <strong style={{ fontSize: 13 }}>Suivi des livraisons et factures</strong>
+            <span className={`badge ${ETAT_BADGE[r.receptionEtat]}`}>
+              Réception : {ETATS[r.receptionEtat]}
+            </span>
+            <span className={`badge ${ETAT_BADGE[r.factureEtat]}`}>
+              Facturation : {ETATS[r.factureEtat]}
+            </span>
+            {r.soldee && <span className="badge success">Commande soldée</span>}
+            {Number(r.ecartPrixTotal) !== 0 && (
+              <span style={{
+                fontSize: 12, fontWeight: 600,
+                color: Number(r.ecartPrixTotal) > 0 ? 'var(--danger, #dc2626)' : 'var(--success, #15803d)',
+              }}>
+                Écart de prix : {euro(r.ecartPrixTotal)}
+              </span>
+            )}
+            {envoyee && (
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-secondary"
+                  disabled={r.receptionEtat === 'complete'}
+                  title={r.receptionEtat === 'complete' ? 'Tout est arrivé' : undefined}
+                  onClick={() => setSaisie('reception')}
+                >
+                  <PackageCheck size={13} /> Réceptionner
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  disabled={r.factureEtat === 'complete'}
+                  title={r.factureEtat === 'complete' ? 'Tout est facturé' : undefined}
+                  onClick={() => setSaisie('facture')}
+                >
+                  <ReceiptText size={13} /> Facturer
+                </button>
+              </span>
             )}
           </div>
-          {f.factures.length === 0
-            ? <span className="muted" style={{ fontSize: 12 }}>Aucune facture rattachée.</span>
-            : f.factures.map((x) => (
-              <div key={x.id} style={{ fontSize: 12, padding: '2px 0', display: 'flex', gap: 8 }}>
-                <span className="code-cell">{x.code}</span>
-                <span className="muted">{jour(x.invoice_date)}</span>
-                <span style={{ marginLeft: 'auto' }}>{euro(x.amount_ht)}</span>
-              </div>
-            ))}
-          {envoyee && (
-            <form
-              style={{ display: 'flex', gap: 6, alignItems: 'flex-end', marginTop: 10, flexWrap: 'wrap' }}
-              onSubmit={(e) => { e.preventDefault(); if (factureCode && factureMontant) enregistrerFacture.mutate(); }}
-            >
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label>N° facture</label>
-                <input value={factureCode} onChange={(e) => setFactureCode(e.target.value)} style={{ width: 120 }} />
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label>Nature</label>
-                <select value={factureNature} onChange={(e) => setFactureNature(e.target.value)} style={{ width: 130 }}>
-                  {NATURES_SAISIE.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
-                </select>
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label>Montant HT</label>
-                <input type="number" min={0} step="0.01" value={factureMontant}
-                  onChange={(e) => setFactureMontant(e.target.value)} style={{ width: 110, textAlign: 'right' }} />
-              </div>
-              <button className="btn btn-secondary" type="submit" disabled={enregistrerFacture.isPending}>
-                Enregistrer
-              </button>
-            </form>
+
+          <table className="grid" style={{ margin: 0 }}>
+            <thead>
+              <tr>
+                <th>Désignation</th>
+                <th style={{ textAlign: 'right', width: 100 }}>Commandé</th>
+                <th style={{ textAlign: 'right', width: 90 }}>Reçu</th>
+                <th style={{ textAlign: 'right', width: 100 }}>Reste à recevoir</th>
+                <th style={{ textAlign: 'right', width: 90 }}>Facturé</th>
+                <th style={{ textAlign: 'right', width: 100 }}>PU commandé</th>
+                <th style={{ textAlign: 'right', width: 100 }}>PU facturé</th>
+                <th style={{ textAlign: 'right', width: 100 }}>Écart</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.lignes.map((l) => {
+                const ecart = Number(l.ecartPrix);
+                const reste = Number(l.resteARecevoir);
+                return (
+                  <tr key={l.orderLineId}>
+                    <td>
+                      {l.designation}
+                      {l.ouvrage && <span className="muted" style={{ fontSize: 11 }}> · {l.ouvrage}</span>}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {Number(l.quantiteCommandee)} {l.uniteAchat ?? ''}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{Number(l.quantiteRecue)}</td>
+                    <td style={{
+                      textAlign: 'right', fontWeight: reste > 0 ? 600 : 400,
+                      color: reste > 0 ? 'var(--accent)' : 'var(--muted)',
+                    }}>
+                      {reste > 0 ? Number(l.resteARecevoir) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{Number(l.quantiteFacturee)}</td>
+                    <td style={{ textAlign: 'right' }}>{euro(l.puCommande)}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {l.puFacture ? euro(l.puFacture) : <span className="muted">—</span>}
+                    </td>
+                    <td style={{
+                      textAlign: 'right', fontWeight: 600,
+                      color: ecart > 0 ? 'var(--danger, #dc2626)' : ecart < 0 ? 'var(--success, #15803d)' : undefined,
+                    }}>
+                      {ecart === 0 ? '—' : euro(l.ecartPrix)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {(f.receptions.length > 0 || f.factures.length > 0) && (
+            <div style={{
+              display: 'flex', gap: 24, flexWrap: 'wrap', padding: '10px 14px',
+              borderTop: '1px solid var(--border)', fontSize: 12,
+            }}>
+              {f.receptions.length > 0 && (
+                <div>
+                  <span className="muted">Bons de livraison : </span>
+                  {f.receptions.map((d) => `${d.code} (${jour(d.received_at)})`).join(' · ')}
+                </div>
+              )}
+              {f.factures.length > 0 && (
+                <div>
+                  <span className="muted">Factures : </span>
+                  {f.factures.map((x) => `${x.code} — ${euro(x.amount_ht)}`).join(' · ')}
+                </div>
+              )}
+            </div>
           )}
         </div>
-      </div>
+      )}
 
       {(journal.data ?? []).length > 0 && (
         <div className="card" style={{ marginTop: 16, padding: 14 }}>
@@ -567,6 +814,16 @@ export function FicheCommande({
             </div>
           ))}
         </div>
+      )}
+
+      {saisie && r && (
+        <SaisieRapprochement
+          mode={saisie}
+          orderId={orderId}
+          lignes={r.lignes}
+          onClose={() => setSaisie(null)}
+          onEnregistre={(message) => { setSaisie(null); setInfo(message); rafraichir(); }}
+        />
       )}
 
       {approOuvert && (
