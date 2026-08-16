@@ -4,10 +4,8 @@ import Link from 'next/link';
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, History, Lock, MessageSquarePlus, PackageCheck, ReceiptText, ShieldCheck,
-  Trash2, Unlock,
+  ArrowLeft, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Unlock,
 } from 'lucide-react';
-import { IconBtn } from '@/components/IconBtn';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
@@ -16,6 +14,9 @@ import { ApproModal } from '@/components/ApproModal';
 import { LigneRapprochement, SaisieRapprochement } from '@/components/SaisieRapprochement';
 import { BibliothequeCommandeModal } from '@/components/BibliothequeCommandeModal';
 import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
+import {
+  CELL_CTR, CodeInput, UnitSelect, focusNextCell, infoBtn,
+} from '@/components/GrilleSaisie';
 
 interface Ligne {
   id: string;
@@ -86,6 +87,24 @@ interface EtatValidation {
   manquants: Array<{ validatorId: string; validateur: string; montantMin: string }>;
   peutValider: boolean;
 }
+/**
+ * Colonnes de la commande, dans le même esprit que le déboursé : marqueur, code, désignation
+ * élastique, puis les chiffres calés à droite. Les actions sont un bandeau flottant révélé au
+ * survol — au repos, toute la largeur va aux colonnes utiles.
+ */
+const GRILLE_COMMANDE: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '22px 96px minmax(160px,1fr) 62px 70px 78px 92px 58px',
+  alignItems: 'stretch',
+  columnGap: 0,
+};
+const GRILLE_COMMENTAIRE: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '22px 1fr',
+  alignItems: 'stretch',
+  columnGap: 0,
+};
+
 const ETATS: Record<string, string> = {
   aucune: 'rien', partielle: 'partielle', complete: 'complète',
 };
@@ -126,45 +145,24 @@ function jour(v: string | null): string {
  * puisque c'est là qu'on vient vérifier ce qui reste à recevoir.
  */
 /**
- * Bouton « i » : les informations techniques d'une ligne ne méritent pas six colonnes permanentes.
- * On les replie derrière un déclencheur, et le tableau garde la place pour ce qu'on lit vraiment —
- * la désignation, la quantité, le prix.
- */
-function BoutonInfo({ ouvert, onClick }: { ouvert: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      title={ouvert ? 'Masquer les informations techniques' : 'Informations techniques (référence, conditionnement)'}
-      onClick={onClick}
-      style={{
-        width: 18, height: 18, borderRadius: 9, cursor: 'pointer', lineHeight: 1,
-        border: `1px solid ${ouvert ? 'var(--primary)' : 'var(--border)'}`,
-        background: ouvert ? 'var(--primary)' : 'transparent',
-        color: ouvert ? '#fff' : 'var(--muted)',
-        fontSize: 11, fontWeight: 700, fontStyle: 'italic',
-      }}
-    >
-      i
-    </button>
-  );
-}
-
-/**
  * Volet technique d'une ligne : référence fournisseur, code produit, conditionnement.
  *
  * Éditable en brouillon — y compris sur une ligne venue d'un catalogue : la commande est une
  * COPIE, et le fournisseur peut avoir changé de référence sans que le catalogue le sache encore.
  */
-function InfosLigne({
+function FicheRessourceModal({
   ligne,
   ouvrages,
+  lecture,
   onChange,
+  onClose,
 }: {
   ligne: Ligne;
   ouvrages: Array<{ id: string; label: string }>;
-  onChange?: (patch: Record<string, string | null>) => void;
+  lecture: boolean;
+  onChange: (patch: Record<string, string | null>) => void;
+  onClose: () => void;
 }) {
-  const lecture = !onChange;
   const champ = (
     label: string,
     valeur: string | null,
@@ -183,7 +181,7 @@ function InfosLigne({
             min={numerique ? 0 : undefined}
             defaultValue={valeur ?? ''}
             placeholder={placeholder}
-            onBlur={(e) => e.target.value !== (valeur ?? '') && onChange!({ [cle]: e.target.value || null })}
+            onBlur={(e) => e.target.value !== (valeur ?? '') && onChange({ [cle]: e.target.value || null })}
           />
         )}
     </div>
@@ -191,9 +189,16 @@ function InfosLigne({
 
   const coeff = Number(ligne.coeff_conversion || 0);
   return (
-    <div>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>
-        FICHE RESSOURCE
+    <div className="modal-overlay" style={ficheOverlay} onClick={onClose}>
+      <div className="modal-box" style={fichePanel} onClick={(e) => e.stopPropagation()}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <strong style={{ fontSize: 15 }}>Fiche ressource</strong>
+          <p className="muted" style={{ margin: '2px 0 0', fontSize: 12 }}>
+            {ligne.code ? `${ligne.code} · ` : ''}{ligne.designation}
+          </p>
+        </div>
+        <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 18 }}>✕</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
         <div className="field" style={{ marginBottom: 0 }}>
@@ -203,7 +208,7 @@ function InfosLigne({
             : (
               <select
                 defaultValue={ligne.nature}
-                onChange={(e) => onChange!({ nature: e.target.value })}
+                onChange={(e) => onChange({ nature: e.target.value })}
               >
                 {NATURES_SAISIE.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
               </select>
@@ -216,7 +221,7 @@ function InfosLigne({
             : (
               <select
                 defaultValue={ligne.execution_line_id ?? ''}
-                onChange={(e) => onChange!({ executionLineId: e.target.value || null })}
+                onChange={(e) => onChange({ executionLineId: e.target.value || null })}
               >
                 <option value="">— Non réparti —</option>
                 {ouvrages.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
@@ -235,9 +240,23 @@ function InfosLigne({
         {ligne.pu_debourse && Number(ligne.pu_debourse) > 0
           && ` · Déboursé budgété : ${Number(ligne.pu_debourse).toFixed(4)} €/${ligne.unite_emploi ?? 'u'}`}
       </p>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+        <button className="btn" onClick={onClose}>Fermer</button>
+      </div>
+      </div>
     </div>
   );
 }
+
+const ficheOverlay: React.CSSProperties = {
+  position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', zIndex: 1100,
+  display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '60px 20px',
+  overflowY: 'auto',
+};
+const fichePanel: React.CSSProperties = {
+  borderRadius: 12, padding: '20px 24px', width: 720, maxWidth: '100%',
+};
 
 /**
  * Bouton « + » d'ajout de ligne, calqué sur le montage d'un devis : un déclencheur, deux gestes.
@@ -367,12 +386,6 @@ export function FicheCommande({
     enabled: Boolean(token && chantierId),
     retry: false,
     queryFn: () => apiFetch<Arbre>(`/chantiers/${chantierId}/execution-tree`, { token }),
-  });
-  const unites = useQuery({
-    queryKey: ['params-units'],
-    enabled: Boolean(token),
-    retry: false,
-    queryFn: () => apiFetch<Array<{ id: string; abrev: string; label: string }>>('/params/units', { token }),
   });
   const plan = useQuery({
     queryKey: ['analytical-plan'],
@@ -718,209 +731,171 @@ export function FicheCommande({
         </div>
       )}
 
-      {/* Grille de saisie type tableur, comme le déboursé d'une étude : filets fins, pas de
-          cellules arrondies — on saisit ligne à ligne, à la manière d'un tableur. */}
-      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'visible' }}>
-        <table className="grid deb-table" style={{ margin: 0 }}>
-          <thead>
-            <tr>
-              <th style={{ width: 26 }} />
-              <th style={{ width: 110 }}>Code</th>
-              <th>Désignation</th>
-              <th style={{ width: 70 }}>Unité</th>
-              <th style={{ width: 85, textAlign: 'right' }}>Qté</th>
-              <th style={{ width: 100, textAlign: 'right' }}>PU</th>
-              <th style={{ width: 120, textAlign: 'right' }}>Total HT</th>
-              <th style={{ width: 58 }} title="Code analytique — obligatoire pour envoyer">Code&nbsp;*</th>
-              {brouillon && <th style={{ width: 56 }} />}
-            </tr>
-          </thead>
-          <tbody>
-            {f.lignes.map((l) => (
-              brouillon ? (
-                // Édition EN PLACE, comme le montage d'un devis : on corrige la cellule qu'on
-                // regarde, sans rouvrir un formulaire au-dessus du tableau.
-                <Fragment key={l.id}>
-                {l.kind === 'comment' ? (
-                  // Un commentaire occupe toute la largeur : ni quantité, ni prix, ni imputation.
-                  <tr>
-                    <td style={{ textAlign: 'center', padding: 0 }}>
-                      <span className="muted" style={{ fontSize: 11 }}>✎</span>
-                    </td>
-                    <td colSpan={7}>
-                      <input
-                        defaultValue={l.designation}
-                        placeholder="Commentaire à l’attention du fournisseur"
-                        onBlur={(e) => e.target.value !== l.designation
-                          && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
-                        style={{ width: '100%', fontStyle: 'italic' }}
-                      />
-                    </td>
-                    <td style={{ textAlign: 'right', paddingRight: 6 }}>
-                      <IconBtn
-                        title="Retirer ce commentaire"
-                        color="var(--danger, #dc2626)"
-                        onClick={() => supprimerLigne.mutate(l.id)}
-                      >
-                        <Trash2 size={13} />
-                      </IconBtn>
-                    </td>
-                  </tr>
-                ) : (
-                <tr>
-                  <td style={{ textAlign: 'center', padding: 0 }}>
-                    <BoutonInfo
-                      ouvert={ligneOuverte === l.id}
-                      onClick={() => setLigneOuverte(ligneOuverte === l.id ? null : l.id)}
-                    />
-                  </td>
-                  <td>
-                    {/* Le code se tape : s'il existe au catalogue, la ligne se remplit seule. */}
-                    <input
-                      defaultValue={l.code ?? ''}
-                      placeholder="Code"
-                      title="Saisissez un code du catalogue : la ligne se remplit avec l’article"
-                      onBlur={(e) => e.target.value !== (l.code ?? '')
-                        && majLigne.mutate({ id: l.id, patch: { code: e.target.value } })}
-                      style={{ width: '100%', fontFamily: 'var(--mono, ui-monospace)', fontSize: 12 }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      defaultValue={l.designation}
-                      onBlur={(e) => e.target.value.trim() && e.target.value !== l.designation
-                        && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
-                      style={{ width: '100%' }}
-                    />
-                  </td>
-                  <td>
-                    <select
-                      defaultValue={l.unite_achat ?? ''}
-                      onChange={(e) => majLigne.mutate({ id: l.id, patch: { uniteAchat: e.target.value || null } })}
-                      style={{ width: '100%', fontSize: 12 }}
-                    >
-                      <option value="">—</option>
-                      {(unites.data ?? []).map((u) => (
-                        <option key={u.id} value={u.abrev} title={u.label}>{u.abrev}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      type="number" min={0} step="0.01" defaultValue={Number(l.quantity)}
-                      onBlur={(e) => Number(e.target.value) !== Number(l.quantity)
-                        && majLigne.mutate({ id: l.id, patch: { quantity: e.target.value } })}
-                      style={{ width: '100%', textAlign: 'right' }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number" min={0} step="0.01" defaultValue={Number(l.unit_price)}
-                      onBlur={(e) => Number(e.target.value) !== Number(l.unit_price)
-                        && majLigne.mutate({ id: l.id, patch: { unitPrice: e.target.value } })}
-                      style={{ width: '100%', textAlign: 'right' }}
-                    />
-                  </td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                    {euro(l.amount_ht)}
-                  </td>
-                  <td>
-                    <SelectCodeAnalytique
-                      valeur={l.code_analytique_id}
-                      codes={codes}
-                      obligatoire
-                      onChange={(id) => majLigne.mutate({ id: l.id, patch: { codeAnalytiqueId: id } })}
-                    />
-                  </td>
-                  <td style={{ textAlign: 'right', paddingRight: 6, whiteSpace: 'nowrap' }}>
-                    <IconBtn
+      {/*
+        Grille de saisie : EXACTEMENT celle du déboursé d'une étude de prix — mêmes classes
+        (.deb-table / .sd-head / .sd-row), mêmes cellules sans habillage, même Entrée qui descend
+        d'une ligne. Passer d'un module à l'autre ne doit pas demander de réapprendre un geste.
+      */}
+      <div className="card deb-table" style={{ marginTop: 16, padding: 0, overflow: 'visible' }}>
+        <div className="sd-head" style={{
+          ...GRILLE_COMMANDE, padding: '3px 6px', fontSize: 9, textTransform: 'uppercase',
+          letterSpacing: '0.3px', fontWeight: 700, background: '#eef2f7',
+          borderBottom: '1px solid #dbe2ea',
+        }}>
+          <span />
+          <span style={{ paddingLeft: 4 }}>Code</span>
+          <span style={{ paddingLeft: 4 }}>Désignation</span>
+          <span style={{ justifyContent: 'center' }}>Unité</span>
+          <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Qté</span>
+          <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>P.U.</span>
+          <span style={{ justifyContent: 'flex-end', paddingRight: 4 }}>Montant</span>
+          <span style={{ justifyContent: 'center' }} title="Code analytique — obligatoire">Analy.</span>
+          <span />
+        </div>
+
+        {f.lignes.map((l) => (
+          l.kind === 'comment' ? (
+            // Un commentaire traverse la grille : ni quantité, ni prix, ni imputation.
+            <div key={l.id} className="sd-row" style={{ ...GRILLE_COMMENTAIRE, padding: '0 6px', fontSize: 12 }}>
+              <span style={CELL_CTR} title="Commentaire">✎</span>
+              <input
+                data-cell="commande:commentaire"
+                onKeyDown={focusNextCell}
+                defaultValue={l.designation}
+                disabled={!brouillon}
+                placeholder="Commentaire à l’attention du fournisseur"
+                onBlur={(e) => e.target.value !== l.designation
+                  && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
+                style={{ width: '100%', fontStyle: 'italic' }}
+              />
+              <span className="sd-actions">
+                {brouillon && (
+                  <button className="btn-ghost" title="Supprimer" onClick={() => supprimerLigne.mutate(l.id)}>✕</button>
+                )}
+              </span>
+            </div>
+          ) : (
+            <div key={l.id} className="sd-row" style={{ ...GRILLE_COMMANDE, padding: '0 6px', fontSize: 12, color: '#475569' }}>
+              <span style={CELL_CTR}>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  title="Fiche ressource (nature, ouvrage, conditionnement)"
+                  onClick={() => setLigneOuverte(l.id)}
+                  style={infoBtn}
+                >
+                  ⓘ
+                </button>
+              </span>
+              <CodeInput
+                value={l.code}
+                readOnly={!brouillon}
+                placeholder="Code"
+                title="Code d’article : s’il existe au catalogue, la ligne se remplit avec lui"
+                style={{ width: '100%' }}
+                onChange={(v) => majLigne.mutate({ id: l.id, patch: { code: v } })}
+              />
+              <input
+                data-cell="commande:designation"
+                onKeyDown={focusNextCell}
+                key={l.designation}
+                defaultValue={l.designation}
+                disabled={!brouillon}
+                title={l.designation}
+                onBlur={(e) => e.target.value.trim() && e.target.value !== l.designation
+                  && majLigne.mutate({ id: l.id, patch: { designation: e.target.value } })}
+                style={{ width: '100%', minWidth: 0 }}
+              />
+              <UnitSelect
+                value={l.unite_achat}
+                token={token}
+                readOnly={!brouillon}
+                style={{ width: '100%' }}
+                onChange={(v) => majLigne.mutate({ id: l.id, patch: { uniteAchat: v || null } })}
+              />
+              <input
+                data-cell="commande:quantite"
+                onKeyDown={focusNextCell}
+                key={`q-${l.quantity}`}
+                defaultValue={Number(l.quantity)}
+                disabled={!brouillon}
+                title="Quantité"
+                onBlur={(e) => Number(e.target.value) !== Number(l.quantity)
+                  && majLigne.mutate({ id: l.id, patch: { quantity: e.target.value || '0' } })}
+                style={{ width: '100%', textAlign: 'right' }}
+              />
+              <input
+                data-cell="commande:pu"
+                onKeyDown={focusNextCell}
+                key={`p-${l.unit_price}`}
+                defaultValue={Number(l.unit_price)}
+                disabled={!brouillon}
+                title="Prix unitaire d’achat"
+                onBlur={(e) => Number(e.target.value) !== Number(l.unit_price)
+                  && majLigne.mutate({ id: l.id, patch: { unitPrice: e.target.value || '0' } })}
+                style={{ width: '100%', textAlign: 'right' }}
+              />
+              <span style={{
+                width: '100%', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums',
+                color: '#334155', fontWeight: 500, paddingRight: 4,
+              }}>
+                {euro(l.amount_ht)}
+              </span>
+              <SelectCodeAnalytique
+                valeur={l.code_analytique_id}
+                codes={codes}
+                obligatoire
+                lecture={!brouillon}
+                onChange={(id) => majLigne.mutate({ id: l.id, patch: { codeAnalytiqueId: id } })}
+              />
+              <span className="sd-actions">
+                {brouillon && (
+                  <>
+                    <button
+                      className="btn-ghost"
                       title="Ajouter un commentaire sous cette ligne"
-                      color="var(--muted)"
                       onClick={() => ajouterCommentaire.mutate({ sortOrder: l.sort_order })}
                     >
-                      <MessageSquarePlus size={13} />
-                    </IconBtn>
-                    <IconBtn
-                      title="Retirer cette ligne"
-                      color="var(--danger, #dc2626)"
-                      onClick={() => supprimerLigne.mutate(l.id)}
-                    >
-                      <Trash2 size={13} />
-                    </IconBtn>
-                  </td>
-                </tr>
+                      ✎
+                    </button>
+                    <button className="btn-ghost" title="Supprimer" onClick={() => supprimerLigne.mutate(l.id)}>✕</button>
+                  </>
                 )}
-                {ligneOuverte === l.id && (
-                  <tr>
-                    <td colSpan={9} style={{ background: 'var(--surface)', padding: '10px 14px' }}>
-                      <InfosLigne
-                        ligne={l}
-                        ouvrages={ouvrages}
-                        onChange={(patch) => majLigne.mutate({ id: l.id, patch })}
-                      />
-                    </td>
-                  </tr>
-                )}
-                </Fragment>
-              ) : (
-                <Fragment key={l.id}>
-                <tr>
-                  <td style={{ textAlign: 'center', padding: 0 }}>
-                    <BoutonInfo
-                      ouvert={ligneOuverte === l.id}
-                      onClick={() => setLigneOuverte(ligneOuverte === l.id ? null : l.id)}
-                    />
-                  </td>
-                  <td className="code-cell">
-                    {l.code ?? l.ressource_code ?? <span className="muted">—</span>}
-                  </td>
-                  <td style={l.kind === 'comment' ? { fontStyle: 'italic', color: 'var(--muted)' } : undefined}>
-                    {l.designation}
-                  </td>
-                  <td className="muted" style={{ fontSize: 12 }}>
-                    {l.kind === 'comment' ? '' : (l.unite_achat ?? l.unite_emploi ?? '—')}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>{Number(l.quantity)}</td>
-                  <td style={{ textAlign: 'right' }}>{euro(l.unit_price)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                    {euro(l.amount_ht)}
-                  </td>
-                  <td>
-                    {l.kind === 'comment' ? '' : (
-                      <SelectCodeAnalytique valeur={l.code_analytique_id} codes={codes} lecture />
-                    )}
-                  </td>
-                </tr>
-                {ligneOuverte === l.id && (
-                  <tr>
-                    <td colSpan={8} style={{ background: 'var(--surface)', padding: '10px 14px' }}>
-                      <InfosLigne ligne={l} ouvrages={ouvrages} />
-                    </td>
-                  </tr>
-                )}
-                </Fragment>
-              )
-            ))}
-            {f.lignes.length === 0 && (
-              <tr><td colSpan={brouillon ? 9 : 8} className="muted" style={{ padding: 16, textAlign: 'center' }}>
-                Cette commande n’a aucune ligne.
-              </td></tr>
-            )}
-            {brouillon && (
-              <tr>
-                <td colSpan={9} style={{ padding: '8px 10px' }}>
-                  <MenuAjout
-                    onRessource={() => setApproOuvert(true)}
-                    onCatalogue={() => setCatalogueOuvert(true)}
-                    onLigneLibre={() => ajouterLigne.mutate()}
-                    onCommentaire={() => ajouterCommentaire.mutate(undefined)}
-                  />
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              </span>
+            </div>
+          )
+        ))}
+
+        {f.lignes.length === 0 && (
+          <div className="muted" style={{ padding: 16, textAlign: 'center', fontSize: 12 }}>
+            Cette commande n’a aucune ligne.
+          </div>
+        )}
+
+        {brouillon && (
+          <div style={{ padding: '8px 10px' }}>
+            <MenuAjout
+              onRessource={() => setApproOuvert(true)}
+              onCatalogue={() => setCatalogueOuvert(true)}
+              onLigneLibre={() => ajouterLigne.mutate()}
+              onCommentaire={() => ajouterCommentaire.mutate(undefined)}
+            />
+          </div>
+        )}
       </div>
+
+      {ligneOuverte && (() => {
+        const ligne = f.lignes.find((x) => x.id === ligneOuverte);
+        return ligne ? (
+          <FicheRessourceModal
+            ligne={ligne}
+            ouvrages={ouvrages}
+            lecture={!brouillon}
+            onChange={(patch) => majLigne.mutate({ id: ligne.id, patch })}
+            onClose={() => setLigneOuverte(null)}
+          />
+        ) : null;
+      })()}
 
       {!brouillon && r && (
         <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>

@@ -1077,17 +1077,8 @@ table.grid tbody tr:hover {
 }
 .deb-table input::placeholder { color: #cbd5e1; }
 
-/* Le même rendu tableur pour une VRAIE table (lignes de commande) : filets fins entre colonnes,
- * cellules sans marge, texte aligné sur la grille. Les boutons d'action gardent leur habillage. */
-table.deb-table th,
-table.deb-table td {
-  padding: 2px 6px !important;
-  border-right: 1px solid #f2f5f9;
-}
-table.deb-table th:last-child,
-table.deb-table td:last-child { border-right: none; }
-table.deb-table td:hover input,
-table.deb-table td:hover select { background: #eef2f7 !important; }
+/* Le rendu tableur vaut pour TOUTE grille de saisie (déboursé d'étude, lignes de commande…) :
+ * c'est le même geste, il doit avoir la même tête d'un module à l'autre. */
 
 /* Lignes de la grille = lignes de tableau : filets fins entre colonnes + entre lignes. */
 .sd-row, .sd-head { position: relative; border-bottom: 1px solid #edf1f6; }
