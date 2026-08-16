@@ -79,7 +79,7 @@ export interface ContextGroup {
 export function contextualGroups(pathname: string): ContextGroup[] {
   // Chantier ouvert : chaque entrée est un écran à part entière.
   const chantier = /^\/chantiers\/([^/]+)/.exec(pathname);
-  if (chantier && !['bibliotheque', 'parametres'].includes(chantier[1])) {
+  if (chantier && !['bibliotheque', 'parametres', 'validation-achats'].includes(chantier[1])) {
     const id = chantier[1];
     // Les heures forment un métier à part : on les regroupe plutôt que de les mêler au reste.
     return [
@@ -175,6 +175,7 @@ export const MODULES: AppModule[] = [
     features: [
       { href: '/chantiers', label: 'Chantiers' },
       { href: '/chantiers/bibliotheque', label: 'Bibliothèque chantier' },
+      { href: '/chantiers/validation-achats', label: 'Validation des achats' },
       { href: '/chantiers/parametres', label: 'Paramètres' },
     ],
   },

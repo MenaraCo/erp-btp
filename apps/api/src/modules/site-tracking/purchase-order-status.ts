@@ -3,10 +3,16 @@
  * ENGAGÉ is counted as soon as the order is `validated` (not at invoicing). A cancelled order
  * no longer counts.
  */
-export type PurchaseOrderStatus = 'draft' | 'validated' | 'cancelled';
+export type PurchaseOrderStatus = 'draft' | 'pending_approval' | 'validated' | 'cancelled';
 
+/**
+ * `pending_approval` : la commande dépasse un seuil et attend ses validateurs. Elle n'engage RIEN
+ * tant qu'elle n'est pas validée — sinon un simple envoi au visa gonflerait l'engagé du chantier.
+ * Un refus la renvoie en brouillon : on corrige et on resoumet.
+ */
 export const PO_TRANSITIONS: Record<PurchaseOrderStatus, PurchaseOrderStatus[]> = {
-  draft: ['validated', 'cancelled'],
+  draft: ['pending_approval', 'validated', 'cancelled'],
+  pending_approval: ['validated', 'draft', 'cancelled'],
   validated: ['cancelled'],
   cancelled: [],
 };

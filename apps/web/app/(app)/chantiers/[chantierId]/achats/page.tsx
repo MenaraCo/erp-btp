@@ -24,8 +24,12 @@ interface Commande {
 interface Registre { lignes: Commande[]; total: number; montantTotal: string }
 interface Summary { engageTotal: string; realiseTotal: string }
 
-const STATUTS: Record<string, string> = { draft: 'Brouillon', validated: 'Envoyée', cancelled: 'Annulée' };
-const BADGE: Record<string, string> = { draft: 'info', validated: 'success', cancelled: 'danger' };
+const STATUTS: Record<string, string> = {
+  draft: 'Brouillon', pending_approval: 'À valider', validated: 'Envoyée', cancelled: 'Annulée',
+};
+const BADGE: Record<string, string> = {
+  draft: 'info', pending_approval: 'warning', validated: 'success', cancelled: 'danger',
+};
 
 function jour(v: string | null): string {
   return v ? new Date(v).toLocaleDateString('fr-FR') : '—';
@@ -134,6 +138,7 @@ export default function AchatsChantierPage() {
           <select value={statut} onChange={(e) => setStatut(e.target.value)}>
             <option value="">Tous</option>
             <option value="draft">Brouillon</option>
+            <option value="pending_approval">À valider</option>
             <option value="validated">Envoyée</option>
             <option value="cancelled">Annulée</option>
           </select>

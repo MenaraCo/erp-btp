@@ -1,9 +1,12 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, Delete, Get, Param, Post, Query,
+} from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { OrderLineInput, PurchasingService } from './purchasing.service';
 import { ApprovisionnementService } from './approvisionnement.service';
 import { AchatsRegistreService, FiltreRegistre } from './achats-registre.service';
+import { ValidationAchatsService } from './validation-achats.service';
 
 const NATURES = ['labor', 'material', 'equipment', 'subcontract', 'site_overhead'];
 
@@ -29,7 +32,76 @@ export class PurchasingController {
     private readonly purchasing: PurchasingService,
     private readonly appro: ApprovisionnementService,
     private readonly registre: AchatsRegistreService,
+    private readonly validation: ValidationAchatsService,
   ) {}
+
+  // --- Circuit de validation ---
+
+  /** Règles applicables à un chantier (les siennes, ou celles de la société à défaut). */
+  @Get('chantiers/:chantierId/validation-achats')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  reglesChantier(@Param('chantierId') chantierId: string) {
+    return this.validation.regles(chantierId);
+  }
+
+  /** Règles POSÉES sur un périmètre — celles qu'on modifie dans les paramètres. */
+  @Get('validation-achats/regles')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  reglesPosees(@Query('chantier') chantierId?: string) {
+    return this.validation.toutesLesRegles(chantierId ?? null);
+  }
+
+  @Post('validation-achats/regles')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('rbac.role.manage')
+  ajouterRegle(
+    @Body() body: { chantierId?: string | null; montantMin?: string | number; validatorId?: string },
+  ) {
+    return this.validation.ajouterRegle({
+      chantierId: body?.chantierId ?? null,
+      montantMin: body?.montantMin ?? 0,
+      validatorId: body?.validatorId ?? '',
+    });
+  }
+
+  @Delete('validation-achats/regles/:id')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('rbac.role.manage')
+  supprimerRegle(@Param('id') id: string) {
+    return this.validation.supprimerRegle(id);
+  }
+
+  /** Envoi d'une commande : direct sous les seuils, sinon mise en attente de validation. */
+  @Post('purchase-orders/:orderId/submit')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.write')
+  soumettre(@Param('orderId') orderId: string) {
+    return this.validation.soumettre(orderId);
+  }
+
+  @Post('purchase-orders/:orderId/approve')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  approuver(@Param('orderId') orderId: string, @Body() body: { motif?: string }) {
+    return this.validation.decider(orderId, 'approved', body?.motif ?? null);
+  }
+
+  @Post('purchase-orders/:orderId/reject')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  refuser(@Param('orderId') orderId: string, @Body() body: { motif?: string }) {
+    return this.validation.decider(orderId, 'rejected', body?.motif ?? null);
+  }
+
+  /** Où en est la validation : qui doit signer, qui a signé, et puis-je signer ? */
+  @Get('purchase-orders/:orderId/approval')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  etatValidation(@Param('orderId') orderId: string) {
+    return this.validation.etat(orderId);
+  }
 
   // --- Registre d'entreprise : retrouver une pièce, tous chantiers confondus ---
 

@@ -29,10 +29,13 @@ interface Reponse { lignes: Commande[]; total: number; montantTotal: string; pag
 
 const STATUTS = [
   { value: 'draft', label: 'Brouillon' },
+  { value: 'pending_approval', label: 'À valider' },
   { value: 'validated', label: 'Envoyée' },
   { value: 'cancelled', label: 'Annulée' },
 ];
-const BADGE: Record<string, string> = { draft: 'info', validated: 'success', cancelled: 'danger' };
+const BADGE: Record<string, string> = {
+  draft: 'info', pending_approval: 'warning', validated: 'success', cancelled: 'danger',
+};
 
 function jour(v: string | null): string {
   return v ? new Date(v).toLocaleDateString('fr-FR') : '—';

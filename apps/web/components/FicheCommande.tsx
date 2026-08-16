@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, History, Lock, PackageCheck, ReceiptText, Unlock } from 'lucide-react';
+import { ArrowLeft, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Unlock } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
@@ -41,11 +41,22 @@ const NATURES: Record<string, string> = {
   material: 'Matériaux', equipment: 'Matériel', subcontract: 'Sous-traitance',
   labor: 'Main d’œuvre', site_overhead: 'Frais de chantier',
 };
-const STATUTS: Record<string, string> = { draft: 'Brouillon', validated: 'Envoyée', cancelled: 'Annulée' };
-const BADGE: Record<string, string> = { draft: 'info', validated: 'success', cancelled: 'danger' };
+const STATUTS: Record<string, string> = {
+  draft: 'Brouillon', pending_approval: 'À valider', validated: 'Envoyée', cancelled: 'Annulée',
+};
+const BADGE: Record<string, string> = {
+  draft: 'info', pending_approval: 'warning', validated: 'success', cancelled: 'danger',
+};
 const ACTIONS: Record<string, string> = {
+  submitted: 'Soumise à validation', approved: 'Approuvée', rejected: 'Refusée',
   validated: 'Envoyée au fournisseur', cancelled: 'Annulée', reopened: 'Rouverte',
 };
+
+interface EtatValidation {
+  requis: Array<{ validatorId: string; validateur: string; montantMin: string }>;
+  manquants: Array<{ validatorId: string; validateur: string; montantMin: string }>;
+  peutValider: boolean;
+}
 const NATURES_SAISIE = [
   { value: 'material', label: 'Matériaux' },
   { value: 'equipment', label: 'Matériel' },
@@ -116,6 +127,11 @@ export function FicheCommande({
     enabled: Boolean(token),
     queryFn: () => apiFetch<Fiche>(`/purchase-orders/${orderId}`, { token }),
   });
+  const validation = useQuery({
+    queryKey: ['commande-validation', orderId],
+    enabled: Boolean(token),
+    queryFn: () => apiFetch<EtatValidation>(`/purchase-orders/${orderId}/approval`, { token }),
+  });
   const journal = useQuery({
     queryKey: ['commande-journal', orderId],
     enabled: Boolean(token),
@@ -154,7 +170,7 @@ export function FicheCommande({
 
   const rafraichir = () => {
     setErr(null);
-    for (const key of ['commande', 'commande-journal', 'achats-commandes', 'purchasing-chain', 'purchasing-summary', 'execution-tree']) {
+    for (const key of ['commande', 'commande-journal', 'commande-validation', 'achats-commandes', 'purchasing-chain', 'purchasing-summary', 'execution-tree']) {
       qc.invalidateQueries({ queryKey: [key] });
     }
   };
@@ -175,10 +191,30 @@ export function FicheCommande({
     },
     onError: (e) => echec(e, 'Ligne non ajoutée.'),
   });
-  const valider = useMutation({
-    mutationFn: () => apiFetch(`/purchase-orders/${orderId}/validate`, { method: 'POST', token }),
+  // Envoyer, c'est SOUMETTRE : sous les seuils la commande part, au-delà elle passe au visa.
+  const envoyer = useMutation({
+    mutationFn: () => apiFetch<{ statut: string; validateurs: string[] }>(
+      `/purchase-orders/${orderId}/submit`, { method: 'POST', token },
+    ),
+    onSuccess: (r) => {
+      setInfo(r.statut === 'pending_approval'
+        ? `En attente de validation : ${r.validateurs.join(', ')}.`
+        : null);
+      rafraichir();
+    },
+    onError: (e) => echec(e, 'Envoi impossible.'),
+  });
+  const approuver = useMutation({
+    mutationFn: () => apiFetch(`/purchase-orders/${orderId}/approve`, { method: 'POST', token, body: {} }),
     onSuccess: rafraichir,
-    onError: (e) => echec(e, 'Validation impossible.'),
+    onError: (e) => echec(e, 'Approbation impossible.'),
+  });
+  const refuser = useMutation({
+    mutationFn: () => apiFetch(`/purchase-orders/${orderId}/reject`, {
+      method: 'POST', token, body: { motif },
+    }),
+    onSuccess: () => { setMotif(''); rafraichir(); },
+    onError: (e) => echec(e, 'Refus impossible.'),
   });
   const annuler = useMutation({
     mutationFn: () => apiFetch(`/purchase-orders/${orderId}/cancel`, { method: 'POST', token }),
@@ -215,6 +251,8 @@ export function FicheCommande({
   const c = f.commande;
   const brouillon = c.status === 'draft';
   const envoyee = c.status === 'validated';
+  const auVisa = c.status === 'pending_approval';
+  const v = validation.data;
   const factureTotal = f.factures.reduce((t, x) => t + Number(x.amount_ht), 0);
 
   return (
@@ -228,6 +266,40 @@ export function FicheCommande({
         <span className={`badge ${BADGE[c.status] ?? 'info'}`}>{STATUTS[c.status] ?? c.status}</span>
         <span style={{ marginLeft: 'auto', fontSize: 20, fontWeight: 700 }}>{euro(c.total_ht)}</span>
       </div>
+
+      {auVisa && (
+        <div className="card" style={{
+          marginTop: 12, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
+          flexWrap: 'wrap', borderColor: 'var(--warning, #b45309)',
+        }}>
+          <ShieldCheck size={15} />
+          <span style={{ fontSize: 13 }}>
+            En attente de validation
+            {(v?.manquants.length ?? 0) > 0 && <> — il manque <strong>{v!.manquants.map((m) => m.validateur).join(', ')}</strong></>}.
+            La commande n’engage rien tant qu’elle n’est pas approuvée.
+          </span>
+          {v?.peutValider && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
+              <input
+                value={motif}
+                placeholder="Motif (obligatoire pour refuser)"
+                onChange={(e) => setMotif(e.target.value)}
+                style={{ width: 230 }}
+              />
+              <button className="btn" disabled={approuver.isPending} onClick={() => approuver.mutate()}>
+                Approuver
+              </button>
+              <button
+                className="btn btn-secondary"
+                disabled={motif.trim().length < 3 || refuser.isPending}
+                onClick={() => refuser.mutate()}
+              >
+                Refuser
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {c.status === 'validated' && (
         <div className="card" style={{
@@ -292,14 +364,23 @@ export function FicheCommande({
               Depuis la bibliothèque chantier…
             </button>
             {info && <span style={{ fontSize: 12, color: 'var(--success, #15803d)' }}>{info}</span>}
+            {(v?.requis.length ?? 0) > 0 && (
+              <span className="muted" style={{ fontSize: 11 }}>
+                Visa requis : {v!.requis.map((r) => r.validateur).join(', ')}
+              </span>
+            )}
             <button
               className="btn"
               style={{ marginLeft: 'auto' }}
-              disabled={f.lignes.length === 0 || valider.isPending}
-              title={f.lignes.length === 0 ? 'Une commande vide ne s’envoie pas' : 'Envoyer au fournisseur'}
-              onClick={() => valider.mutate()}
+              disabled={f.lignes.length === 0 || envoyer.isPending}
+              title={f.lignes.length === 0
+                ? 'Une commande vide ne s’envoie pas'
+                : (v?.requis.length ?? 0) > 0
+                  ? 'Elle passera par ses validateurs avant de partir'
+                  : 'Envoyer au fournisseur'}
+              onClick={() => envoyer.mutate()}
             >
-              {valider.isPending ? 'Envoi…' : 'Envoyer la commande'}
+              {envoyer.isPending ? 'Envoi…' : 'Envoyer la commande'}
             </button>
             <button className="btn btn-secondary" disabled={annuler.isPending} onClick={() => annuler.mutate()}>
               Annuler le BC
