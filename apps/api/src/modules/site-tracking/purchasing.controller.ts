@@ -1,6 +1,7 @@
 import {
-  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query,
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { OrderLineInput, PurchasingService } from './purchasing.service';
@@ -8,6 +9,7 @@ import { ApprovisionnementService } from './approvisionnement.service';
 import { AchatsRegistreService, FiltreRegistre } from './achats-registre.service';
 import { ValidationAchatsService } from './validation-achats.service';
 import { LigneSaisie, RapprochementService } from './rapprochement.service';
+import { CommandePdfService } from './commande-pdf.service';
 
 const NATURES = ['labor', 'material', 'equipment', 'subcontract', 'site_overhead'];
 
@@ -35,7 +37,25 @@ export class PurchasingController {
     private readonly registre: AchatsRegistreService,
     private readonly validation: ValidationAchatsService,
     private readonly rapprochement: RapprochementService,
+    private readonly pdf: CommandePdfService,
   ) {}
+
+  /**
+   * Bon de commande en PDF — l'aperçu comme l'envoi lisent CE document.
+   * Servi en `inline` : c'est ce que l'aperçu affiche à côté de la commande avant de l'envoyer.
+   */
+  @Get('purchase-orders/:orderId/bon-de-commande.pdf')
+  @RequiresCapability('purchasing')
+  @RequiresPermission('site_tracking.read')
+  async bonDeCommande(@Param('orderId') orderId: string, @Res() res: Response) {
+    const buffer = await this.pdf.generate(orderId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="bon-de-commande-${orderId}.pdf"`,
+      'Content-Length': String(buffer.length),
+    });
+    res.end(buffer);
+  }
 
   // --- Rapprochement commande / réception / facture ---
 

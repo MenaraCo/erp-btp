@@ -1,12 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Unlock,
+  ArrowLeft, FileText, History, Lock, PackageCheck, ReceiptText, ShieldCheck, Unlock, X,
 } from 'lucide-react';
-import { apiFetch, ApiError } from '@/lib/api';
+import { apiFetch, apiDownload, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { teinteChantier } from '@/components/CalendrierMois';
@@ -324,6 +324,8 @@ export function FicheCommande({
   const [catalogueOuvert, setCatalogueOuvert] = useState(false);
   const [ligneOuverte, setLigneOuverte] = useState<string | null>(null);
   const [saisie, setSaisie] = useState<null | 'reception' | 'facture'>(null);
+  const [apercu, setApercu] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [ouvrirReouverture, setOuvrirReouverture] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -471,6 +473,29 @@ export function FicheCommande({
     onError: (e) => echec(e, 'Ligne non supprimée.'),
   });
 
+  /**
+   * Aperçu : le PDF est protégé par le jeton, qu'une iframe ne sait pas porter. On le récupère
+   * donc en mémoire (blob) puis on l'affiche — et on le régénère à chaque changement de la
+   * commande, pour que l'aperçu ne mente jamais sur ce qui partira.
+   */
+  const signature = `${fiche.data?.commande.total_ht}-${fiche.data?.lignes.length}-${fiche.data?.commande.status}`;
+  useEffect(() => {
+    if (!apercu || !token) { setPdfUrl(null); return undefined; }
+    let annule = false;
+    let ancienne: string | null = null;
+    apiFetchBlobUrl(`/purchase-orders/${orderId}/bon-de-commande.pdf`, token)
+      .then((url) => {
+        if (annule) { URL.revokeObjectURL(url); return; }
+        ancienne = url;
+        setPdfUrl(url);
+      })
+      .catch(() => setErr('Aperçu indisponible.'));
+    return () => {
+      annule = true;
+      if (ancienne) URL.revokeObjectURL(ancienne);
+    };
+  }, [apercu, token, orderId, signature]);
+
   const f = fiche.data;
 
   if (!f) {
@@ -492,7 +517,8 @@ export function FicheCommande({
   const r = rappro.data;
 
   return (
-    <div>
+    <div style={apercu ? { display: 'flex', gap: 16, alignItems: 'flex-start' } : undefined}>
+      <div style={apercu ? { flex: '1 1 0', minWidth: 0 } : undefined}>
       <p className="muted" style={{ marginTop: 0 }}>
         <Link href={retour.href} className="link"><ArrowLeft size={13} /> {retour.label}</Link>
       </p>
@@ -697,8 +723,15 @@ export function FicheCommande({
               </span>
             )}
             <button
-              className="btn"
+              className="btn btn-secondary"
               style={{ marginLeft: 'auto' }}
+              title="Relire le bon de commande tel qu'il partira au fournisseur"
+              onClick={() => setApercu((a) => !a)}
+            >
+              <FileText size={13} /> {apercu ? 'Masquer l’aperçu' : 'Aperçu PDF'}
+            </button>
+            <button
+              className="btn"
               disabled={f.lignes.length === 0 || envoyer.isPending}
               title={f.lignes.length === 0
                 ? 'Une commande vide ne s’envoie pas'
@@ -1060,9 +1093,71 @@ export function FicheCommande({
       )}
 
       <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-        La validation par seuil, l’aperçu PDF et le rapprochement ligne à ligne arrivent aux étapes
-        suivantes.
+        L’import des bons de livraison et des factures (avec lecture automatique) arrive à l’étape
+        suivante.
       </p>
+      </div>
+
+      {/*
+        Aperçu en VUE PARTAGÉE : le document à droite, la commande à gauche. On relit ce qui va
+        partir sans perdre de vue ce qu'on corrige — un aperçu en plein écran obligerait à faire
+        des allers-retours pour chaque coquille.
+      */}
+      {apercu && (
+        <aside style={{
+          flex: '0 0 clamp(360px, 42%, 620px)', position: 'sticky', top: 12,
+          height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column',
+        }}>
+          <div className="card" style={{
+            padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+          }}>
+            <FileText size={14} />
+            <strong style={{ fontSize: 13 }}>Bon de commande {c.code}</strong>
+            <span className="muted" style={{ fontSize: 11 }}>
+              tel qu’il partira au fournisseur
+            </span>
+            {/* Soupape : certains navigateurs refusent d'afficher un PDF dans la page. */}
+            {pdfUrl && (
+              <a
+                className="btn btn-ghost"
+                style={{ marginLeft: 'auto' }}
+                href={pdfUrl}
+                target="_blank"
+                rel="noreferrer"
+                title="Ouvrir dans un onglet"
+              >
+                Ouvrir
+              </a>
+            )}
+            <button
+              className="btn btn-secondary"
+              style={pdfUrl ? undefined : { marginLeft: 'auto' }}
+              title="Télécharger le bon de commande"
+              onClick={() => apiDownload(
+                `/purchase-orders/${orderId}/bon-de-commande.pdf`, token, `${c.code}.pdf`,
+              )}
+            >
+              Télécharger
+            </button>
+            <button className="btn btn-ghost" title="Fermer l’aperçu" onClick={() => setApercu(false)}>
+              <X size={14} />
+            </button>
+          </div>
+          {pdfUrl ? (
+            <iframe
+              title={`Aperçu du bon de commande ${c.code}`}
+              src={pdfUrl}
+              style={{ flex: 1, width: '100%', border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}
+            />
+          ) : (
+            <div className="card muted" style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12,
+            }}>
+              Préparation de l’aperçu…
+            </div>
+          )}
+        </aside>
+      )}
     </div>
   );
 }
