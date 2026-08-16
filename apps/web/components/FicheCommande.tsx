@@ -718,19 +718,21 @@ export function FicheCommande({
         </div>
       )}
 
-      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
-        <table className="grid" style={{ margin: 0 }}>
+      {/* Grille de saisie type tableur, comme le déboursé d'une étude : filets fins, pas de
+          cellules arrondies — on saisit ligne à ligne, à la manière d'un tableur. */}
+      <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'visible' }}>
+        <table className="grid deb-table" style={{ margin: 0 }}>
           <thead>
             <tr>
-              <th style={{ width: 30 }} />
-              <th style={{ width: 120 }}>Code</th>
+              <th style={{ width: 26 }} />
+              <th style={{ width: 110 }}>Code</th>
               <th>Désignation</th>
-              <th style={{ width: 80 }}>Unité</th>
-              <th style={{ width: 90, textAlign: 'right' }}>Qté</th>
-              <th style={{ width: 110, textAlign: 'right' }}>PU</th>
-              <th style={{ width: 130, textAlign: 'right' }}>Total HT</th>
-              <th style={{ width: 190 }}>Code analytique *</th>
-              {brouillon && <th style={{ width: 40 }} />}
+              <th style={{ width: 70 }}>Unité</th>
+              <th style={{ width: 85, textAlign: 'right' }}>Qté</th>
+              <th style={{ width: 100, textAlign: 'right' }}>PU</th>
+              <th style={{ width: 120, textAlign: 'right' }}>Total HT</th>
+              <th style={{ width: 58 }} title="Code analytique — obligatoire pour envoyer">Code&nbsp;*</th>
+              {brouillon && <th style={{ width: 56 }} />}
             </tr>
           </thead>
           <tbody>

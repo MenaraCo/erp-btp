@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface CodeAnalytique {
   id: string;
@@ -33,12 +34,15 @@ export function SelectCodeAnalytique({
 }) {
   const [ouvert, setOuvert] = useState(false);
   const [filtre, setFiltre] = useState('');
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const bouton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!ouvert) return undefined;
     const dehors = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOuvert(false);
+      const dansLaListe = document.getElementById('liste-codes-analytiques')?.contains(e.target as Node);
+      if (!ref.current?.contains(e.target as Node) && !dansLaListe) setOuvert(false);
     };
     const echap = (e: KeyboardEvent) => { if (e.key === 'Escape') setOuvert(false); };
     document.addEventListener('mousedown', dehors);
@@ -64,23 +68,37 @@ export function SelectCodeAnalytique({
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
+        ref={bouton}
         type="button"
-        onClick={() => { setOuvert((o) => !o); setFiltre(''); }}
+        onClick={() => {
+          if (ouvert) { setOuvert(false); return; }
+          // Position calculée au clic : la liste est rendue en PORTAIL, sinon le tableau la rogne.
+          const r = bouton.current?.getBoundingClientRect();
+          if (r) {
+            const largeur = 300;
+            setPos({
+              top: r.bottom + 4,
+              left: Math.max(8, Math.min(r.left, window.innerWidth - largeur - 8)),
+            });
+          }
+          setFiltre('');
+          setOuvert(true);
+        }}
         title={choisi ? `${choisi.code} — ${choisi.label}` : 'Obligatoire pour envoyer la commande'}
         style={{
-          width: '100%', textAlign: 'left', padding: '4px 8px', borderRadius: 6, cursor: 'pointer',
-          border: `1px solid ${manquant ? 'var(--danger, #dc2626)' : 'var(--border)'}`,
-          background: 'var(--card, #fff)', font: 'inherit', fontSize: 12,
+          width: '100%', textAlign: 'left', padding: '2px 4px', borderRadius: 0, cursor: 'pointer',
+          border: 'none', background: 'transparent', font: 'inherit', fontSize: 12, height: 22,
           color: choisi ? undefined : 'var(--muted)',
+          boxShadow: manquant ? 'inset 0 0 0 1.5px var(--danger, #dc2626)' : undefined,
         }}
       >
-        {choisi ? choisi.code : '— à renseigner —'}
+        {choisi ? choisi.code : '—'}
       </button>
 
-      {ouvert && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, zIndex: 60, marginTop: 2,
-          width: 300, maxHeight: 260, overflow: 'auto',
+      {ouvert && pos && createPortal(
+        <div id="liste-codes-analytiques" style={{
+          position: 'fixed', top: pos.top, left: pos.left, zIndex: 2000,
+          width: 300, maxHeight: 280, overflow: 'auto',
           background: 'var(--card, #fff)', border: '1px solid var(--border)', borderRadius: 8,
           boxShadow: '0 8px 24px rgba(15,23,42,.16)', padding: 6,
         }}>
@@ -112,7 +130,8 @@ export function SelectCodeAnalytique({
           {visibles.length === 0 && (
             <div className="muted" style={{ fontSize: 12, padding: 8 }}>Aucun code ne correspond.</div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
