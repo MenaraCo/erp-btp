@@ -31,6 +31,8 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   '/direction': Gauge,
   '/direction/achats': BarChart3,
   '/chantiers': Building2,
+  '/materiel': Truck,
+  '/materiel/planning': CalendarRange,
   '/personnel': CalendarDays,
   '/personnel/planning': CalendarRange,
   '/personnel/absences': PalmtreeIcon,

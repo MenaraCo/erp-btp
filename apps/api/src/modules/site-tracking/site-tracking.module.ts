@@ -7,6 +7,8 @@ import { ChantierService } from './chantier.service';
 import { ChantierController } from './chantier.controller';
 import { EmployeeService } from './employee.service';
 import { InterimService } from './interim.service';
+import { MaterielService } from './materiel.service';
+import { MaterielController } from './materiel.controller';
 import { PlanningService } from './planning.service';
 import { PersonnelService } from './personnel.service';
 import { AbsenceService } from './absence.service';
@@ -40,7 +42,7 @@ import { AnalyticsController } from './analytics.controller';
 @Module({
   imports: [TenancyModule, NumberingModule, MailerModule, EstimatingModule],
   providers: [ChantierService, TimesheetService,
-    EmployeeService, InterimService,
+    EmployeeService, InterimService, MaterielService,
     PlanningService,
     PersonnelService, AbsenceService, AbsencesPdfService, PurchasingService, ApprovisionnementService,
     AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService,
@@ -52,13 +54,14 @@ import { AnalyticsController } from './analytics.controller';
     EmployeeController,
     PlanningController,
     PersonnelController,
+    MaterielController,
     PurchasingController,
     PayeController,
     AnalyticsController,
     LibraryTransferController,
   ],
   exports: [ChantierService, TimesheetService,
-    EmployeeService, InterimService,
+    EmployeeService, InterimService, MaterielService,
     PlanningService,
     PersonnelService, AbsenceService, AbsencesPdfService, PurchasingService, ApprovisionnementService,
     AchatsRegistreService, ValidationAchatsService, RapprochementService, CommandePdfService, DocumentsAchatsService,

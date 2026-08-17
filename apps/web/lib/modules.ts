@@ -216,6 +216,19 @@ export const MODULES: AppModule[] = [
     ],
   },
   {
+    key: 'materiel',
+    parent: 'chantiers',
+    label: 'Matériel',
+    tagline: 'Parc, affectation aux chantiers et coût d’utilisation',
+    home: '/materiel',
+    match: ['/materiel'],
+    capabilities: ['site_tracking.timesheet'],
+    features: [
+      { href: '/materiel', label: 'Parc matériel' },
+      { href: '/materiel/planning', label: 'Planning du parc' },
+    ],
+  },
+  {
     key: 'personnel',
     parent: 'chantiers',
     label: 'Gestion du personnel',

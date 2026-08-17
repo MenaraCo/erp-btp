@@ -216,6 +216,16 @@ export class AnalyticalResultsService {
       if (new Decimal(r.montant ?? 0).isZero()) continue;
       this.dispatch(rows, siteOverhead, r.code_id, r.nature ?? 'labor', 'realise', r.montant);
     }
+    // Matériel : ce que l'engin a réellement servi sur le chantier, à son coût d'utilisation.
+    const materiel = await em.query(
+      `SELECT code_analytique_id AS code_id, SUM(cout)::numeric(16,2) AS montant
+         FROM equipment_usage WHERE chantier_id = $1 GROUP BY code_analytique_id`,
+      [chantierId],
+    );
+    for (const r of materiel) {
+      if (new Decimal(r.montant ?? 0).isZero()) continue;
+      this.dispatch(rows, siteOverhead, r.code_id, 'equipment', 'realise', r.montant);
+    }
   }
 
   /**

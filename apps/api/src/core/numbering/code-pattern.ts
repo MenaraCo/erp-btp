@@ -20,7 +20,8 @@ export type NumberedEntity =
   | 'employee'
   | 'purchase_request'
   | 'purchase_order'
-  | 'delivery_note';
+  | 'delivery_note'
+  | 'equipment';
 
 export const NUMBERED_ENTITIES: NumberedEntity[] = [
   'client',
@@ -32,6 +33,7 @@ export const NUMBERED_ENTITIES: NumberedEntity[] = [
   'purchase_request',
   'purchase_order',
   'delivery_note',
+  'equipment',
 ];
 
 /** Motif par défaut + libellé lisible, appliqués à toute société sans réglage propre. */
@@ -45,6 +47,7 @@ export const NUMBERING_DEFAULTS: Record<NumberedEntity, { label: string; pattern
   purchase_request: { label: 'Demande de prix', pattern: 'DDP-{YYYY}-{SEQ:4}' },
   purchase_order: { label: 'Bon de commande', pattern: 'BC-{YYYY}-{SEQ:4}' },
   delivery_note: { label: 'Bon de livraison', pattern: 'BL-{YYYY}-{SEQ:4}' },
+  equipment: { label: 'Matériel', pattern: 'MAT-{SEQ:4}' },
 };
 
 const SEQ_TOKEN = /\{SEQ(?::(\d+))?\}/;

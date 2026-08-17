@@ -22,6 +22,7 @@ const DECOR: Record<string, { icon: React.ElementType; tint: string }> = {
   chantiers: { icon: HardHat, tint: '#ff9500' },
   achats: { icon: ShoppingCart, tint: '#0891b2' },
   personnel: { icon: Users, tint: '#4d7c0f' },
+  materiel: { icon: Truck, tint: '#b45309' },
 };
 
 /**
@@ -55,16 +56,6 @@ export default function EspaceChantierPage() {
       ...(DECOR[m.key] ?? { icon: HardHat, tint: '#8e8e93' }),
       ouvert: ouvertParDefaut || moduleIsOpen(m, caps.has),
     })),
-    {
-      key: 'materiel',
-      label: 'Matériel',
-      tagline: 'Parc, affectation aux chantiers et coût d’utilisation',
-      href: null,
-      icon: Truck,
-      tint: '#b45309',
-      ouvert: false,
-      aVenir: true,
-    },
     {
       key: 'stocks',
       label: 'Stocks',

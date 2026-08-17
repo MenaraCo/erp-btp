@@ -76,6 +76,36 @@ export class AnalyticsService {
         [chantierId],
       );
       const payeMap = mapBy(payeParNature, 'montant');
+      // Matériel : le réalisé vient des relevés d'utilisation ; l'engagé, des journées affectées
+      // qui n'ont pas encore de relevé — sans cette exclusion, une journée servie compterait deux
+      // fois, une fois promise et une fois faite.
+      const materielRealise = (await em.query(
+        `SELECT COALESCE(SUM(cout), 0)::numeric(16,2) AS total
+           FROM equipment_usage WHERE chantier_id = $1`,
+        [chantierId],
+      ))[0].total;
+      const materielEngage = (await em.query(
+        `WITH jours AS (
+           SELECT a.equipment_id, e.cout_unitaire, e.unite_cout,
+                  generate_series(a.date_debut, a.date_fin, INTERVAL '1 day')::date AS jour
+             FROM equipment_assignment a
+             JOIN equipment e ON e.id = a.equipment_id
+            WHERE a.chantier_id = $1
+         )
+         SELECT COALESCE(SUM(
+                  -- Un engin facturé à l'heure est engagé sur une journée type de 7 heures :
+                  -- l'affectation réserve des jours, pas des heures.
+                  CASE WHEN j.unite_cout = 'heure' THEN j.cout_unitaire * 7 ELSE j.cout_unitaire END
+                ), 0)::numeric(16,2) AS total
+           FROM jours j
+          WHERE EXTRACT(ISODOW FROM j.jour) < 6
+            AND NOT EXISTS (
+              SELECT 1 FROM equipment_usage u
+               WHERE u.equipment_id = j.equipment_id AND u.chantier_id = $1
+                 AND u.work_date = j.jour
+            )`,
+        [chantierId],
+      ))[0].total;
 
       const budgetObj = mapBy(budget, 'objectif');
       const budgetPrev = mapBy(budget, 'previsionnel');
@@ -88,6 +118,10 @@ export class AnalyticsService {
         if (nature === 'labor') {
           realise = realise.plus(new Decimal(laborTimesheets));
           engageNature = engageNature.plus(new Decimal(laborEngage));
+        }
+        if (nature === 'equipment') {
+          realise = realise.plus(new Decimal(materielRealise));
+          engageNature = engageNature.plus(new Decimal(materielEngage));
         }
         return natureResult({
           nature,
