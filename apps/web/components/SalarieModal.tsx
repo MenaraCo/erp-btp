@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth';
 import { Modale } from './Modale';
 import { Alerte, Bouton } from './ui';
 import { CodeAnalytique, SelectCodeAnalytique } from './SelectCodeAnalytique';
+import { ContratInterimBloc } from './ContratInterim';
 
 export interface Salarie {
   id: string;
@@ -15,7 +16,7 @@ export interface Salarie {
   lastName: string;
   jobTitle: string | null;
   hourlyCost: string;
-  contractType: 'salarie' | 'interimaire' | 'apprenti';
+  contractType: 'cdi' | 'cdd' | 'alternance' | 'stage' | 'apprentissage' | 'interimaire';
   agency: string | null;
   codeAnalytiqueId: string | null;
   active: boolean;
@@ -30,14 +31,21 @@ export interface Salarie {
   ville: string | null;
   qualification: string | null;
   dateVisiteMedicale: string | null;
+  dateFinContrat: string | null;
   commentaire: string | null;
 }
 
-const CONTRATS: Array<{ v: Salarie['contractType']; l: string }> = [
-  { v: 'salarie', l: 'Salarié' },
-  { v: 'interimaire', l: 'Intérimaire' },
-  { v: 'apprenti', l: 'Apprenti' },
+export const CONTRATS: Array<{ v: Salarie['contractType']; l: string }> = [
+  { v: 'cdi', l: 'CDI' },
+  { v: 'cdd', l: 'CDD' },
+  { v: 'alternance', l: 'Alternance' },
+  { v: 'stage', l: 'Stage' },
+  { v: 'apprentissage', l: 'Apprentissage' },
+  { v: 'interimaire', l: 'Intérim' },
 ];
+
+/** Contrats à terme : leur date de fin n'est pas une option, c'est ce qui les définit. */
+const A_TERME: Array<Salarie['contractType']> = ['cdd', 'alternance', 'stage', 'apprentissage'];
 
 /** Classification BTP : ce qu'on lit sur un bulletin, pas une invention maison. */
 const QUALIFICATIONS = [
@@ -48,10 +56,11 @@ const QUALIFICATIONS = [
 type Champs = Omit<Salarie, 'id' | 'code'>;
 
 const VIDE: Champs = {
-  firstName: '', lastName: '', jobTitle: '', hourlyCost: '', contractType: 'salarie',
+  firstName: '', lastName: '', jobTitle: '', hourlyCost: '', contractType: 'cdi',
   agency: '', codeAnalytiqueId: null, active: true,
   dateEntree: '', dateSortie: '', dateNaissance: '', numeroSecu: '', telephone: '', email: '',
-  adresse: '', codePostal: '', ville: '', qualification: '', dateVisiteMedicale: '', commentaire: '',
+  adresse: '', codePostal: '', ville: '', qualification: '', dateVisiteMedicale: '',
+  dateFinContrat: '', commentaire: '',
 };
 
 /** Une visite de plus de deux ans ne vaut plus : c'est la règle de la médecine du travail. */
@@ -128,7 +137,7 @@ export function SalarieModal({
         <Bouton
           chargement={enregistrer.isPending}
           libelleChargement="Enregistrement…"
-          disabled={!f.lastName?.trim()}
+          disabled={!f.lastName?.trim() || (A_TERME.includes(f.contractType) && !f.dateFinContrat)}
           onClick={() => { setErr(null); enregistrer.mutate(); }}
         >
           Enregistrer
@@ -171,7 +180,16 @@ export function SalarieModal({
             onChange={(e) => set({ hourlyCost: e.target.value })}
           />
         </div>
-        {f.contractType === 'interimaire' && champ('Agence d’intérim', 'agency')}
+        {A_TERME.includes(f.contractType) && (
+          <div className="field" style={{ marginBottom: 0, width: 170 }}>
+            <label>Fin de contrat *</label>
+            <input
+              type="date"
+              value={f.dateFinContrat ?? ''}
+              onChange={(e) => set({ dateFinContrat: e.target.value })}
+            />
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
         {champ('Date d’entrée', 'dateEntree', 'date', 160)}
@@ -226,6 +244,19 @@ export function SalarieModal({
         Le numéro de sécurité sociale ne sert qu’à la paye : il n’apparaît ni dans les listes, ni
         dans les exports d’écran.
       </p>
+
+      {/* L'intérim se gère par contrat d'agence — il faut donc une fiche déjà créée pour l'y
+          rattacher. Le bloc n'apparaît qu'ensuite, plutôt que de proposer un formulaire orphelin. */}
+      {f.contractType === 'interimaire' && (
+        salarie
+          ? <div style={{ marginTop: 16 }}><ContratInterimBloc employeeId={salarie.id} /></div>
+          : (
+            <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+              Enregistrez d’abord la fiche : le contrat d’agence (taux, coefficient, indemnités)
+              s’ajoute ensuite, et c’est lui qui donnera le coût réel de l’heure.
+            </p>
+          )
+      )}
     </Modale>
   );
 }

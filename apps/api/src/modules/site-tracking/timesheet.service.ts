@@ -10,6 +10,7 @@ import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { returningRows } from '../../core/database/returning.util';
+import { InterimService } from './interim.service';
 
 /** Date ISO : le filtre de période ne doit accepter qu'une date, jamais un fragment de SQL. */
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -35,6 +36,7 @@ export class TimesheetService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly context: TenantContext,
+    private readonly interim: InterimService,
   ) {}
 
   create(chantierId: string, input: TimesheetInput) {
@@ -89,7 +91,12 @@ export class TimesheetService {
         )[0];
         if (!fiche) throw new NotFoundException('Salarié introuvable');
         libelle = [fiche.first_name, fiche.last_name].filter(Boolean).join(' ');
-        if (coutHoraire === null) coutHoraire = new Decimal(fiche.hourly_cost);
+        if (coutHoraire === null) {
+          // Un intérimaire coûte le taux FACTURÉ par son agence (taux × coefficient), pas son
+          // taux horaire nu : compter ce dernier sous-estimerait le chantier de moitié.
+          const interim = await this.interim.tauxApplicable(em, input.employeeId, input.date);
+          coutHoraire = new Decimal(interim ?? fiche.hourly_cost);
+        }
         if (!codeAnalytiqueId) codeAnalytiqueId = fiche.code_analytique_id ?? null;
       }
       if (!libelle) {
@@ -218,7 +225,11 @@ export class TimesheetService {
           )[0];
           if (!fiche) throw new NotFoundException('Salarié introuvable');
           libelle = [fiche.first_name, fiche.last_name].filter(Boolean).join(' ');
-          if (input.hourlyCost === undefined) hourlyCost = new Decimal(fiche.hourly_cost);
+          if (input.hourlyCost === undefined) {
+            const jour = (input.date ?? t.work_date) as string;
+            const interim = await this.interim.tauxApplicable(em, employeeId, jour);
+            hourlyCost = new Decimal(interim ?? fiche.hourly_cost);
+          }
         }
       }
       if (input.employee !== undefined && !employeeId) {

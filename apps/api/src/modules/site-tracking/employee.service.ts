@@ -6,7 +6,11 @@ import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { NumberingService } from '../../core/numbering/numbering.service';
 
-export type ContractType = 'salarie' | 'interimaire' | 'apprenti';
+export type ContractType =
+  | 'cdi' | 'cdd' | 'alternance' | 'stage' | 'apprentissage' | 'interimaire';
+
+/** Contrats à durée déterminée : leur fin doit être connue, c'est ce qui les définit. */
+const CONTRATS_A_TERME: ContractType[] = ['cdd', 'alternance', 'stage', 'apprentissage'];
 
 export interface EmployeeInput {
   firstName?: string | null;
@@ -32,6 +36,8 @@ export interface EmployeeInput {
   qualification?: string | null;
   /** Dernière visite médicale : périmée, elle interdit le chantier. */
   dateVisiteMedicale?: string | null;
+  /** Fin d'un CDD, d'un stage, d'une alternance ou d'un apprentissage. */
+  dateFinContrat?: string | null;
   commentaire?: string | null;
 }
 
@@ -48,6 +54,7 @@ const CHAMPS_ADMIN = [
   ['ville', 'ville'],
   ['qualification', 'qualification'],
   ['dateVisiteMedicale', 'date_visite_medicale'],
+  ['dateFinContrat', 'date_fin_contrat'],
   ['commentaire', 'commentaire'],
 ] as const;
 
@@ -75,10 +82,13 @@ export interface EmployeeRow {
   ville: string | null;
   qualification: string | null;
   dateVisiteMedicale: string | null;
+  dateFinContrat: string | null;
   commentaire: string | null;
 }
 
-const CONTRACTS: ContractType[] = ['salarie', 'interimaire', 'apprenti'];
+const CONTRACTS: ContractType[] = [
+  'cdi', 'cdd', 'alternance', 'stage', 'apprentissage', 'interimaire',
+];
 
 /**
  * Fichier des salariés du suivi de chantiers.
@@ -106,7 +116,8 @@ export class EmployeeService {
                 e.contract_type, e.agency, e.code_analytique_id, e.active,
                 e.date_entree::text, e.date_sortie::text, e.date_naissance::text,
                 e.numero_secu, e.telephone, e.email, e.adresse, e.code_postal, e.ville,
-                e.qualification, e.date_visite_medicale::text, e.commentaire,
+                e.qualification, e.date_visite_medicale::text, e.date_fin_contrat::text,
+                e.commentaire,
                 a.code AS code_analytique
            FROM employee e
            LEFT JOIN analytical_code a ON a.id = e.code_analytique_id
@@ -123,6 +134,7 @@ export class EmployeeService {
     if (!lastName) throw new BadRequestException('Le nom du salarié est requis.');
     const hourlyCost = check(input.hourlyCost);
     const contractType = checkContract(input.contractType);
+    checkFinContrat(contractType, input.dateFinContrat);
 
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const code = await this.numbering.next(em, 'employee');
@@ -131,14 +143,15 @@ export class EmployeeService {
            (tenant_id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency,
             code_analytique_id, active,
             date_entree, date_sortie, date_naissance, numero_secu, telephone, email,
-            adresse, code_postal, ville, qualification, date_visite_medicale, commentaire)
+            adresse, code_postal, ville, qualification, date_visite_medicale,
+            date_fin_contrat, commentaire)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
          RETURNING id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency,
                    code_analytique_id, active,
                    date_entree::text, date_sortie::text, date_naissance::text, numero_secu,
                    telephone, email, adresse, code_postal, ville, qualification,
-                   date_visite_medicale::text, commentaire`,
+                   date_visite_medicale::text, date_fin_contrat::text, commentaire`,
         [
           tenantId,
           code,
@@ -169,27 +182,35 @@ export class EmployeeService {
         input.lastName === undefined ? current.last_name : (input.lastName ?? '').trim();
       if (!lastName) throw new BadRequestException('Le nom du salarié est requis.');
 
+      const contractType = input.contractType === undefined
+        ? (current.contract_type as ContractType) : checkContract(input.contractType);
+      checkFinContrat(
+        contractType,
+        input.dateFinContrat === undefined ? current.date_fin_contrat : input.dateFinContrat,
+      );
+
       const rows = await em.query(
         `UPDATE employee
             SET first_name = $2, last_name = $3, job_title = $4, hourly_cost = $5,
                 contract_type = $6, agency = $7, code_analytique_id = $8, active = $9,
                 date_entree = $10, date_sortie = $11, date_naissance = $12, numero_secu = $13,
                 telephone = $14, email = $15, adresse = $16, code_postal = $17, ville = $18,
-                qualification = $19, date_visite_medicale = $20, commentaire = $21,
+                qualification = $19, date_visite_medicale = $20, date_fin_contrat = $21,
+                commentaire = $22,
                 updated_at = now()
           WHERE id = $1
           RETURNING id, code, first_name, last_name, job_title, hourly_cost, contract_type, agency,
                     code_analytique_id, active,
                     date_entree::text, date_sortie::text, date_naissance::text, numero_secu,
                     telephone, email, adresse, code_postal, ville, qualification,
-                    date_visite_medicale::text, commentaire`,
+                    date_visite_medicale::text, date_fin_contrat::text, commentaire`,
         [
           id,
           input.firstName === undefined ? current.first_name : (input.firstName ?? '').trim() || null,
           lastName,
           input.jobTitle === undefined ? current.job_title : (input.jobTitle ?? '').trim() || null,
           input.hourlyCost === undefined ? current.hourly_cost : check(input.hourlyCost),
-          input.contractType === undefined ? current.contract_type : checkContract(input.contractType),
+          contractType,
           input.agency === undefined ? current.agency : (input.agency ?? '').trim() || null,
           input.codeAnalytiqueId === undefined ? current.code_analytique_id : input.codeAnalytiqueId,
           input.active === undefined ? current.active : input.active,
@@ -245,11 +266,25 @@ function check(v: string | number | undefined): string {
 }
 
 function checkContract(v: ContractType | undefined): ContractType {
-  if (v === undefined) return 'salarie';
+  if (v === undefined) return 'cdi';
   if (!CONTRACTS.includes(v)) {
-    throw new BadRequestException('Type de contrat inconnu (salarie, interimaire, apprenti).');
+    throw new BadRequestException(
+      `Type de contrat inconnu (${CONTRACTS.join(', ')}).`,
+    );
   }
   return v;
+}
+
+/**
+ * Un contrat à terme sans date de fin est un contrat qu'on oublie : personne ne sera prévenu que
+ * la mission s'arrête vendredi. On l'exige donc à la saisie, pas au moment du renouvellement raté.
+ */
+function checkFinContrat(type: ContractType, fin: string | null | undefined): void {
+  if (CONTRATS_A_TERME.includes(type) && !fin) {
+    throw new BadRequestException(
+      'Un contrat à durée déterminée doit porter sa date de fin.',
+    );
+  }
 }
 
 type LigneBrute = Record<string, string | boolean | null | undefined>;
@@ -283,6 +318,7 @@ function toRow(r: LigneBrute): EmployeeRow {
     ville: chaine(r.ville),
     qualification: chaine(r.qualification),
     dateVisiteMedicale: chaine(r.date_visite_medicale),
+    dateFinContrat: chaine(r.date_fin_contrat),
     commentaire: chaine(r.commentaire),
   };
 }

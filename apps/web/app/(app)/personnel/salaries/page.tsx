@@ -7,13 +7,9 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { Alerte, Badge, Bouton, LigneVide } from '@/components/ui';
-import { Salarie, SalarieModal, visiteAExpirer } from '@/components/SalarieModal';
+import { CONTRATS, Salarie, SalarieModal, visiteAExpirer } from '@/components/SalarieModal';
 
-const CONTRATS: Record<Salarie['contractType'], string> = {
-  salarie: 'Salarié',
-  interimaire: 'Intérimaire',
-  apprenti: 'Apprenti',
-};
+
 
 function jour(v: string | null): string {
   return v ? new Date(v).toLocaleDateString('fr-FR') : '—';
@@ -126,7 +122,15 @@ export default function SalariesPage() {
                   </td>
                   <td className="muted">{e.jobTitle ?? '—'}</td>
                   <td className="muted">{e.qualification ?? '—'}</td>
-                  <td className="muted">{CONTRATS[e.contractType]}</td>
+                  <td className="muted">
+                    {CONTRATS.find((c) => c.v === e.contractType)?.l ?? e.contractType}
+                    {/* Une fin de contrat proche est ce qu'on cherche dans cette colonne. */}
+                    {e.dateFinContrat && (
+                      <span className="muted" style={{ fontSize: 10, display: 'block' }}>
+                        jusqu’au {jour(e.dateFinContrat)}
+                      </span>
+                    )}
+                  </td>
                   <td className="muted">{jour(e.dateEntree)}</td>
                   <td style={{ color: visiteAExpirer(e.dateVisiteMedicale) ? 'var(--danger)' : undefined }}>
                     {jour(e.dateVisiteMedicale)}
