@@ -48,6 +48,18 @@ export class MaterielController {
     return this.materiel.affectations(debut, fin, equipmentId ?? null, chantierId ?? null);
   }
 
+  /** Relevés d'utilisation d'un chantier — l'écran matériel DU chantier lit ici. */
+  @Get('utilisations')
+  @RequiresCapability('site_tracking.timesheet')
+  @RequiresPermission('site_tracking.read')
+  utilisationsChantier(
+    @Query('chantier') chantierId: string,
+    @Query('debut') debut?: string,
+    @Query('fin') fin?: string,
+  ) {
+    return this.materiel.utilisationsChantier(chantierId, debut ?? null, fin ?? null);
+  }
+
   @Get('conflits')
   @RequiresCapability('site_tracking.timesheet')
   @RequiresPermission('site_tracking.read')

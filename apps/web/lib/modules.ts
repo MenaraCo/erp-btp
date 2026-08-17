@@ -111,6 +111,14 @@ export function contextualGroups(pathname: string): ContextGroup[] {
           { href: `/chantiers/${id}/controle-heures`, label: 'Contrôle des heures' },
         ],
       },
+      {
+        // Le matériel se réserve et se relève DEPUIS le chantier : c'est là qu'on sait de quelle
+        // machine on a besoin, et là qu'on constate ce qu'elle a réellement fait.
+        title: 'Matériel',
+        features: [
+          { href: `/chantiers/${id}/materiel`, label: 'Matériel du chantier' },
+        ],
+      },
     ];
   }
 

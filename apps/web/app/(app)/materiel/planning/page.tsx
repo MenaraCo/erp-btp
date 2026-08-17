@@ -49,6 +49,9 @@ export default function PlanningMaterielPage() {
   const [saisie, setSaisie] = useState<null | {
     equipmentId: string; chantierId: string; dateDebut: string; dateFin: string;
   }>(null);
+  // Toute la barre est cliquable : sans confirmation, un clic de trop libérait la machine et
+  // personne ne s'en apercevait avant que le chantier la réclame.
+  const [aLiberer, setALiberer] = useState<Affectation | null>(null);
 
   const [annee, moisNum] = mois.split('-').map(Number);
   const debut = `${mois}-01`;
@@ -103,7 +106,7 @@ export default function PlanningMaterielPage() {
   });
   const retirer = useMutation({
     mutationFn: (id: string) => apiFetch(`/materiel/affectations/${id}`, { method: 'DELETE', token }),
-    onSuccess: () => { setErr(null); rafraichir(); },
+    onSuccess: () => { setErr(null); setALiberer(null); rafraichir(); },
     onError: echoue,
   });
 
@@ -216,7 +219,7 @@ export default function PlanningMaterielPage() {
                       <td
                         key={cle}
                         title={a ? `${a.chantier_code} — ${a.chantier_nom ?? ''}` : undefined}
-                        onClick={() => a && retirer.mutate(a.id)}
+                        onClick={() => a && setALiberer(a)}
                         style={{
                           padding: 0, height: 24, cursor: a ? 'pointer' : 'default',
                           background: a
@@ -242,8 +245,37 @@ export default function PlanningMaterielPage() {
       </div>
 
       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-        Cliquez une barre pour libérer le matériel sur cette période.
+        Cliquez une barre pour libérer le matériel sur cette période — une confirmation est
+        demandée avant.
       </p>
+
+      {aLiberer && (
+        <Modale
+          titre="Libérer ce matériel ?"
+          largeur="s"
+          onClose={() => setALiberer(null)}
+          actions={(
+            <Bouton
+              variante="danger"
+              chargement={retirer.isPending}
+              onClick={() => retirer.mutate(aLiberer.id)}
+            >
+              Libérer
+            </Bouton>
+          )}
+        >
+          <p style={{ fontSize: 13, marginTop: 0 }}>
+            <strong>{aLiberer.materiel_code} — {aLiberer.materiel}</strong> est réservé au chantier{' '}
+            <strong>{aLiberer.chantier_code}</strong> du{' '}
+            {new Date(aLiberer.date_debut).toLocaleDateString('fr-FR')} au{' '}
+            {new Date(aLiberer.date_fin).toLocaleDateString('fr-FR')}.
+          </p>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+            Le libérer retire l’engagé correspondant du chantier ; les utilisations déjà relevées,
+            elles, restent — elles ont eu lieu.
+          </p>
+        </Modale>
+      )}
 
       {saisie && (
         <Modale

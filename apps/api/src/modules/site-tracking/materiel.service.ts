@@ -282,6 +282,29 @@ export class MaterielService {
 
   /* ─────────── utilisation réelle ─────────── */
 
+  /** Relevés d'un CHANTIER : ce que le matériel y a réellement coûté, jour par jour. */
+  utilisationsChantier(chantierId: string, debut?: string | null, fin?: string | null) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, (em) => {
+      const params: unknown[] = [chantierId];
+      let periode = '';
+      if (debut && ISO.test(debut)) { params.push(debut); periode += ` AND u.work_date >= $${params.length}`; }
+      if (fin && ISO.test(fin)) { params.push(fin); periode += ` AND u.work_date <= $${params.length}`; }
+      return em.query(
+        `SELECT u.*, u.work_date::text AS work_date,
+                e.code AS materiel_code, e.label AS materiel, e.unite_cout,
+                el.designation AS ouvrage_label, ac.code AS code_analytique
+           FROM equipment_usage u
+           JOIN equipment e ON e.id = u.equipment_id
+           LEFT JOIN execution_line el ON el.id = u.execution_line_id
+           LEFT JOIN analytical_code ac ON ac.id = u.code_analytique_id
+          WHERE u.chantier_id = $1 ${periode}
+          ORDER BY u.work_date DESC, e.code`,
+        params,
+      );
+    });
+  }
+
   utilisations(equipmentId: string, debut?: string | null, fin?: string | null) {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) => {

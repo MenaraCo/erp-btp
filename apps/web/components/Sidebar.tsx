@@ -56,6 +56,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
 
 /** Icônes du sous-menu contextuel, repérées par le dernier segment de l'URL. */
 const CONTEXT_ICONS: Record<string, React.ElementType> = {
+  materiel: Truck,
   '': Building2,
   structure: Layers,
   calendrier: CalendarDays,
