@@ -22,7 +22,7 @@ describe('Plan analytique — fusionner les doublons hérités', () => {
   let userId: string;
   let familleId: string;
 
-  const as = (method: 'get' | 'post', path: string) =>
+  const as = (method: 'get' | 'post' | 'patch', path: string) =>
     request(app.getHttpServer())[method](path)
       .set('Host', 'localhost').set('X-Tenant-Id', tenantId).set('X-User-Id', userId);
 
@@ -109,5 +109,28 @@ describe('Plan analytique — fusionner les doublons hérités', () => {
       .send({ type: 'lot', gardeId: lot.id, supprimeId: lot.id }).expect(400);
     await as('post', '/params/doublons/fusionner')
       .send({ type: 'inconnu', gardeId: lot.id, supprimeId: lot.id }).expect(400);
+  });
+
+  it('rééditer une fiche sans la renommer reste possible même si un libellé voisin existe', async () => {
+    // Deux postes que la normalisation rapproche : « Frais généraux / Part propre » d'un côté,
+    // « Frais généraux — part propre » de l'autre. Ils coexistent (l'un vient de la société,
+    // l'autre du plan modèle) ; changer la CATÉGORIE de l'un ne doit pas buter sur l'autre.
+    const societeId = await codeHerite('601', 'Frais généraux / Part propre');
+    // Le second vient du plan modèle, posé par migration : la garde de saisie ne l'a jamais vu.
+    await codeHerite('901', 'Frais généraux — part propre');
+
+    const r = (await as('patch', `/params/codes/${societeId}`)
+      .send({
+        familleId, code: '601', label: 'Frais généraux / Part propre',
+        nature: 'material', categorie: 'frais_generaux',
+      })
+      .expect(200)).body;
+    expect(r.categorie).toBe('frais_generaux');
+
+    // En revanche, RENOMMER vers le libellé d'une AUTRE fiche reste refusé.
+    await codeHerite('902', 'Assurance décennale');
+    await as('patch', `/params/codes/${societeId}`)
+      .send({ label: 'Assurance décennale' })
+      .expect(409);
   });
 });

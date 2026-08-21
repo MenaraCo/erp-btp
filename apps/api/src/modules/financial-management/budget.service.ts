@@ -114,8 +114,27 @@ export class BudgetService {
 
       /* ── Bloc CHARGES : l'axe analytique des 4 natures ── */
       const rows: MeasureRow[] = [];
+      // Un code sans famille n'apparaît dans aucune branche de l'arbre : il tomberait dans
+      // « à ventiler » alors qu'il EST ventilé. On le sort à part, sous son propre nom.
+      const codesDuPlan = new Set<string>();
+      for (const n of tree) {
+        for (const l of n.lots) for (const f of l.familles) for (const c of f.codes) codesDuPlan.add(c.id);
+      }
+      const parCodeHorsPlan = new Map<string, Record<string, Decimal>>();
+      const pousseCharge = (bucket: string, metriques: Array<'etude' | 'mouvements' | 'global' | 'initial'>, montant: Decimal) => {
+        if (!bucket.startsWith(UNALLOC_PREFIX) && !codesDuPlan.has(bucket)) {
+          const acc = parCodeHorsPlan.get(bucket) ?? this.accumulateur();
+          for (const m of metriques) acc[m] = acc[m].plus(montant);
+          parCodeHorsPlan.set(bucket, acc);
+          return;
+        }
+        const metrics: Metrics = {};
+        for (const m of metriques) metrics[m] = montant.toString();
+        rows.push(this.bucketRow(bucket, metrics));
+      };
+
       for (const [bucket, montant] of etude.parBucket) {
-        rows.push(this.bucketRow(bucket, { etude: montant.toString(), global: montant.toString() }));
+        pousseCharge(bucket, ['etude', 'global'], montant);
       }
       const fg = this.accumulateur();
       const parCodeFg = new Map<string, Record<string, Decimal>>();
@@ -137,7 +156,7 @@ export class BudgetService {
         }
         const categorie = categories.get(bucket) ?? 'charge';
         if (categorie === 'charge') {
-          rows.push(this.bucketRow(bucket, { etude: montant.toString(), global: montant.toString() }));
+          pousseCharge(bucket, ['etude', 'global'], montant);
           continue;
         }
         const cible = categorie === 'produit' ? parCodeProduit : parCodeFg;
@@ -174,9 +193,13 @@ export class BudgetService {
           for (const m of metriques) fg[m] = fg[m].plus(montant);
           return;
         }
+        if (ligne.code_id) {
+          pousseCharge(ligne.code_id, metriques, montant);
+          return;
+        }
         const metrics: Metrics = {};
         for (const m of metriques) metrics[m] = ligne.montant;
-        rows.push({ codeId: ligne.code_id, nature: ligne.nature as MeasureRow['nature'], metrics });
+        rows.push({ codeId: null, nature: ligne.nature as MeasureRow['nature'], metrics });
       };
 
       for (const m of mouvements) ranger(m, ['mouvements', 'global']);
@@ -193,13 +216,17 @@ export class BudgetService {
 
       const lignesFg = await this.lignesParCode(em, sections.fraisGeneraux.codes, parCodeFg);
       const lignesProduits = await this.lignesParCode(em, sections.produits.codes, parCodeProduit);
+      const lignesHorsPlan = await this.lignesParCode(em, [], parCodeHorsPlan);
 
       /* ── Totaux et résultats ── */
       const totalCharges: Record<string, string> = {};
       const resultatBrut: Record<string, string> = {};
       const resultatNet: Record<string, string> = {};
       for (const m of METRICS) {
-        const charges = new Decimal(aggregate.total[m] ?? 0);
+        const horsPlan = [...parCodeHorsPlan.values()].reduce(
+          (t, acc) => t.plus(acc[m] ?? 0), new Decimal(0),
+        );
+        const charges = new Decimal(aggregate.total[m] ?? 0).plus(horsPlan);
         totalCharges[m] = charges.toString();
         const brut = produits[m].minus(charges);
         resultatBrut[m] = brut.toString();
@@ -213,6 +240,8 @@ export class BudgetService {
           label: 'Charges',
           natures: aggregate.natures,
           aVentiler: aggregate.aVentiler,
+          /** Postes réellement imputés mais absents de l'arbre : codes sans famille. */
+          horsPlan: lignesHorsPlan,
           total: totalCharges,
         },
         fraisGeneraux: {

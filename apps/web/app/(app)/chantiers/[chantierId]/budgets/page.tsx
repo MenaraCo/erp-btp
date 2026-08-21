@@ -26,6 +26,8 @@ interface TableauBudgets {
     label: string;
     natures: NoeudNature[];
     aVentiler: { code: string; label: string; metrics: Metriques };
+    /** Postes imputés mais absents de l'arbre (codes sans famille). */
+    horsPlan: LigneCode[];
     total: Metriques;
   };
   fraisGeneraux: {
@@ -276,6 +278,17 @@ export default function BudgetsPage() {
                       <Cellules m={c.metrics} />
                     </tr>
                   ))}
+                {/* Un code sans famille est bel et bien ventilé : il se lit sous son nom, pas
+                    dans « à ventiler » — sinon on cherche une erreur qui n'existe pas. */}
+                {d.charges.horsPlan.map((l) => (
+                  <tr key={l.id}>
+                    <td style={{ paddingLeft: 20 }}>
+                      <span className="code-cell">{l.code}</span> {l.label}
+                      <span className="muted" style={{ fontSize: 11 }}> — sans famille</span>
+                    </td>
+                    <Cellules m={l.metrics} />
+                  </tr>
+                ))}
                 {porteUneValeur(d.charges.aVentiler.metrics) && (
                   <tr>
                     <td style={{ paddingLeft: 20 }}>

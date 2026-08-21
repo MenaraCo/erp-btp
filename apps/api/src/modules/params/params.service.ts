@@ -634,6 +634,20 @@ export class ParamsService {
     );
     const autres = existantes.filter((e) => e.id !== idExclu);
 
+    // MODIFICATION : on ne contrôle que ce qui CHANGE. Sans cela, rééditer une fiche pour un
+    // détail (sa catégorie, sa famille) échouait parce que son propre libellé ressemblait à celui
+    // d'une autre entrée — « Frais généraux / Part Propre » contre « Frais généraux — part propre ».
+    // Le doublon reste refusé quand on renomme VERS un libellé déjà pris.
+    if (idExclu) {
+      const courant = existantes.find((e) => e.id === idExclu);
+      if (courant) {
+        if ((courant.code ?? '').trim().toLowerCase() === (valeurCode ?? '').trim().toLowerCase()) {
+          valeurCode = null;
+        }
+        if (normaliserLibelle(courant.label) === normaliserLibelle(libelle)) libelle = null;
+      }
+    }
+
     const code = (valeurCode ?? '').trim().toLowerCase();
     if (code) {
       const collision = autres.find((e) => (e.code ?? '').trim().toLowerCase() === code);
