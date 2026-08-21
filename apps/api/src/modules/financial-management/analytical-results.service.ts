@@ -5,30 +5,11 @@ import Decimal from 'decimal.js';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { engageMainOeuvreParCode } from '../site-tracking/labor-commitment';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
-import { CalcComponent, CalcOuvrage } from '../estimating/ouvrage-calc';
-import { computeBucketBreakdownMap } from '../estimating/bucket-breakdown';
 import { AnalyticalPlanService } from '../analytical/analytical-plan.service';
 import { aggregateAnalytical, MeasureRow, Metrics } from './analytical-aggregate';
+import { budgetEtude, UNALLOC_PREFIX } from './budget-etude';
 
-const UNALLOC_PREFIX = '__unalloc__:';
 const METRICS = ['budgetObjectif', 'engage', 'realise'] as const;
-
-interface CompRow {
-  execution_line_id: string;
-  kind: string;
-  child_line_id: string | null;
-  quantite_objectif: string | null;
-  rate: string | null;
-  nature: string | null;
-  unit_cost_objectif: string | null;
-  code_id: string | null;
-}
-interface LineRow {
-  id: string;
-  parent_line_id: string | null;
-  vendable: boolean;
-  quantite_objectif: string | null;
-}
 
 /**
  * Tableau de bord analytique d'un chantier (cahier des charges §5.8): budget / engagé / réalisé
@@ -93,62 +74,32 @@ export class AnalyticalResultsService {
     });
   }
 
-  /** Budget objectif par code analytique (lignes vendables) + frais de chantier (non-vendables). */
+  /**
+   * Budget objectif par code analytique = budget d'ÉTUDE d'exécution (calculé) + MOUVEMENTS de
+   * budget saisis (dotations, reprises, ripages). Ignorer les mouvements ferait mentir l'écart :
+   * on comparerait la dépense à une cible que le conducteur a lui-même déplacée.
+   */
   private async collectBudget(
     em: EntityManager,
     chantierId: string,
     rows: MeasureRow[],
     siteOverhead: Record<string, Decimal>,
   ): Promise<void> {
-    const lines: LineRow[] = await em.query(
-      `SELECT id, parent_line_id, vendable, quantite_objectif
-         FROM execution_line WHERE chantier_id = $1`,
-      [chantierId],
-    );
-    // Code analytique = celui de la nomenclature de chantier (copié au transfert), pas la biblio.
-    const comps: CompRow[] = await em.query(
-      `SELECT ec.execution_line_id, ec.kind, ec.child_line_id, ec.quantite_objectif, ec.rate,
-              n.nature, n.unit_cost_objectif, n.code_analytique_id AS code_id
-         FROM execution_component ec
-         JOIN execution_line el ON el.id = ec.execution_line_id
-         LEFT JOIN nomenclature_resource n ON n.id = ec.nomenclature_resource_id
-        WHERE el.chantier_id = $1`,
-      [chantierId],
-    );
-
-    const map = new Map<string, CalcOuvrage>();
-    for (const l of lines) map.set(l.id, { id: l.id, components: [] });
-    for (const c of comps) {
-      const parent = map.get(c.execution_line_id);
-      if (!parent) continue;
-      const comp: CalcComponent = { kind: c.kind === 'sub_line' ? 'sub_ouvrage' : c.kind === 'resource' ? 'resource' : 'percentage' };
-      if (c.kind === 'resource') {
-        comp.quantity = c.quantite_objectif ?? 0;
-        comp.unitCost = c.unit_cost_objectif ?? 0;
-        comp.bucket = c.code_id ?? `${UNALLOC_PREFIX}${c.nature ?? 'material'}`;
-      } else if (c.kind === 'sub_line') {
-        comp.quantity = c.quantite_objectif ?? 0;
-        comp.childOuvrageId = c.child_line_id ?? undefined;
-      } else {
-        comp.rate = c.rate ?? 0;
-      }
-      parent.components.push(comp);
+    const etude = await budgetEtude(em, chantierId, 'code');
+    siteOverhead.budgetObjectif = siteOverhead.budgetObjectif.plus(etude.fraisChantier);
+    for (const [bucket, montant] of etude.parBucket) {
+      rows.push(this.bucketToRow(bucket, { budgetObjectif: montant.toString() }));
     }
 
-    const breakdown = computeBucketBreakdownMap(map);
-    for (const l of lines) {
-      if (l.parent_line_id) continue; // budget only on top lines
-      const unit = breakdown.get(l.id) ?? {};
-      const qty = new Decimal(l.quantite_objectif ?? 0);
-      if (!l.vendable) {
-        for (const value of Object.values(unit)) {
-          siteOverhead.budgetObjectif = siteOverhead.budgetObjectif.plus(value.times(qty));
-        }
-        continue;
-      }
-      for (const [bucket, value] of Object.entries(unit)) {
-        rows.push(this.bucketToRow(bucket, { budgetObjectif: value.times(qty).toString() }));
-      }
+    const mouvements = await em.query(
+      `SELECT code_analytique_id AS code_id, nature, SUM(montant)::numeric(16,2) AS montant
+         FROM chantier_budget_movement WHERE chantier_id = $1
+        GROUP BY code_analytique_id, nature`,
+      [chantierId],
+    );
+    for (const m of mouvements) {
+      if (new Decimal(m.montant ?? 0).isZero()) continue;
+      this.dispatch(rows, siteOverhead, m.code_id, m.nature, 'budgetObjectif', m.montant);
     }
   }
 

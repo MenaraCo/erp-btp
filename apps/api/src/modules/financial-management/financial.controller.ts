@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { FinancialConfigService, FormulaSetInput } from './financial-config.service';
@@ -8,6 +8,7 @@ import { FinancialForecastService } from './financial-forecast.service';
 import { PortfolioService } from './portfolio.service';
 import { MonthlyService } from './monthly.service';
 import { PilotageService } from './pilotage.service';
+import { BudgetService, RipageBudget, SaisieBudget } from './budget.service';
 
 @Controller()
 export class FinancialController {
@@ -19,6 +20,7 @@ export class FinancialController {
     private readonly portfolio: PortfolioService,
     private readonly monthly: MonthlyService,
     private readonly pilotage: PilotageService,
+    private readonly budget: BudgetService,
   ) {}
 
   /** Courbes de pilotage : budget / budget avancé / réalisé+engagé, mois par mois (§5.8). */
@@ -123,12 +125,14 @@ export class FinancialController {
   @RequiresPermission('financial.write')
   recordLineAdvancement(
     @Param('chantierId') chantierId: string,
-    @Body() body: { executionLineId?: string; pct?: string | number },
+    @Body() body: { executionLineId?: string; pct?: string | number; constatDate?: string | null },
   ) {
     if (!body?.executionLineId || body?.pct == null) {
       throw new BadRequestException('executionLineId and pct are required');
     }
-    return this.advancement.recordLine(chantierId, body.executionLineId, body.pct);
+    return this.advancement.recordLine(
+      chantierId, body.executionLineId, body.pct, body.constatDate ?? null,
+    );
   }
 
   /** Applique un avancement en masse : global (tout le chantier), par marché ou par sous-arbre. */
@@ -137,13 +141,21 @@ export class FinancialController {
   @RequiresPermission('financial.write')
   applyLineAdvancement(
     @Param('chantierId') chantierId: string,
-    @Body() body: { pct?: string | number; parentLineId?: string | null; marcheId?: string | null },
+    @Body() body: {
+      pct?: string | number;
+      parentLineId?: string | null;
+      marcheId?: string | null;
+      constatDate?: string | null;
+    },
   ) {
     if (body?.pct == null) {
       throw new BadRequestException('pct is required');
     }
     return this.advancement.applyToLines(chantierId, {
-      pct: body.pct, parentLineId: body.parentLineId ?? null, marcheId: body.marcheId ?? null,
+      pct: body.pct,
+      parentLineId: body.parentLineId ?? null,
+      marcheId: body.marcheId ?? null,
+      constatDate: body.constatDate ?? null,
     });
   }
 
@@ -153,5 +165,64 @@ export class FinancialController {
   @RequiresPermission('financial.write')
   applyFromSituations(@Param('chantierId') chantierId: string) {
     return this.advancement.applyFromSituations(chantierId);
+  }
+
+  /* ─── Budgets du chantier : étude / mouvements / global / initial (§17 à 20) ─── */
+
+  @Get('chantiers/:chantierId/budgets')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  getBudgets(@Param('chantierId') chantierId: string) {
+    return this.budget.tableau(chantierId);
+  }
+
+  /** Ressources du chantier avec leur budget : la liste où l'on choisit source et cible d'un ripage. */
+  @Get('chantiers/:chantierId/budgets/ressources')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  getBudgetRessources(@Param('chantierId') chantierId: string) {
+    return this.budget.ressources(chantierId);
+  }
+
+  @Get('chantiers/:chantierId/budgets/historique')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  getBudgetHistorique(@Param('chantierId') chantierId: string) {
+    return this.budget.historique(chantierId);
+  }
+
+  @Post('chantiers/:chantierId/budgets/mouvements')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  saisirBudget(@Param('chantierId') chantierId: string, @Body() body: SaisieBudget) {
+    if (!body?.codeAnalytiqueId && !body?.ressourceId) {
+      throw new BadRequestException('Indiquez une ressource ou un code analytique.');
+    }
+    return this.budget.saisir(chantierId, body);
+  }
+
+  @Post('chantiers/:chantierId/budgets/ripages')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  riperBudget(@Param('chantierId') chantierId: string, @Body() body: RipageBudget) {
+    if (body?.montant == null) throw new BadRequestException('Le montant à riper est obligatoire.');
+    return this.budget.riper(chantierId, body);
+  }
+
+  @Post('chantiers/:chantierId/budgets/initial')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  fixerBudgetInitial(@Param('chantierId') chantierId: string) {
+    return this.budget.fixerBudgetInitial(chantierId);
+  }
+
+  @Delete('chantiers/:chantierId/budgets/mouvements/:mouvementId')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  supprimerMouvementBudget(
+    @Param('chantierId') chantierId: string,
+    @Param('mouvementId') mouvementId: string,
+  ) {
+    return this.budget.supprimerMouvement(chantierId, mouvementId);
   }
 }

@@ -10,6 +10,12 @@ export interface AdvancementInput {
   /** fraction 0..1 */
   pct: string | number;
   source?: 'manual' | 'situations';
+  /**
+   * Date du CONSTAT — « avancement constaté au 31/07 ». Elle n'est pas l'instant de la saisie :
+   * on relève le chantier un jour et on l'enregistre le lendemain. L'horodatage reste la preuve,
+   * la date de constat reste le repère métier.
+   */
+  constatDate?: string | null;
 }
 
 /**
@@ -37,9 +43,10 @@ export class AdvancementService {
       }
       return (
         await em.query(
-          `INSERT INTO chantier_advancement (tenant_id, chantier_id, nature, pct, source)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [tenantId, chantierId, input.nature ?? null, String(pct), input.source ?? 'manual'],
+          `INSERT INTO chantier_advancement (tenant_id, chantier_id, nature, pct, source, constat_date)
+           VALUES ($1, $2, $3, $4, $5, $6::date) RETURNING *`,
+          [tenantId, chantierId, input.nature ?? null, String(pct), input.source ?? 'manual',
+           input.constatDate ?? null],
         )
       )[0];
     });
@@ -50,7 +57,7 @@ export class AdvancementService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       const rows = await em.query(
-        `SELECT DISTINCT ON (nature) nature, pct, source, recorded_at
+        `SELECT DISTINCT ON (nature) nature, pct, source, recorded_at, constat_date::text AS constat_date
            FROM chantier_advancement WHERE chantier_id = $1
           ORDER BY nature, recorded_at DESC`,
         [chantierId],
@@ -64,7 +71,12 @@ export class AdvancementService {
   /* ───────── Avancement ouvrage par ouvrage (cahier §5.8) ───────── */
 
   /** Enregistre l'avancement d'un ouvrage (ligne d'exécution). */
-  recordLine(chantierId: string, executionLineId: string, pct: string | number) {
+  recordLine(
+    chantierId: string,
+    executionLineId: string,
+    pct: string | number,
+    constatDate?: string | null,
+  ) {
     const tenantId = this.context.requireTenantId();
     const p = Number(pct);
     if (!(p >= 0 && p <= 1)) {
@@ -79,9 +91,10 @@ export class AdvancementService {
         throw new NotFoundException(`Unknown execution line "${executionLineId}"`);
       }
       await em.query(
-        `INSERT INTO execution_line_advancement (tenant_id, chantier_id, execution_line_id, pct, source)
-         VALUES ($1, $2, $3, $4, 'manual')`,
-        [tenantId, chantierId, executionLineId, String(p)],
+        `INSERT INTO execution_line_advancement
+           (tenant_id, chantier_id, execution_line_id, pct, source, constat_date)
+         VALUES ($1, $2, $3, $4, 'manual', $5::date)`,
+        [tenantId, chantierId, executionLineId, String(p), constatDate ?? null],
       );
       return this.currentLinesInEm(em, chantierId);
     });
@@ -91,7 +104,15 @@ export class AdvancementService {
    * Applique un avancement à un ensemble d'ouvrages en une fois : à tout le chantier (global),
    * ou au sous-arbre d'une ligne (par titre / section / ouvrage). Un enregistrement par ligne.
    */
-  applyToLines(chantierId: string, input: { pct: string | number; parentLineId?: string | null; marcheId?: string | null }) {
+  applyToLines(
+    chantierId: string,
+    input: {
+      pct: string | number;
+      parentLineId?: string | null;
+      marcheId?: string | null;
+      constatDate?: string | null;
+    },
+  ) {
     const tenantId = this.context.requireTenantId();
     const p = Number(input.pct);
     if (!(p >= 0 && p <= 1)) {
@@ -108,9 +129,10 @@ export class AdvancementService {
       );
       for (const t of targets) {
         await em.query(
-          `INSERT INTO execution_line_advancement (tenant_id, chantier_id, execution_line_id, pct, source)
-           VALUES ($1, $2, $3, $4, 'bulk')`,
-          [tenantId, chantierId, t.id, String(p)],
+          `INSERT INTO execution_line_advancement
+             (tenant_id, chantier_id, execution_line_id, pct, source, constat_date)
+           VALUES ($1, $2, $3, $4, 'bulk', $5::date)`,
+          [tenantId, chantierId, t.id, String(p), input.constatDate ?? null],
         );
       }
       return this.currentLinesInEm(em, chantierId);
@@ -158,11 +180,20 @@ export class AdvancementService {
   /** Dernier avancement par ligne, dans une transaction donnée (voit les écritures en cours). */
   private currentLinesInEm(em: EntityManager, chantierId: string) {
     return em.query(
-      `SELECT DISTINCT ON (execution_line_id) execution_line_id, pct, recorded_at
+      `SELECT DISTINCT ON (execution_line_id) execution_line_id, pct, recorded_at,
+              constat_date::text AS constat_date, source
          FROM execution_line_advancement WHERE chantier_id = $1
         ORDER BY execution_line_id, recorded_at DESC`,
       [chantierId],
-    ) as Promise<Array<{ execution_line_id: string; pct: string; recorded_at: Date }>>;
+    ) as Promise<
+      Array<{
+        execution_line_id: string;
+        pct: string;
+        recorded_at: Date;
+        constat_date: string | null;
+        source: string;
+      }>
+    >;
   }
 
   /** Dernier avancement par ligne d'exécution (les lignes budgétées). */

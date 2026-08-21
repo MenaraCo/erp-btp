@@ -124,8 +124,18 @@ export class AnalyticsService {
         [chantierId],
       ))[0].total;
 
+      // Mouvements de budget saisis (dotations, reprises, ripages) : ils déplacent la CIBLE, donc
+      // ils font partie du budget objectif. Sans eux, un ripage laisserait l'écart au stade
+      // inchangé — le budget aurait bougé à l'écran, jamais dans le calcul.
+      const mouvementsBudget = await em.query(
+        `SELECT nature, SUM(montant)::numeric(16,2) AS montant
+           FROM chantier_budget_movement WHERE chantier_id = $1 GROUP BY nature`,
+        [chantierId],
+      );
+
       const budgetObj = mapBy(budget, 'objectif');
       const budgetPrev = mapBy(budget, 'previsionnel');
+      const budgetMvt = mapBy(mouvementsBudget, 'montant');
       const engageMap = mapBy(engage, 'montant');
       const supplierMap = mapBy(supplier, 'montant');
 
@@ -144,7 +154,9 @@ export class AnalyticsService {
         }
         return natureResult({
           nature,
-          budgetObjectif: budgetObj[nature] ?? 0,
+          budgetObjectif: new Decimal(budgetObj[nature] ?? 0)
+            .plus(budgetMvt[nature] ?? 0)
+            .toString(),
           budgetPrevisionnel: budgetPrev[nature] ?? 0,
           engage: engageNature.toString(),
           realise: realise.toString(),

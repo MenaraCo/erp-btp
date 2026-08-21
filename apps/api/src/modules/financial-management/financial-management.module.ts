@@ -9,6 +9,7 @@ import { FinancialForecastService } from './financial-forecast.service';
 import { PortfolioService } from './portfolio.service';
 import { MonthlyService } from './monthly.service';
 import { PilotageService } from './pilotage.service';
+import { BudgetService } from './budget.service';
 import { FinancialController } from './financial.controller';
 
 /**
@@ -26,8 +27,9 @@ import { FinancialController } from './financial.controller';
     AdvancementService,
     AnalyticalResultsService,
     FinancialForecastService,
+    BudgetService,
   ],
   controllers: [FinancialController],
-  exports: [FinancialConfigService, AdvancementService],
+  exports: [FinancialConfigService, AdvancementService, BudgetService],
 })
 export class FinancialManagementModule {}

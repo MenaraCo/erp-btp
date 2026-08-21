@@ -3,7 +3,7 @@
 import { Fragment, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { BarresGroupees, PALETTE } from '@/components/Graphiques';
 import { teinteChantier } from '@/components/CalendrierMois';
@@ -130,6 +130,7 @@ function postesAnalytiques(d: AnalyticalResults): Array<{ label: string; metrics
 }
 
 export default function ChantierDetailPage() {
+  const qc = useQueryClient();
   const { token } = useAuth();
   const params = useParams();
   const chantierId = String(params.chantierId);
@@ -360,7 +361,13 @@ export default function ChantierDetailPage() {
         <AVentilerCard
           chantierId={chantierId}
           data={analytical.data.aVentiler}
-          onVentiled={() => analytical.refetch()}
+          onVentiled={() => {
+            analytical.refetch();
+            // Ranger une ressource déplace son budget d'un code à l'autre : l'écran Budgets
+            // et les listes de ripage lisent la même donnée.
+            qc.invalidateQueries({ queryKey: ['budgets', chantierId] });
+            qc.invalidateQueries({ queryKey: ['budgets-ressources', chantierId] });
+          }}
         />
       )}
     </div>

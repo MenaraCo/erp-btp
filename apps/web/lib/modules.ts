@@ -87,10 +87,20 @@ export function contextualGroups(pathname: string): ContextGroup[] {
         title: 'Chantier ouvert',
         features: [
           { href: `/chantiers/${id}`, label: 'Fiche chantier' },
-          { href: `/chantiers/${id}/structure`, label: 'Structure & budget' },
-          { href: `/chantiers/${id}/avancement`, label: 'Avancement' },
           { href: `/chantiers/${id}/mensuel`, label: 'Gestion mensuelle' },
           { href: `/chantiers/${id}/pilotage`, label: 'Pilotage' },
+        ],
+      },
+      {
+        // Trois gestes distincts, trois écrans — les confondre était la source des erreurs :
+        // l'ÉTUDE dit ce qu'on prévoit de faire, le BUDGET dit ce qu'on s'autorise à dépenser,
+        // l'AVANCEMENT dit ce qui est fait. Saisir un avancement dans la fenêtre de validation
+        // du budget mélangeait une prévision et un constat.
+        title: 'Étude & budgets',
+        features: [
+          { href: `/chantiers/${id}/etude`, label: 'Étude d’exécution' },
+          { href: `/chantiers/${id}/budgets`, label: 'Budgets' },
+          { href: `/chantiers/${id}/avancement`, label: 'Avancement constaté' },
         ],
       },
       {

@@ -47,8 +47,8 @@ type TypeVentilableCle = 'ressources' | 'commandes' | 'factures' | 'pointages' |
  *
  * Une dépense sans code analytique compte dans le total du chantier et dans aucun poste : le
  * tableau de bord la montre sans jamais permettre de la ranger. Ce panneau la liste — budget,
- * engagé ET réalisé — et l'impute d'un clic, là où le travail se fait : dans la structure du
- * chantier, pas dans le tableau de résultats.
+ * engagé ET réalisé — et l'impute d'un clic, là où le travail se fait : dans l'écran des
+ * budgets du chantier, pas dans le tableau de résultats.
  *
  * L'imputation reste corrigeable ensuite : on découvre en cours de chantier qu'une ressource
  * était du matériel et non de la main-d'œuvre. Seules les heures d'un mois arrêté résistent — les
@@ -77,7 +77,10 @@ export function PanneauVentilation({ chantierId }: { chantierId: string }) {
       }),
     onSuccess: () => {
       setErr(null);
-      for (const key of ['a-ventiler', 'chantier-analytical', 'chantier-results', 'execution-tree', 'chantier']) {
+      // Ranger une ressource déplace du budget d'un code à l'autre : le tableau des budgets et
+      // les listes de ripage en dépendent autant que le tableau de bord.
+      for (const key of ['a-ventiler', 'chantier-analytical', 'chantier-results', 'execution-tree',
+        'chantier', 'budgets', 'budgets-ressources']) {
         qc.invalidateQueries({ queryKey: [key] });
       }
     },
