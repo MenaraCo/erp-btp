@@ -127,9 +127,14 @@ export class AnalyticsService {
       // Mouvements de budget saisis (dotations, reprises, ripages) : ils déplacent la CIBLE, donc
       // ils font partie du budget objectif. Sans eux, un ripage laisserait l'écart au stade
       // inchangé — le budget aurait bougé à l'écran, jamais dans le calcul.
+      // Les RECETTES sont exclues : ce sont des produits, pas un budget de dépense. Les frais
+      // généraux saisis rejoignent, eux, les frais de chantier — ils pèsent bien sur le coût.
       const mouvementsBudget = await em.query(
-        `SELECT nature, SUM(montant)::numeric(16,2) AS montant
-           FROM chantier_budget_movement WHERE chantier_id = $1 GROUP BY nature`,
+        `SELECT CASE WHEN nature = 'frais_generaux' THEN 'site_overhead' ELSE nature END AS nature,
+                SUM(montant)::numeric(16,2) AS montant
+           FROM chantier_budget_movement
+          WHERE chantier_id = $1 AND nature <> 'produit'
+          GROUP BY 1`,
         [chantierId],
       );
 

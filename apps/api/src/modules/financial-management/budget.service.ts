@@ -33,6 +33,13 @@ export interface RipageBudget {
   motif: string;
 }
 
+interface LigneParCode {
+  code_id: string | null;
+  nature: string;
+  categorie: string;
+  montant: string;
+}
+
 interface RessourceRow {
   id: string;
   code: string;
@@ -66,93 +73,245 @@ export class BudgetService {
     private readonly plan: AnalyticalPlanService,
   ) {}
 
-  /** Tableau des budgets par code analytique : étude / mouvements / global / initial. */
+  /**
+   * Tableau des budgets : trois blocs (charges, frais généraux, produits) et deux résultats.
+   *
+   * La cohérence avec l'ÉTUDE DE PRIX est structurelle, pas déclarative : les charges viennent du
+   * déboursé de l'étude d'exécution, les frais généraux des lignes non vendables reprises du devis
+   * (FG + frais annexes), les produits du montant HT des marchés et de leurs avenants. Résultat
+   * net = vente − déboursé − FG = le BÉNÉFICE de la feuille de vente. Aucune saisie n'est requise
+   * pour que le chantier dise la même chose que le devis qui l'a vendu.
+   */
   async tableau(chantierId: string) {
     const tenantId = this.context.requireTenantId();
     await this.plan.ensurePlan(tenantId);
     const tree = await this.plan.getTree(tenantId);
+    const sections = await this.plan.sections(tenantId);
 
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertChantier(em, chantierId);
 
       const etude = await budgetEtude(em, chantierId, 'code');
-      const mouvements: Array<{ code_id: string | null; nature: string; montant: string }> =
-        await em.query(
-          `SELECT code_analytique_id AS code_id, nature, SUM(montant)::numeric(16,2) AS montant
-             FROM chantier_budget_movement WHERE chantier_id = $1
-            GROUP BY code_analytique_id, nature`,
-          [chantierId],
-        );
-      const initial: Array<{ code_id: string | null; nature: string; montant: string }> =
-        await em.query(
-          `SELECT code_analytique_id AS code_id, nature, SUM(montant)::numeric(16,2) AS montant
-             FROM chantier_budget_initial WHERE chantier_id = $1
-            GROUP BY code_analytique_id, nature`,
-          [chantierId],
-        );
+      const mouvements = await this.parCode(em, chantierId, 'chantier_budget_movement');
+      const initial = await this.parCode(em, chantierId, 'chantier_budget_initial');
       const fige = (
         await em.query(
           `SELECT MAX(fixed_at) AS fixed_at FROM chantier_budget_initial WHERE chantier_id = $1`,
           [chantierId],
         )
       )[0];
+      // Recettes de l'étude : ce que les marchés (devis gagnés) et leurs avenants ont vendu.
+      const [vente] = await em.query(
+        `SELECT COALESCE(SUM(m.total_ht), 0)::numeric(16,2) AS marches,
+                COALESCE((SELECT SUM(a.total_ht) FROM avenant a
+                           JOIN marche mm ON mm.id = a.marche_id
+                          WHERE mm.chantier_id = $1 AND a.status <> 'cancelled'), 0)::numeric(16,2) AS avenants
+           FROM marche m WHERE m.chantier_id = $1`,
+        [chantierId],
+      );
+      const venteMarches = new Decimal(vente?.marches ?? 0);
+      const venteAvenants = new Decimal(vente?.avenants ?? 0);
 
-      // Les frais de chantier vivent hors de l'axe analytique (lignes non vendables) : ils ont
-      // leur propre branche, comme dans le tableau de bord analytique.
-      const frais: Record<string, Decimal> = {
-        etude: etude.fraisChantier,
-        mouvements: new Decimal(0),
-        global: etude.fraisChantier,
-        initial: new Decimal(0),
-      };
+      /* ── Bloc CHARGES : l'axe analytique des 4 natures ── */
       const rows: MeasureRow[] = [];
       for (const [bucket, montant] of etude.parBucket) {
         rows.push(this.bucketRow(bucket, { etude: montant.toString(), global: montant.toString() }));
       }
-      for (const m of mouvements) {
-        const montant = new Decimal(m.montant ?? 0);
-        if (!m.code_id && m.nature === 'site_overhead') {
-          frais.mouvements = frais.mouvements.plus(montant);
-          frais.global = frais.global.plus(montant);
+      const fg = this.accumulateur();
+      const parCodeFg = new Map<string, Record<string, Decimal>>();
+      const parCodeProduit = new Map<string, Record<string, Decimal>>();
+      const produits = this.accumulateur();
+      // Frais de chantier repris du devis (lignes non vendables) NON ventilés : ils restent dans
+      // les frais généraux, sans poste. Une fois ventilés, ils suivent leur code — c'est la
+      // catégorie de ce code qui décide du bloc, exactement comme pour une saisie.
+      const fraisNonVentiles = this.accumulateur();
+      const categories = await this.categoriesParCode(em);
+
+      for (const [bucket, montant] of etude.fraisParBucket) {
+        if (bucket.startsWith(UNALLOC_PREFIX)) {
+          for (const m of ['etude', 'global'] as const) {
+            fraisNonVentiles[m] = fraisNonVentiles[m].plus(montant);
+            fg[m] = fg[m].plus(montant);
+          }
           continue;
         }
-        rows.push({
-          codeId: m.code_id,
-          nature: m.nature as MeasureRow['nature'],
-          metrics: { mouvements: m.montant, global: m.montant } as Metrics,
-        });
-      }
-      for (const i of initial) {
-        const montant = new Decimal(i.montant ?? 0);
-        if (!i.code_id && i.nature === 'site_overhead') {
-          frais.initial = frais.initial.plus(montant);
+        const categorie = categories.get(bucket) ?? 'charge';
+        if (categorie === 'charge') {
+          rows.push(this.bucketRow(bucket, { etude: montant.toString(), global: montant.toString() }));
           continue;
         }
-        rows.push({
-          codeId: i.code_id,
-          nature: i.nature as MeasureRow['nature'],
-          metrics: { initial: i.montant } as Metrics,
-        });
+        const cible = categorie === 'produit' ? parCodeProduit : parCodeFg;
+        const totalCible = categorie === 'produit' ? produits : fg;
+        const acc = cible.get(bucket) ?? this.accumulateur();
+        for (const m of ['etude', 'global'] as const) {
+          acc[m] = acc[m].plus(montant);
+          totalCible[m] = totalCible[m].plus(montant);
+        }
+        cible.set(bucket, acc);
       }
 
+      const ranger = (
+        ligne: LigneParCode,
+        metriques: Array<'mouvements' | 'global' | 'initial'>,
+      ) => {
+        const montant = new Decimal(ligne.montant ?? 0);
+        if (montant.isZero()) return;
+        if (ligne.categorie === 'produit') {
+          if (ligne.code_id) {
+            const acc = parCodeProduit.get(ligne.code_id) ?? this.accumulateur();
+            for (const m of metriques) acc[m] = acc[m].plus(montant);
+            parCodeProduit.set(ligne.code_id, acc);
+          }
+          for (const m of metriques) produits[m] = produits[m].plus(montant);
+          return;
+        }
+        if (ligne.categorie === 'frais_generaux' || (!ligne.code_id && ligne.nature === 'site_overhead')) {
+          if (ligne.code_id) {
+            const acc = parCodeFg.get(ligne.code_id) ?? this.accumulateur();
+            for (const m of metriques) acc[m] = acc[m].plus(montant);
+            parCodeFg.set(ligne.code_id, acc);
+          }
+          for (const m of metriques) fg[m] = fg[m].plus(montant);
+          return;
+        }
+        const metrics: Metrics = {};
+        for (const m of metriques) metrics[m] = ligne.montant;
+        rows.push({ codeId: ligne.code_id, nature: ligne.nature as MeasureRow['nature'], metrics });
+      };
+
+      for (const m of mouvements) ranger(m, ['mouvements', 'global']);
+      for (const i of initial) ranger(i, ['initial']);
+
       const aggregate = aggregateAnalytical(tree, rows, [...METRICS]);
-      const total: Record<string, string> = {};
+
+      /* ── Bloc PRODUITS : la vente des marchés en « étude », les saisies par-dessus ── */
+      const venteTotale = venteMarches.plus(venteAvenants);
+      produits.etude = produits.etude.plus(venteTotale);
+      produits.global = produits.global.plus(venteTotale);
+      // La recette du budget INITIAL n'est pas recalculée ici : elle a été figée avec le reste
+      // (voir fixerBudgetInitial), sinon un avenant signé plus tard réécrirait la référence.
+
+      const lignesFg = await this.lignesParCode(em, sections.fraisGeneraux.codes, parCodeFg);
+      const lignesProduits = await this.lignesParCode(em, sections.produits.codes, parCodeProduit);
+
+      /* ── Totaux et résultats ── */
+      const totalCharges: Record<string, string> = {};
+      const resultatBrut: Record<string, string> = {};
+      const resultatNet: Record<string, string> = {};
       for (const m of METRICS) {
-        total[m] = new Decimal(aggregate.total[m] ?? 0).plus(frais[m]).toString();
+        const charges = new Decimal(aggregate.total[m] ?? 0);
+        totalCharges[m] = charges.toString();
+        const brut = produits[m].minus(charges);
+        resultatBrut[m] = brut.toString();
+        resultatNet[m] = brut.minus(fg[m]).toString();
       }
 
       return {
         chantierId,
         fixedAt: fige?.fixed_at ?? null,
-        natures: aggregate.natures,
-        aVentiler: aggregate.aVentiler,
-        fraisChantier: {
-          label: 'Frais de chantier',
-          metrics: Object.fromEntries(METRICS.map((m) => [m, frais[m].toString()])),
+        charges: {
+          label: 'Charges',
+          natures: aggregate.natures,
+          aVentiler: aggregate.aVentiler,
+          total: totalCharges,
         },
-        total,
+        fraisGeneraux: {
+          label: 'Frais généraux',
+          // Repris du devis : la part FG de la feuille de vente, non saisie à la main.
+          fraisChantier: {
+            label: 'Frais du devis — non ventilés',
+            metrics: this.rendu(fraisNonVentiles),
+          },
+          lignes: lignesFg,
+          total: this.rendu(fg),
+        },
+        produits: {
+          label: 'Produits',
+          marches: {
+            label: 'Recettes travaux — marchés',
+            venteMarches: venteMarches.toFixed(2),
+            venteAvenants: venteAvenants.toFixed(2),
+            metrics: this.rendu({
+              etude: venteTotale,
+              mouvements: new Decimal(0),
+              global: venteTotale,
+              initial: new Decimal(0),
+            }),
+          },
+          lignes: lignesProduits,
+          total: this.rendu(produits),
+        },
+        resultatBrut,
+        resultatNet,
+        /** Total général des charges + frais généraux : la dépense autorisée, tous postes confondus. */
+        total: Object.fromEntries(
+          METRICS.map((m) => [m, new Decimal(totalCharges[m]).plus(fg[m]).toString()]),
+        ),
       };
     });
+  }
+
+  /** Catégorie de chaque code analytique : c'est elle qui décide du bloc où le montant tombe. */
+  private async categoriesParCode(em: EntityManager): Promise<Map<string, string>> {
+    const rows: Array<{ id: string; categorie: string }> = await em.query(
+      `SELECT id, COALESCE(categorie, 'charge') AS categorie FROM analytical_code`,
+    );
+    return new Map(rows.map((r) => [r.id, r.categorie]));
+  }
+
+  /**
+   * Lignes d'un bloc : les codes du plan pour cette catégorie, PLUS tout code effectivement
+   * mouvementé qui n'y figurerait pas (un frais du devis ventilé sur un poste d'une autre
+   * famille, par exemple). Un montant qui existe doit toujours porter un nom.
+   */
+  private async lignesParCode(
+    em: EntityManager,
+    codesDuPlan: Array<{ id: string; code: string; label: string }>,
+    valeurs: Map<string, Record<string, Decimal>>,
+  ) {
+    const connus = new Set(codesDuPlan.map((c) => c.id));
+    const manquants = [...valeurs.keys()].filter((id) => !connus.has(id));
+    const complement: Array<{ id: string; code: string; label: string }> = manquants.length
+      ? await em.query(
+        `SELECT id, code, label FROM analytical_code WHERE id = ANY($1::uuid[]) ORDER BY code`,
+        [manquants],
+      )
+      : [];
+    return [...codesDuPlan, ...complement]
+      .map((c) => ({ ...c, metrics: this.rendu(valeurs.get(c.id)) }))
+      .filter((l) => this.porteUneValeur(l.metrics))
+      .sort((a, b) => a.code.localeCompare(b.code, 'fr', { numeric: true }));
+  }
+
+  /** Mouvements (ou budget initial) agrégés par code, avec la catégorie du code. */
+  private parCode(
+    em: EntityManager,
+    chantierId: string,
+    table: 'chantier_budget_movement' | 'chantier_budget_initial',
+  ): Promise<LigneParCode[]> {
+    return em.query(
+      `SELECT b.code_analytique_id AS code_id, b.nature,
+              COALESCE(c.categorie,
+                       CASE WHEN b.nature = 'produit' THEN 'produit'
+                            WHEN b.nature = 'frais_generaux' THEN 'frais_generaux'
+                            ELSE 'charge' END) AS categorie,
+              SUM(b.montant)::numeric(16,2) AS montant
+         FROM ${table} b
+         LEFT JOIN analytical_code c ON c.id = b.code_analytique_id
+        WHERE b.chantier_id = $1
+        GROUP BY b.code_analytique_id, b.nature, c.categorie`,
+      [chantierId],
+    );
+  }
+
+  private accumulateur(): Record<string, Decimal> {
+    return Object.fromEntries(METRICS.map((m) => [m, new Decimal(0)]));
+  }
+  private rendu(acc?: Record<string, Decimal>): Record<string, string> {
+    return Object.fromEntries(METRICS.map((m) => [m, (acc?.[m] ?? new Decimal(0)).toString()]));
+  }
+  private porteUneValeur(metrics: Record<string, string>): boolean {
+    return METRICS.some((m) => !new Decimal(metrics[m] ?? 0).isZero());
   }
 
   /**
@@ -322,6 +481,24 @@ export class BudgetService {
       if (!etude.fraisChantier.isZero()) ajoute(null, 'site_overhead', etude.fraisChantier);
       for (const m of mouvements) ajoute(m.code_id, m.nature, new Decimal(m.montant ?? 0));
 
+      // La RECETTE fait partie de la photo : figer les seules charges donnerait une référence
+      // sans résultat, et un avenant signé plus tard réécrirait silencieusement la comparaison.
+      const [vente] = await em.query(
+        `SELECT COALESCE(SUM(m.total_ht), 0)::numeric(16,2) AS marches,
+                COALESCE((SELECT SUM(a.total_ht) FROM avenant a
+                           JOIN marche mm ON mm.id = a.marche_id
+                          WHERE mm.chantier_id = $1 AND a.status <> 'cancelled'), 0)::numeric(16,2) AS avenants
+           FROM marche m WHERE m.chantier_id = $1`,
+        [chantierId],
+      );
+      const venteTotale = new Decimal(vente?.marches ?? 0).plus(vente?.avenants ?? 0);
+      if (!venteTotale.isZero()) {
+        const [codeRecette] = await em.query(
+          `SELECT id FROM analytical_code WHERE categorie = 'produit' ORDER BY code LIMIT 1`,
+        );
+        ajoute(codeRecette?.id ?? null, 'produit', venteTotale);
+      }
+
       await em.query(`DELETE FROM chantier_budget_initial WHERE chantier_id = $1`, [chantierId]);
       for (const e of cumul.values()) {
         if (e.montant.isZero()) continue;
@@ -438,7 +615,10 @@ export class BudgetService {
           'Cette ressource n’a pas de code analytique : ventilez-la avant de riper son budget.',
         );
       }
-      return { codeId, ressourceId: r.id, nature: r.nature ?? 'material' };
+      // Le code choisi peut être un poste de FG ou de recette : sa catégorie l'emporte sur la
+      // nature de la ressource, sinon le mouvement se rangerait du mauvais côté du résultat.
+      const natures = await this.naturesParCode(em);
+      return { codeId, ressourceId: r.id, nature: natures.get(codeId) ?? r.nature ?? 'material' };
     }
     if (!codeAnalytiqueId) {
       throw new BadRequestException('Indiquez une ressource ou un code analytique.');
@@ -449,15 +629,22 @@ export class BudgetService {
     return { codeId: codeAnalytiqueId, ressourceId: null, nature: natures.get(codeAnalytiqueId) ?? 'material' };
   }
 
-  /** Nature portée par la FAMILLE du code (repli sur le lot), comme le plan analytique. */
+  /**
+   * Nature d'un mouvement selon son code analytique.
+   *
+   * La CATÉGORIE prime sur la nature du plan : un poste de recette rangé dans une famille de
+   * matériaux reste une recette. Sans cette priorité, un compte prorata saisi en négatif viendrait
+   * diminuer le budget MATÉRIAUX du chantier — le contrôle de gestion mentirait de bout en bout.
+   */
   private async naturesParCode(em: EntityManager): Promise<Map<string, string>> {
-    const rows: Array<{ id: string; nature: string }> = await em.query(
-      `SELECT c.id, COALESCE(f.nature, l.nature) AS nature
+    const rows: Array<{ id: string; nature: string; categorie: string }> = await em.query(
+      `SELECT c.id, COALESCE(c.nature, f.nature, l.nature, 'material') AS nature,
+              COALESCE(c.categorie, 'charge') AS categorie
          FROM analytical_code c
-         JOIN analytical_famille f ON f.id = c.famille_id
-         JOIN analytical_lot l ON l.id = f.lot_id`,
+         LEFT JOIN analytical_famille f ON f.id = c.famille_id
+         LEFT JOIN analytical_lot l ON l.id = f.lot_id`,
     );
-    return new Map(rows.map((r) => [r.id, r.nature]));
+    return new Map(rows.map((r) => [r.id, natureDeCategorie(r.categorie, r.nature)]));
   }
 
   private bucketRow(bucket: string, metrics: Metrics): MeasureRow {
@@ -471,6 +658,13 @@ export class BudgetService {
     const c = await em.query(`SELECT id FROM chantier WHERE id = $1`, [chantierId]);
     if (c.length === 0) throw new NotFoundException(`Chantier "${chantierId}" introuvable.`);
   }
+}
+
+/** Une catégorie hors charges impose sa propre « nature » de mouvement. */
+function natureDeCategorie(categorie: string, natureDuPlan: string): string {
+  if (categorie === 'produit') return 'produit';
+  if (categorie === 'frais_generaux') return 'frais_generaux';
+  return natureDuPlan;
 }
 
 interface Cible {

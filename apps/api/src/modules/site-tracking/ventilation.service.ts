@@ -117,8 +117,21 @@ export class VentilationService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
       if (codeAnalytiqueId) {
-        const code = await em.query(`SELECT id FROM analytical_code WHERE id = $1`, [codeAnalytiqueId]);
+        const code = await em.query(
+          `SELECT id, code, label, COALESCE(categorie, 'charge') AS categorie
+             FROM analytical_code WHERE id = $1`,
+          [codeAnalytiqueId],
+        );
         if (code.length === 0) throw new NotFoundException('Code analytique introuvable.');
+        // Tout ce qui se ventile ici est une DÉPENSE (ressource, commande, facture, heures,
+        // matériel) : un poste de recette la ferait sortir des charges du chantier.
+        if (code[0].categorie !== 'charge') {
+          throw new BadRequestException(
+            `Le code « ${code[0].code} — ${code[0].label} » est un poste de ${
+              code[0].categorie === 'produit' ? 'produits' : 'frais généraux'
+            } : une dépense s'impute sur un poste de charges.`,
+          );
+        }
       }
 
       switch (type) {

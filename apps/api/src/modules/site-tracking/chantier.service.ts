@@ -925,9 +925,22 @@ export class ChantierService {
         throw new NotFoundException(`Ressource de nomenclature introuvable (${resourceId}).`);
       }
       if (codeAnalytiqueId) {
-        const code = await em.query(`SELECT id FROM analytical_code WHERE id = $1`, [codeAnalytiqueId]);
+        const code = await em.query(
+          `SELECT id, code, label, COALESCE(categorie, 'charge') AS categorie
+             FROM analytical_code WHERE id = $1`,
+          [codeAnalytiqueId],
+        );
         if (code.length === 0) {
           throw new NotFoundException(`Code analytique introuvable (${codeAnalytiqueId}).`);
+        }
+        // Une ressource est une DÉPENSE : l'imputer sur un poste de recette ou de frais généraux
+        // ferait disparaître son budget du bloc des charges — et le résultat du chantier avec.
+        if (code[0].categorie !== 'charge') {
+          throw new BadRequestException(
+            `Le code « ${code[0].code} — ${code[0].label} » est un poste de ${
+              code[0].categorie === 'produit' ? 'produits' : 'frais généraux'
+            } : une ressource s'impute sur un poste de charges.`,
+          );
         }
       }
       await em.query(

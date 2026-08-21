@@ -12,6 +12,8 @@ import {
   ANALYTICAL_NATURES,
   ANALYTICAL_PLAN_TEMPLATE,
   AnalyticalNature,
+  CATEGORIE_LABELS,
+  CategorieAnalytique,
   NATURE_LABELS,
 } from './analytical-plan.config';
 
@@ -88,9 +90,10 @@ export class AnalyticalPlanService {
           );
           for (const code of fam.codes) {
             await em.query(
-              `INSERT INTO analytical_code (tenant_id, famille_id, code, label)
-                 VALUES ($1, $2, $3, $4)`,
-              [tenantId, famRow.id, code.code, code.label],
+              `INSERT INTO analytical_code (tenant_id, famille_id, code, label, nature, categorie)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+              [tenantId, famRow.id, code.code, code.label, famNature,
+               code.categorie ?? lot.categorie ?? 'charge'],
             );
           }
         }
@@ -107,8 +110,12 @@ export class AnalyticalPlanService {
       const familles: FamilleRow[] = await em.query(
         `SELECT id, lot_id, nature, code, label FROM analytical_famille ORDER BY code`,
       );
+      // L'arbre des natures décrit la DÉPENSE : les postes de frais généraux et de produits ont
+      // leurs propres sections (voir `sections()`), sinon une recette se retrouverait comptée
+      // comme un coût de matériaux.
       const codes: CodeRow[] = await em.query(
-        `SELECT id, famille_id, code, label FROM analytical_code ORDER BY code`,
+        `SELECT id, famille_id, code, label FROM analytical_code
+          WHERE categorie = 'charge' ORDER BY code`,
       );
       const famByLot = new Map<string, FamilleRow[]>();
       for (const f of familles) {
@@ -152,6 +159,33 @@ export class AnalyticalPlanService {
             })),
           })),
       }));
+    });
+  }
+
+  /**
+   * Les deux sections HORS exploitation : frais généraux et produits, à plat.
+   *
+   * Elles ne se dépliant pas par nature (une recette n'est ni du matériau ni de la main-d'œuvre),
+   * un simple listing de codes suffit — c'est d'ailleurs ainsi qu'on les lit dans un compte de
+   * résultat de chantier.
+   */
+  async sections(tenantId = this.context.requireTenantId()) {
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const rows: Array<{
+        id: string; code: string; label: string; categorie: CategorieAnalytique; famille: string | null;
+      }> = await em.query(
+        `SELECT c.id, c.code, c.label, c.categorie, f.label AS famille
+           FROM analytical_code c
+           LEFT JOIN analytical_famille f ON f.id = c.famille_id
+          WHERE c.categorie <> 'charge'
+          ORDER BY c.categorie, c.code`,
+      );
+      const par = (categorie: CategorieAnalytique) => ({
+        categorie,
+        label: CATEGORIE_LABELS[categorie],
+        codes: rows.filter((r) => r.categorie === categorie),
+      });
+      return { fraisGeneraux: par('frais_generaux'), produits: par('produit') };
     });
   }
 

@@ -86,15 +86,37 @@ export class AnalyticalResultsService {
     siteOverhead: Record<string, Decimal>,
   ): Promise<void> {
     const etude = await budgetEtude(em, chantierId, 'code');
-    siteOverhead.budgetObjectif = siteOverhead.budgetObjectif.plus(etude.fraisChantier);
     for (const [bucket, montant] of etude.parBucket) {
       rows.push(this.bucketToRow(bucket, { budgetObjectif: montant.toString() }));
     }
+    // Frais de chantier repris du devis : tant qu'ils ne sont pas ventilés, ils restent dans leur
+    // branche. VENTILÉS, ils rejoignent leur code analytique — c'est tout l'intérêt de les avoir
+    // ventilés, et sans cela le conducteur ne voit jamais l'effet de son classement.
+    const categories: Array<{ id: string; categorie: string }> = await em.query(
+      `SELECT id, COALESCE(categorie, 'charge') AS categorie FROM analytical_code`,
+    );
+    const parCategorie = new Map(categories.map((c) => [c.id, c.categorie]));
+    for (const [bucket, montant] of etude.fraisParBucket) {
+      const categorie = bucket.startsWith(UNALLOC_PREFIX) ? null : parCategorie.get(bucket) ?? 'charge';
+      // Un poste de PRODUITS n'est pas une charge : il n'a rien à faire dans ce tableau de coûts.
+      if (categorie === 'produit') continue;
+      if (categorie === 'charge') {
+        rows.push(this.bucketToRow(bucket, { budgetObjectif: montant.toString() }));
+      } else {
+        siteOverhead.budgetObjectif = siteOverhead.budgetObjectif.plus(montant);
+      }
+    }
 
+    // Hors recettes (ce sont des produits) ; les frais généraux saisis rejoignent la branche
+    // « frais de chantier », qui est déjà celle des lignes non vendables reprises du devis.
     const mouvements = await em.query(
-      `SELECT code_analytique_id AS code_id, nature, SUM(montant)::numeric(16,2) AS montant
-         FROM chantier_budget_movement WHERE chantier_id = $1
-        GROUP BY code_analytique_id, nature`,
+      `SELECT b.code_analytique_id AS code_id,
+              CASE WHEN b.nature = 'frais_generaux' THEN 'site_overhead' ELSE b.nature END AS nature,
+              SUM(b.montant)::numeric(16,2) AS montant
+         FROM chantier_budget_movement b
+         LEFT JOIN analytical_code c ON c.id = b.code_analytique_id
+        WHERE b.chantier_id = $1 AND COALESCE(c.categorie, 'charge') <> 'produit'
+        GROUP BY 1, 2`,
       [chantierId],
     );
     for (const m of mouvements) {

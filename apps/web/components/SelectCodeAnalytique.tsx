@@ -8,6 +8,8 @@ export interface CodeAnalytique {
   id: string;
   code: string;
   label: string;
+  /** charge (défaut) | frais_generaux | produit. */
+  categorie?: string;
 }
 
 /**
@@ -29,12 +31,19 @@ export function SelectCodeAnalytique({
   onChange,
   obligatoire = false,
   lecture = false,
+  categories = ['charge'],
 }: {
   valeur: string | null;
   codes: CodeAnalytique[];
   onChange?: (id: string | null) => void;
   obligatoire?: boolean;
   lecture?: boolean;
+  /**
+   * Catégories proposées. Par défaut les seules CHARGES : partout où l'on impute une dépense
+   * (ressource, commande, facture, heures, matériel), proposer un poste de recette n'offre qu'une
+   * façon de fausser le résultat. Le budget, lui, ouvre les trois.
+   */
+  categories?: string[];
 }) {
   const [ouvert, setOuvert] = useState(false);
   const [filtre, setFiltre] = useState('');
@@ -76,11 +85,14 @@ export function SelectCodeAnalytique({
     };
   }, [ouvert]);
 
+  // Le libellé du code déjà choisi se lit dans la liste COMPLÈTE : une imputation historique sur
+  // un poste devenu hors catégorie doit rester lisible, même si on ne la propose plus.
   const choisi = codes.find((c) => c.id === valeur) ?? null;
   const manquant = obligatoire && !choisi;
+  const proposables = codes.filter((c) => categories.includes(c.categorie ?? 'charge'));
   const visibles = filtre
-    ? codes.filter((c) => `${c.code} ${c.label}`.toLowerCase().includes(filtre.toLowerCase()))
-    : codes;
+    ? proposables.filter((c) => `${c.code} ${c.label}`.toLowerCase().includes(filtre.toLowerCase()))
+    : proposables;
 
   if (lecture) {
     return choisi

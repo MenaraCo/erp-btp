@@ -15,7 +15,14 @@ import { normaliserLibelle } from '../../core/common/normalisation';
 export interface UnitInput { abrev: string; label: string; sortOrder?: number }
 export interface LotInput { code: string; label: string }
 export interface FamilleInput { lotId: string; code: string; label: string; nature?: string }
-export interface CodeInput { familleId: string; code: string; label: string; nature?: string }
+export interface CodeInput {
+  familleId: string;
+  code: string;
+  label: string;
+  nature?: string;
+  /** charge | frais_generaux | produit — typage à la manière des A.R.C. (charges ou produits). */
+  categorie?: string;
+}
 
 export interface CompanyInfoInput {
   name?: string;
@@ -241,7 +248,7 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT c.id, c.code, c.label, c.famille_id, c.nature,
+        `SELECT c.id, c.code, c.label, c.famille_id, c.nature, c.categorie,
                 f.code AS famille_code, f.label AS famille_label,
                 l.code AS lot_code
          FROM analytical_code c
@@ -258,11 +265,13 @@ export class ParamsService {
       await this.assertPasDeDoublon(em, 'analytical_code', 'code', input.code, input.label);
       // Nature par défaut = celle de la famille parente si non fournie
       const rows = await em.query(
-        `INSERT INTO analytical_code (tenant_id, famille_id, code, label, nature)
+        `INSERT INTO analytical_code (tenant_id, famille_id, code, label, nature, categorie)
          VALUES ($1,$2,$3,$4,
-                 COALESCE($5, (SELECT nature FROM analytical_famille WHERE id = $2), 'material'))
-         RETURNING id, code, label, famille_id, nature`,
-        [tenantId, input.familleId, input.code, input.label, input.nature ?? null],
+                 COALESCE($5, (SELECT nature FROM analytical_famille WHERE id = $2), 'material'),
+                 COALESCE($6, 'charge'))
+         RETURNING id, code, label, famille_id, nature, categorie`,
+        [tenantId, input.familleId, input.code, input.label, input.nature ?? null,
+         input.categorie ?? null],
       );
       return rows[0];
     });
@@ -278,11 +287,16 @@ export class ParamsService {
            famille_id = COALESCE($2, famille_id),
            code       = COALESCE($3, code),
            label      = COALESCE($4, label),
-           nature     = COALESCE($5, nature)
+           nature     = COALESCE($5, nature),
+           categorie  = COALESCE($6, categorie)
          WHERE id = $1`,
-        [id, input.familleId ?? null, input.code ?? null, input.label ?? null, input.nature ?? null],
+        [id, input.familleId ?? null, input.code ?? null, input.label ?? null, input.nature ?? null,
+         input.categorie ?? null],
       );
-      return (await em.query(`SELECT id, code, label, famille_id, nature FROM analytical_code WHERE id = $1`, [id]))[0];
+      return (await em.query(
+        `SELECT id, code, label, famille_id, nature, categorie FROM analytical_code WHERE id = $1`,
+        [id],
+      ))[0];
     });
   }
 

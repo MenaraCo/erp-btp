@@ -67,7 +67,7 @@ function Row({ children, style }: { children: React.ReactNode; style?: React.CSS
 interface Unit { id: string; abrev: string; label: string; sort_order: number }
 interface Lot { id: string; code: string; label: string }
 interface Famille { id: string; code: string; label: string; lot_id: string; nature: string; lot_code?: string; lot_label?: string }
-interface Code { id: string; code: string; label: string; famille_id: string; nature: string; famille_code?: string; famille_label?: string }
+interface Code { id: string; code: string; label: string; famille_id: string; nature: string; categorie?: string; famille_code?: string; famille_label?: string }
 
 const NAT_OPTS = [
   { v: 'material', l: 'Matériaux' },
@@ -76,6 +76,18 @@ const NAT_OPTS = [
   { v: 'subcontract', l: 'Sous-traitance' },
 ];
 const natLabel = (v: string) => NAT_OPTS.find((n) => n.v === v)?.l ?? v;
+
+/**
+ * Catégorie d'un code analytique — l'équivalent de l'A.R.C. typée charges ou produits.
+ * C'est elle qui décide du bloc dans lequel le poste tombe au budget du chantier, et donc de la
+ * possibilité d'y lire un résultat brut et un résultat net.
+ */
+const CAT_OPTS = [
+  { v: 'charge', l: 'Charge' },
+  { v: 'frais_generaux', l: 'Frais généraux' },
+  { v: 'produit', l: 'Produit (recette)' },
+];
+const catLabel = (v?: string) => CAT_OPTS.find((c) => c.v === (v ?? 'charge'))?.l ?? 'Charge';
 interface Company { id: string; code: string; name: string; has_logo?: boolean; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
 interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; devis_numero_annee?: boolean; devis_numero_digits?: number; mail_devis_objet?: string; mail_devis_corps?: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
@@ -672,8 +684,10 @@ function TabCodes({ token }: { token: string }) {
     queryFn: () => api<Famille[]>('/params/familles'),
     enabled: Boolean(token),
   });
-  const [nf, setNf] = useState({ familleId: '', code: '', label: '', nature: 'material' });
-  const [editing, setEditing] = useState<{ id: string; familleId: string; code: string; label: string; nature: string } | null>(null);
+  const [nf, setNf] = useState({ familleId: '', code: '', label: '', nature: 'material', categorie: 'charge' });
+  const [editing, setEditing] = useState<
+    { id: string; familleId: string; code: string; label: string; nature: string; categorie: string } | null
+  >(null);
   const { selectedIds, toggle, toggleAll, clear } = useSelection();
 
   const inv = () => qc.invalidateQueries({ queryKey: ['params-codes'] });
@@ -685,12 +699,12 @@ function TabCodes({ token }: { token: string }) {
   };
 
   const create = useMutation({
-    mutationFn: () => api('/params/codes', { method: 'POST', body: { familleId: nf.familleId, code: nf.code, label: nf.label, nature: nf.nature } }),
+    mutationFn: () => api('/params/codes', { method: 'POST', body: { familleId: nf.familleId, code: nf.code, label: nf.label, nature: nf.nature, categorie: nf.categorie } }),
     onError: erreur.onError,
-    onSuccess: () => { erreur.onOk(); inv(); setNf({ familleId: '', code: '', label: '', nature: 'material' }); },
+    onSuccess: () => { erreur.onOk(); inv(); setNf({ familleId: '', code: '', label: '', nature: 'material', categorie: 'charge' }); },
   });
   const update = useMutation({
-    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/codes/${e.id}`, { method: 'PATCH', body: { familleId: e.familleId || null, code: e.code, label: e.label, nature: e.nature } }),
+    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/codes/${e.id}`, { method: 'PATCH', body: { familleId: e.familleId || null, code: e.code, label: e.label, nature: e.nature, categorie: e.categorie } }),
     onError: erreur.onError,
     onSuccess: () => { erreur.onOk(); inv(); setEditing(null); },
   });
@@ -736,6 +750,13 @@ function TabCodes({ token }: { token: string }) {
               {NAT_OPTS.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
             </select>
           </Field>
+          {/* Charges, frais généraux ou produits : c'est ce typage qui permet au chantier
+              d'afficher un résultat, et pas seulement une pile de dépenses. */}
+          <Field label="Catégorie">
+            <select className="input" style={{ width: 160 }} value={nf.categorie} onChange={(e) => setNf({ ...nf, categorie: e.target.value })}>
+              {CAT_OPTS.map((c) => <option key={c.v} value={c.v}>{c.l}</option>)}
+            </select>
+          </Field>
           <Field label="Code"><input className="input" style={{ width: 110 }} placeholder="Ex: 280" value={nf.code} onChange={(e) => setNf({ ...nf, code: e.target.value })} /></Field>
           <Field label="Désignation"><input className="input" style={{ width: 240 }} placeholder="Ex: Colle carrelage" value={nf.label} onChange={(e) => setNf({ ...nf, label: e.target.value })} /></Field>
           <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => create.mutate()} disabled={!nf.familleId || !nf.code || !nf.label}>+ Ajouter</button>
@@ -759,13 +780,13 @@ function TabCodes({ token }: { token: string }) {
           </BulkBar>
         )}
         <RefTable
-          rows={codes.map((c) => [c.code, c.label, c.famille_code ? `${c.famille_code} — ${c.famille_label}` : '⚠ non rattaché', natLabel(c.nature)])}
-          headers={['Code', 'Désignation', 'Famille', 'Nature']}
+          rows={codes.map((c) => [c.code, c.label, c.famille_code ? `${c.famille_code} — ${c.famille_label}` : '⚠ non rattaché', natLabel(c.nature), catLabel(c.categorie)])}
+          headers={['Code', 'Désignation', 'Famille', 'Nature', 'Catégorie']}
           ids={codes.map((c) => c.id)}
           selectedIds={selectedIds}
           onToggle={toggle}
           onToggleAll={() => toggleAll(codes.map((c) => c.id))}
-          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id || '', code: codes[i].code, label: codes[i].label, nature: codes[i].nature })}
+          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id || '', code: codes[i].code, label: codes[i].label, nature: codes[i].nature, categorie: codes[i].categorie ?? 'charge' })}
           onDelete={(i) => { if (confirm('Supprimer ce code analytique ?')) del.mutate(codes[i].id); }}
         />
       </Card>
@@ -781,6 +802,11 @@ function TabCodes({ token }: { token: string }) {
           <Field label="Nature">
             <select className="input" value={editing.nature} onChange={(e) => setEditing({ ...editing, nature: e.target.value })}>
               {NAT_OPTS.map((n) => <option key={n.v} value={n.v}>{n.l}</option>)}
+            </select>
+          </Field>
+          <Field label="Catégorie">
+            <select className="input" value={editing.categorie} onChange={(e) => setEditing({ ...editing, categorie: e.target.value })}>
+              {CAT_OPTS.map((c) => <option key={c.v} value={c.v}>{c.l}</option>)}
             </select>
           </Field>
           <Field label="Code"><input className="input" value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value })} /></Field>

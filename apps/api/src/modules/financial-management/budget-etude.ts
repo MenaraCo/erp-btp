@@ -12,8 +12,16 @@ export type CleBudget = 'code' | 'ressource';
 export interface BudgetEtude {
   /** bucket → montant. Bucket = id du code analytique (ou de la ressource), sinon `__unalloc__:nature`. */
   parBucket: Map<string, Decimal>;
-  /** Lignes non vendables : frais de chantier, hors axe analytique. */
+  /** Total des lignes non vendables (frais de chantier repris du devis). */
   fraisChantier: Decimal;
+  /**
+   * Le même total, mais DÉTAILLÉ par bucket.
+   *
+   * Un frais annexe (compte prorata, heures d'insertion…) se ventile comme n'importe quelle
+   * dépense : une fois son code analytique renseigné, il doit apparaître sous ce code. L'agréger
+   * en un seul bloc anonyme faisait disparaître la ventilation que le conducteur venait de faire.
+   */
+  fraisParBucket: Map<string, Decimal>;
 }
 
 interface CompRow {
@@ -88,20 +96,24 @@ export async function budgetEtude(
 
   const breakdown = computeBucketBreakdownMap(map);
   const parBucket = new Map<string, Decimal>();
+  const fraisParBucket = new Map<string, Decimal>();
   let fraisChantier = new Decimal(0);
+
+  const cumule = (cible: Map<string, Decimal>, bucket: string, montant: Decimal) => {
+    cible.set(bucket, (cible.get(bucket) ?? new Decimal(0)).plus(montant));
+  };
 
   for (const l of lines) {
     if (l.parent_line_id) continue; // le budget se lit sur les ouvrages de tête
     const unit = breakdown.get(l.id) ?? {};
     const qty = new Decimal(l.quantite_objectif ?? 0);
-    if (!l.vendable) {
-      for (const value of Object.values(unit)) fraisChantier = fraisChantier.plus(value.times(qty));
-      continue;
-    }
+    const cible = l.vendable ? parBucket : fraisParBucket;
     for (const [bucket, value] of Object.entries(unit)) {
-      parBucket.set(bucket, (parBucket.get(bucket) ?? new Decimal(0)).plus(value.times(qty)));
+      const montant = value.times(qty);
+      cumule(cible, bucket, montant);
+      if (!l.vendable) fraisChantier = fraisChantier.plus(montant);
     }
   }
 
-  return { parBucket, fraisChantier };
+  return { parBucket, fraisChantier, fraisParBucket };
 }

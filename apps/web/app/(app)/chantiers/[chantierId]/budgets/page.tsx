@@ -19,11 +19,29 @@ interface NoeudCode { id: string; code: string; label: string; metrics: Metrique
 interface NoeudFamille { id: string; code: string; label: string; metrics: Metriques; codes: NoeudCode[] }
 interface NoeudLot { id: string; code: string; label: string; metrics: Metriques; familles: NoeudFamille[] }
 interface NoeudNature { nature: string; label: string; metrics: Metriques; lots: NoeudLot[] }
+interface LigneCode { id: string; code: string; label: string; famille?: string | null; metrics: Metriques }
 interface TableauBudgets {
   fixedAt: string | null;
-  natures: NoeudNature[];
-  aVentiler: { code: string; label: string; metrics: Metriques };
-  fraisChantier: { label: string; metrics: Metriques };
+  charges: {
+    label: string;
+    natures: NoeudNature[];
+    aVentiler: { code: string; label: string; metrics: Metriques };
+    total: Metriques;
+  };
+  fraisGeneraux: {
+    label: string;
+    fraisChantier: { label: string; metrics: Metriques };
+    lignes: LigneCode[];
+    total: Metriques;
+  };
+  produits: {
+    label: string;
+    marches: { label: string; venteMarches: string; venteAvenants: string; metrics: Metriques };
+    lignes: LigneCode[];
+    total: Metriques;
+  };
+  resultatBrut: Metriques;
+  resultatNet: Metriques;
   total: Metriques;
 }
 interface RessourceBudget {
@@ -79,6 +97,7 @@ export default function BudgetsPage() {
   const [saisie, setSaisie] = useState(false);
   const [ripage, setRipage] = useState(false);
   const [figer, setFiger] = useState(false);
+  const [vue, setVue] = useState<'plat' | 'axe'>('plat');
 
   const chantier = useQuery({
     queryKey: ['chantier', chantierId],
@@ -138,8 +157,13 @@ export default function BudgetsPage() {
     onSuccess: () => { setErr(null); rafraichir(); }, onError: onErr,
   });
 
-  const t = budgets.data?.total;
+  const d = budgets.data;
+  const t = d?.total;
   const ecartInitial = t ? Number(t.global) - Number(t.initial) : 0;
+  const resultatNet = d ? Number(d.resultatNet.global) : 0;
+  // Aucun poste typé « produit » : le chantier ne peut afficher aucun résultat. On le dit, et on
+  // dit où le corriger — sinon le bloc reste vide sans qu'on sache pourquoi.
+  const sansProduits = Boolean(d) && Number(d!.produits.total.global) === 0;
 
   return (
     <div>
@@ -150,10 +174,11 @@ export default function BudgetsPage() {
         <div style={{ flex: 1, minWidth: 320 }}>
           <h1 style={{ marginBottom: 4 }}>Budgets du chantier</h1>
           <p className="muted" style={{ marginTop: 0, maxWidth: 780 }}>
-            L'enveloppe par code analytique. Le <strong>budget d'étude</strong> est calculé par l'étude
-            d'exécution ; les <strong>mouvements</strong> sont ce que vous dotez, reprenez ou <strong>ripez</strong> d'une
-            ressource à l'autre ; leur somme fait le <strong>budget global</strong>, la cible que le contrôle de
-            gestion compare à l'engagé et au réalisé. Le <strong>budget initial</strong> est la photo figée au départ.
+            Le compte de résultat du chantier, poste par poste : <strong>charges</strong> (calculées par l'étude
+            d'exécution), <strong>frais généraux</strong> (repris de la feuille de vente du devis) et
+            <strong> produits</strong> (le montant des marchés, moins le prorata et la retenue de garantie).
+            Les <strong>mouvements</strong> sont ce que vous dotez, reprenez ou <strong>ripez</strong> ; le
+            <strong> budget initial</strong> est la photo figée au départ.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -178,32 +203,54 @@ export default function BudgetsPage() {
         </p>
       )}
 
-      {t && (
+      {d && t && (
         <div className="card-grid" style={{ marginTop: 12 }}>
-          <CarteKpi titre="Budget d'étude" valeur={euro(t.etude)} icone={Wallet}
-            detail="Calculé par l'étude d'exécution" />
-          <CarteKpi titre="Mouvements" valeur={euro(t.mouvements)} icone={ArrowLeftRight}
-            detail="Dotations, reprises et ripages" />
-          <CarteKpi titre="Budget global" valeur={euro(t.global)}
-            detail="La cible du moment (étude + mouvements)" />
+          <CarteKpi titre="Produits" valeur={euro(d.produits.total.global)} icone={Wallet}
+            detail={`Marchés ${euro(d.produits.marches.venteMarches)}${
+              Number(d.produits.marches.venteAvenants) !== 0
+                ? ` + avenants ${euro(d.produits.marches.venteAvenants)}` : ''}`} />
+          <CarteKpi titre="Charges" valeur={euro(d.charges.total.global)}
+            detail={`dont mouvements ${euro(d.charges.total.mouvements)}`} />
+          <CarteKpi titre="Frais généraux" valeur={euro(d.fraisGeneraux.total.global)}
+            detail="Repris du devis + saisies" />
           <CarteKpi
-            titre="Budget initial"
-            valeur={Number(t.initial) === 0 ? '— non figé' : euro(t.initial)}
-            ton={ecartInitial < 0 ? 'danger' : undefined}
-            detail={
-              budgets.data?.fixedAt
-                ? `Figé le ${dt(budgets.data.fixedAt)} · écart ${euro(ecartInitial)}`
-                : 'À figer une fois l’étude arrêtée'
-            }
+            titre="Résultat net"
+            valeur={euro(d.resultatNet.global)}
+            ton={resultatNet < 0 ? 'danger' : 'succes'}
+            detail={`Brut ${euro(d.resultatBrut.global)} · ${
+              d.fixedAt ? `initial figé le ${dt(d.fixedAt)}, écart ${euro(ecartInitial)}` : 'budget initial non figé'
+            }`}
           />
         </div>
       )}
 
-      {budgets.data && (
+      {d && (
         <div className="card" style={{ marginTop: 16 }}>
-          <h2 style={{ marginTop: 0 }}>Budgets par code analytique</h2>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="grid" style={{ margin: 0, minWidth: 720 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <h2 style={{ marginTop: 0, marginBottom: 0 }}>Budgets par code analytique</h2>
+            {/* Deux lectures du même tableau : à plat pour la synthèse (une ligne par poste,
+                comme un compte de résultat), dépliable quand il faut savoir d'où vient un écart. */}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+              <Bouton variante={vue === 'plat' ? 'primaire' : 'secondaire'} onClick={() => setVue('plat')}>
+                Vue à plat
+              </Bouton>
+              <Bouton variante={vue === 'axe' ? 'primaire' : 'secondaire'} onClick={() => setVue('axe')}>
+                Vue par axe analytique
+              </Bouton>
+            </div>
+          </div>
+
+          {sansProduits && (
+            <Alerte ton="info">
+              Aucun poste n'est typé « Produit » : sans recette en face des dépenses, le résultat reste
+              théorique. Typez vos codes (recettes, prorata, retenue de garantie) dans{' '}
+              <Link href="/chantiers/parametres" className="link">Paramètres du plan analytique</Link>, onglet
+              « Codes analytiques » : la colonne <strong>Catégorie</strong> les range en charge, frais général ou produit.
+            </Alerte>
+          )}
+
+          <div style={{ overflowX: 'auto', marginTop: 10 }}>
+            <table className="grid" style={{ margin: 0, minWidth: 760 }}>
               <thead>
                 <tr>
                   <th>Poste</th>
@@ -215,29 +262,83 @@ export default function BudgetsPage() {
                 </tr>
               </thead>
               <tbody>
-                {budgets.data.natures.filter((n) => porteUneValeur(n.metrics)).map((n) => (
-                  <LignesNature key={n.nature} nature={n} />
-                ))}
-                {porteUneValeur(budgets.data.aVentiler.metrics) && (
+                {/* ─── Charges ─── */}
+                <TitreSection titre="Charges" />
+                {vue === 'axe'
+                  ? d.charges.natures.filter((n) => porteUneValeur(n.metrics)).map((n) => (
+                    <LignesNature key={n.nature} nature={n} />
+                  ))
+                  : codesAPlat(d.charges.natures).map((c) => (
+                    <tr key={c.id}>
+                      <td style={{ paddingLeft: 20 }}>
+                        <span className="code-cell">{c.code}</span> {c.label}
+                      </td>
+                      <Cellules m={c.metrics} />
+                    </tr>
+                  ))}
+                {porteUneValeur(d.charges.aVentiler.metrics) && (
                   <tr>
-                    <td>
-                      <strong>
-                        <span className="code-cell">{budgets.data.aVentiler.code}</span>{' '}
-                        {budgets.data.aVentiler.label}
-                      </strong>
+                    <td style={{ paddingLeft: 20 }}>
+                      <span className="code-cell">{d.charges.aVentiler.code}</span> {d.charges.aVentiler.label}
                     </td>
-                    <Cellules m={budgets.data.aVentiler.metrics} />
+                    <Cellules m={d.charges.aVentiler.metrics} />
                   </tr>
                 )}
-                {porteUneValeur(budgets.data.fraisChantier.metrics) && (
+                <LigneTotal titre="Total charges" m={d.charges.total} />
+
+                {/* ─── Frais généraux ─── */}
+                <TitreSection titre="Frais généraux" />
+                {porteUneValeur(d.fraisGeneraux.fraisChantier.metrics) && (
                   <tr>
-                    <td><strong>{budgets.data.fraisChantier.label}</strong></td>
-                    <Cellules m={budgets.data.fraisChantier.metrics} />
+                    <td style={{ paddingLeft: 20 }}>{d.fraisGeneraux.fraisChantier.label}</td>
+                    <Cellules m={d.fraisGeneraux.fraisChantier.metrics} />
                   </tr>
                 )}
+                {d.fraisGeneraux.lignes.map((l) => (
+                  <tr key={l.id}>
+                    <td style={{ paddingLeft: 20 }}>
+                      <span className="code-cell">{l.code}</span> {l.label}
+                    </td>
+                    <Cellules m={l.metrics} />
+                  </tr>
+                ))}
+                <LigneTotal titre="Total frais généraux" m={d.fraisGeneraux.total} />
+
+                {/* ─── Produits ─── */}
+                <TitreSection titre="Produits" />
+                {porteUneValeur(d.produits.marches.metrics) && (
+                  <tr>
+                    <td style={{ paddingLeft: 20 }}>
+                      {d.produits.marches.label}
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        {' '}— repris des marchés, aucune saisie
+                      </span>
+                    </td>
+                    <Cellules m={d.produits.marches.metrics} />
+                  </tr>
+                )}
+                {d.produits.lignes.map((l) => (
+                  <tr key={l.id}>
+                    <td style={{ paddingLeft: 20 }}>
+                      <span className="code-cell">{l.code}</span> {l.label}
+                    </td>
+                    <Cellules m={l.metrics} />
+                  </tr>
+                ))}
+                <LigneTotal titre="Total produits" m={d.produits.total} />
+
+                {/* ─── Résultats ─── */}
                 <tr style={{ borderTop: '2px solid var(--border)' }}>
-                  <td><strong>Total chantier</strong></td>
-                  <Cellules m={budgets.data.total} gras />
+                  <td><strong>Résultat brut</strong>
+                    <span className="muted" style={{ fontSize: 11 }}> — produits − charges</span>
+                  </td>
+                  <Cellules m={d.resultatBrut} gras resultat />
+                </tr>
+                <tr>
+                  <td><strong>Résultat net</strong>
+                    <span className="muted" style={{ fontSize: 11 }}> — après frais généraux</span>
+                  </td>
+                  <Cellules m={d.resultatNet} gras resultat />
                 </tr>
               </tbody>
             </table>
@@ -360,16 +461,45 @@ export default function BudgetsPage() {
 }
 
 /* ─────────── lignes du tableau ─────────── */
-function Cellules({ m, gras }: { m: Metriques; gras?: boolean }) {
+/** Aplatit l'axe analytique en une liste de codes : la lecture synthétique, poste par poste. */
+function codesAPlat(natures: NoeudNature[]): NoeudCode[] {
+  return natures
+    .flatMap((n) => n.lots)
+    .flatMap((l) => l.familles)
+    .flatMap((f) => f.codes)
+    .filter((c) => porteUneValeur(c.metrics))
+    .sort((a, b) => a.code.localeCompare(b.code, 'fr', { numeric: true }));
+}
+
+function TitreSection({ titre }: { titre: string }) {
+  return (
+    <tr style={{ background: 'var(--bg)' }}>
+      <td colSpan={6} style={{ fontWeight: 700, letterSpacing: '.02em' }}>{titre}</td>
+    </tr>
+  );
+}
+
+function LigneTotal({ titre, m }: { titre: string; m: Metriques }) {
+  return (
+    <tr style={{ borderTop: '1px solid var(--border)' }}>
+      <td><strong>{titre}</strong></td>
+      <Cellules m={m} gras />
+    </tr>
+  );
+}
+
+function Cellules({ m, gras, resultat }: { m: Metriques; gras?: boolean; resultat?: boolean }) {
   const e = ecart(m);
   const style = { textAlign: 'right' as const, fontVariantNumeric: 'tabular-nums' as const, fontWeight: gras ? 700 : undefined };
+  // Sur une ligne de résultat, le rouge dit « on perd de l'argent » — pas « le chiffre est négatif ».
+  const ton = (v: string | number) => (resultat && Number(v ?? 0) < 0 ? 'var(--danger)' : undefined);
   return (
     <>
-      <td style={style}>{euro(m.etude ?? '0')}</td>
-      <td style={{ ...style, color: Number(m.mouvements ?? 0) < 0 ? 'var(--danger)' : undefined }}>
+      <td style={{ ...style, color: ton(m.etude) }}>{euro(m.etude ?? '0')}</td>
+      <td style={{ ...style, color: resultat ? ton(m.mouvements) : Number(m.mouvements ?? 0) < 0 ? 'var(--danger)' : undefined }}>
         {Number(m.mouvements ?? 0) === 0 ? '—' : euro(m.mouvements)}
       </td>
-      <td style={style}>{euro(m.global ?? '0')}</td>
+      <td style={{ ...style, color: ton(m.global) }}>{euro(m.global ?? '0')}</td>
       <td style={style}>{Number(m.initial ?? 0) === 0 ? '—' : euro(m.initial)}</td>
       <td style={{ ...style, color: e < 0 ? 'var(--danger)' : undefined }}>
         {Number(m.initial ?? 0) === 0 ? '—' : euro(e)}
@@ -439,7 +569,7 @@ function ModaleSaisie({
   return (
     <Modale
       titre="Saisir un budget"
-      sousTitre="Une dotation (montant positif) ou une reprise (montant négatif)"
+      sousTitre="Charge, frais général ou recette — le code analytique choisi décide du bloc"
       largeur="m"
       onClose={onClose}
       actions={
@@ -463,6 +593,11 @@ function ModaleSaisie({
       }
     >
       {erreur && <Alerte>{erreur}</Alerte>}
+      <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+        Le montant est <strong>signé</strong> : positif pour une dotation ou une recette, négatif pour une
+        reprise. Le <strong>compte prorata</strong> et la <strong>retenue de garantie</strong> se saisissent
+        donc sur un code de type « produit », en négatif.
+      </p>
       <div className="field">
         <label>Date de valeur</label>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -485,6 +620,9 @@ function ModaleSaisie({
           codes={codes}
           obligatoire
           lecture={Boolean(ressource?.codeAnalytiqueId)}
+          // Le budget est le seul écran à ouvrir les trois catégories : c'est ici qu'on saisit
+          // une recette, un frais général ou une dotation de charges.
+          categories={['charge', 'frais_generaux', 'produit']}
           onChange={(id) => setCodeId(id)}
         />
       </div>
