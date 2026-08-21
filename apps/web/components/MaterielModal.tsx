@@ -35,6 +35,8 @@ export interface Materiel {
   actif: boolean;
   commentaire: string | null;
   chantier_actuel: string | null;
+  cout_amenee: string;
+  cout_repli: string;
 }
 
 export const TYPES_MATERIEL: Array<{ v: Materiel['type']; l: string }> = [
@@ -72,6 +74,8 @@ type Champs = {
   dateAssurance: string;
   actif: boolean;
   commentaire: string;
+  coutAmenee: string;
+  coutRepli: string;
 };
 
 const VIDE: Champs = {
@@ -79,6 +83,7 @@ const VIDE: Champs = {
   immatriculation: '', numeroSerie: '', annee: '', coutUnitaire: '', uniteCout: 'jour',
   codeAnalytiqueId: null, dateAchat: '', valeurAchat: '', dateProchaineRevision: '',
   dateControleTechnique: '', dateAssurance: '', actif: true, commentaire: '',
+  coutAmenee: '', coutRepli: '',
 };
 
 function depuis(m: Materiel): Champs {
@@ -102,6 +107,8 @@ function depuis(m: Materiel): Champs {
     dateAssurance: m.date_assurance ?? '',
     actif: m.actif,
     commentaire: m.commentaire ?? '',
+    coutAmenee: String(Number(m.cout_amenee ?? 0)),
+    coutRepli: String(Number(m.cout_repli ?? 0)),
   };
 }
 
@@ -158,6 +165,8 @@ export function MaterielModal({
           dateAssurance: f.dateAssurance || null,
           actif: f.actif,
           commentaire: f.commentaire,
+          coutAmenee: f.coutAmenee || '0',
+          coutRepli: f.coutRepli || '0',
         },
       },
     ),
@@ -190,7 +199,7 @@ export function MaterielModal({
         <Bouton
           chargement={enregistrer.isPending}
           libelleChargement="Enregistrement…"
-          disabled={!f.label.trim()}
+          disabled={!f.label.trim() || !f.codeAnalytiqueId}
           onClick={() => { setErr(null); enregistrer.mutate(); }}
         >
           Enregistrer
@@ -259,11 +268,12 @@ export function MaterielModal({
           </select>
         </div>
         <div className="field" style={{ marginBottom: 0, width: 160 }}>
-          <label>Code analytique</label>
+          <label>Code analytique *</label>
           <SelectCodeAnalytique
             valeur={f.codeAnalytiqueId}
             codes={codes.data ?? []}
             onChange={(id) => set({ codeAnalytiqueId: id })}
+            obligatoire
           />
         </div>
         <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, paddingBottom: 6 }}>
@@ -271,9 +281,30 @@ export function MaterielModal({
           Actif
         </label>
       </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+        <div className="field" style={{ marginBottom: 0, width: 150 }}>
+          <label>Amenée (€)</label>
+          <input
+            type="number" step="0.01" style={{ textAlign: 'right' }}
+            value={f.coutAmenee}
+            onChange={(e) => set({ coutAmenee: e.target.value })}
+          />
+        </div>
+        <div className="field" style={{ marginBottom: 0, width: 150 }}>
+          <label>Repli (€)</label>
+          <input
+            type="number" step="0.01" style={{ textAlign: 'right' }}
+            value={f.coutRepli}
+            onChange={(e) => set({ coutRepli: e.target.value })}
+          />
+        </div>
+      </div>
       <p className="muted" style={{ fontSize: 11, marginTop: 6, marginBottom: 0 }}>
         C’est ce coût — et non le prix d’achat — qui sera compté sur le chantier à chaque journée
-        d’utilisation relevée.
+        d’utilisation relevée. L’amenée et le repli sont des forfaits de transport proposés à
+        chaque mission, corrigeables sur la réservation. Tout matériel relève du déboursé{' '}
+        <strong>Matériel</strong>, et son <strong>code analytique est obligatoire</strong> : sans
+        lui, ses journées n’apparaîtraient dans aucun tableau de bord.
       </p>
 
       <div className="form-section-title" style={{ marginTop: 14 }}>Acquisition et entretien</div>

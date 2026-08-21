@@ -84,6 +84,23 @@ export class AnalyticsService {
            FROM equipment_usage WHERE chantier_id = $1`,
         [chantierId],
       ))[0].total;
+      // Amenée et repli réservés mais pas encore relevés : un transport promis est engagé.
+      const transportEngage = (await em.query(
+        `SELECT COALESCE(SUM(
+                  CASE WHEN NOT EXISTS (
+                    SELECT 1 FROM equipment_usage u
+                     WHERE u.equipment_id = a.equipment_id AND u.chantier_id = a.chantier_id
+                       AND u.type = 'amenee'
+                  ) THEN a.cout_amenee ELSE 0 END
+                  + CASE WHEN NOT EXISTS (
+                    SELECT 1 FROM equipment_usage u
+                     WHERE u.equipment_id = a.equipment_id AND u.chantier_id = a.chantier_id
+                       AND u.type = 'repli'
+                  ) THEN a.cout_repli ELSE 0 END
+                ), 0)::numeric(16,2) AS total
+           FROM equipment_assignment a WHERE a.chantier_id = $1`,
+        [chantierId],
+      ))[0].total;
       const materielEngage = (await em.query(
         `WITH jours AS (
            SELECT a.equipment_id, e.cout_unitaire, e.unite_cout,
@@ -102,7 +119,7 @@ export class AnalyticsService {
             AND NOT EXISTS (
               SELECT 1 FROM equipment_usage u
                WHERE u.equipment_id = j.equipment_id AND u.chantier_id = $1
-                 AND u.work_date = j.jour
+                 AND u.work_date = j.jour AND u.type = 'utilisation'
             )`,
         [chantierId],
       ))[0].total;
@@ -121,7 +138,9 @@ export class AnalyticsService {
         }
         if (nature === 'equipment') {
           realise = realise.plus(new Decimal(materielRealise));
-          engageNature = engageNature.plus(new Decimal(materielEngage));
+          engageNature = engageNature
+            .plus(new Decimal(materielEngage))
+            .plus(new Decimal(transportEngage));
         }
         return natureResult({
           nature,

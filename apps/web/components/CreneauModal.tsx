@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { SelectOuvrage } from './SelectOuvrage';
 import { Modale } from '@/components/Modale';
 
 export interface CreneauEdite {
@@ -21,25 +22,10 @@ export interface CreneauEdite {
 
 interface Option { id: string; label: string }
 
-interface LigneExecution {
-  id: string;
-  code: string | null;
-  designation: string;
-  vendable: boolean;
-  children?: LigneExecution[];
-}
 interface PlanCode { id: string; code: string; label: string }
 interface PlanFamille { codes: PlanCode[] }
 interface PlanLot { familles: PlanFamille[] }
 interface PlanNature { nature: string; label: string; lots: PlanLot[] }
-
-/** Aplatit l'arbre d'exécution : un sélecteur se lit mieux à plat, indenté par niveau. */
-function aplatir(lignes: LigneExecution[], niveau = 0): Array<{ id: string; label: string }> {
-  return lignes.flatMap((l) => [
-    { id: l.id, label: `${'— '.repeat(niveau)}${l.code ? `${l.code} · ` : ''}${l.designation}` },
-    ...aplatir(l.children ?? [], niveau + 1),
-  ]);
-}
 
 /** Découpages courants d'une journée de chantier — un clic plutôt que quatre champs. */
 const RACCOURCIS = [
@@ -97,19 +83,12 @@ export function CreneauModal({
 
   // Ouvrages du chantier choisi : c'est là que se joue le coût réel d'une prestation. Sans cette
   // imputation, on sait ce qu'a coûté le chantier, jamais ce qu'a coûté l'ouvrage.
-  const ouvrages = useQuery({
-    queryKey: ['execution-tree', chantierId],
-    enabled: Boolean(token && chantierId && kind === 'realise'),
-    retry: false,
-    queryFn: () => apiFetch<LigneExecution[]>(`/chantiers/${chantierId}/execution-tree`, { token }),
-  });
   const plan = useQuery({
     queryKey: ['analytical-plan'],
     enabled: Boolean(token && kind === 'realise'),
     queryFn: () => apiFetch<PlanNature[]>('/analytical/plan', { token }),
   });
 
-  const optionsOuvrages = aplatir(ouvrages.data ?? []);
   const optionsCodes = (plan.data ?? []).flatMap((n) =>
     n.lots.flatMap((l) => l.familles.flatMap((f) =>
       f.codes.map((c) => ({ id: c.id, label: `${c.code} — ${c.label}` })))));
@@ -217,14 +196,12 @@ export function CreneauModal({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="field">
               <label>Ouvrage</label>
-              <select
-                value={ouvrage}
-                disabled={!chantierId || optionsOuvrages.length === 0}
-                onChange={(e) => setOuvrage(e.target.value)}
-              >
-                <option value="">— Sans ouvrage —</option>
-                {optionsOuvrages.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
+              <SelectOuvrage
+                chantierId={chantierId}
+                valeur={ouvrage}
+                onChange={setOuvrage}
+                libelleVide="— Sans ouvrage —"
+              />
             </div>
             <div className="field">
               <label>Code analytique</label>

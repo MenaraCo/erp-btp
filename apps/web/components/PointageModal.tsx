@@ -9,13 +9,11 @@ import { euro } from '@/lib/format';
 import { Modale } from './Modale';
 import { Alerte, Bouton } from './ui';
 import { CodeAnalytique, SelectCodeAnalytique } from './SelectCodeAnalytique';
+import { SelectOuvrage } from './SelectOuvrage';
 import { estFige, PointageJour } from './CalendrierPointages';
 
 interface Employee { id: string; fullName: string; jobTitle: string | null; hourlyCost: string }
-interface LigneExecution {
-  id: string; type: string; vendable: boolean; code: string | null; designation: string | null;
-}
-interface ArbreExecution { lines: LigneExecution[] }
+
 
 /**
  * Saisie et correction d'un pointage.
@@ -52,12 +50,6 @@ export function PointageModal({
     queryKey: ['employees'], enabled: Boolean(token),
     queryFn: () => apiFetch<Employee[]>('/employees', { token }),
   });
-  const arbre = useQuery({
-    queryKey: ['execution-tree', chantierId], enabled: Boolean(token), retry: false,
-    queryFn: () => apiFetch<ArbreExecution>(`/chantiers/${chantierId}/execution-tree`, { token }),
-  });
-  // Seuls les ouvrages portent des heures : les titres ne sont là que pour la lecture.
-  const ouvrages = (arbre.data?.lines ?? []).filter((l) => l.type === 'ouvrage');
   const codes = useQuery({
     queryKey: ['params-codes'], enabled: Boolean(token), retry: false,
     queryFn: () => apiFetch<CodeAnalytique[]>('/params/codes', { token }),
@@ -186,18 +178,12 @@ export function PointageModal({
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 220 }}>
           <label>Ouvrage (facultatif)</label>
-          <select
-            value={executionLineId}
+          <SelectOuvrage
+            chantierId={chantierId}
+            valeur={executionLineId}
+            onChange={setExecutionLineId}
             disabled={fige}
-            onChange={(e) => setExecutionLineId(e.target.value)}
-          >
-            <option value="">— Non rattaché —</option>
-            {ouvrages.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.code ? `${o.code} · ` : ''}{o.designation ?? ''}
-              </option>
-            ))}
-          </select>
+          />
         </div>
         <div className="field" style={{ marginBottom: 0, width: 170 }}>
           <label>Code analytique</label>

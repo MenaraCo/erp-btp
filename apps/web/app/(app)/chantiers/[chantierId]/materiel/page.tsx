@@ -4,14 +4,17 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarRange, ClipboardCheck, Plus, ShoppingCart, Trash2, Truck } from 'lucide-react';
+import {
+  CalendarRange, ClipboardCheck, Pencil, Plus, ShoppingCart, Trash2, Truck,
+} from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
 import { Alerte, Badge, Bouton, CarteKpi, LigneVide } from '@/components/ui';
 import { Modale } from '@/components/Modale';
-import { Materiel } from '@/components/MaterielModal';
+import { Materiel, MaterielModal } from '@/components/MaterielModal';
 import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
+import { SelectOuvrage } from '@/components/SelectOuvrage';
 
 interface Affectation {
   id: string;
@@ -22,12 +25,15 @@ interface Affectation {
   materiel: string;
   unite_cout: 'heure' | 'jour';
   cout_unitaire: string;
+  cout_amenee: string;
+  cout_repli: string;
   commentaire: string | null;
 }
 interface Utilisation {
   id: string;
   equipment_id: string;
   work_date: string;
+  type: 'utilisation' | 'amenee' | 'repli';
   quantite: string;
   cout_unitaire: string;
   cout: string;
@@ -38,7 +44,6 @@ interface Utilisation {
   code_analytique: string | null;
   commentaire: string | null;
 }
-interface LigneExecution { id: string; type: string; code: string | null; designation: string | null }
 interface Resultats {
   byNature: Array<{ nature: string; engage: string; realise: string; budgetObjectif: string }>;
 }
@@ -72,7 +77,14 @@ export default function MaterielChantierPage() {
   const [releve, setReleve] = useState<null | {
     equipmentId: string; date: string; quantite: string; coutUnitaire: string;
     executionLineId: string; codeAnalytiqueId: string | null;
+    // Une semaine de pelle se saisit en un geste, pas en cinq : la fenêtre couvre les deux cas.
+    periode: boolean; fin: string; joursOuvres: boolean;
   }>(null);
+  const [bilanPeriode, setBilanPeriode] = useState<string | null>(null);
+  // La mission se corrige ici (dates, transport) ; la fiche, elle, s'ouvre à part : un coût
+  // horaire vaut pour tous les chantiers, une amenée non.
+  const [reservationOuverte, setReservationOuverte] = useState<Affectation | null>(null);
+  const [ficheOuverte, setFicheOuverte] = useState<Materiel | null>(null);
 
   const chantier = useQuery({
     queryKey: ['chantier', chantierId],
@@ -102,11 +114,6 @@ export default function MaterielChantierPage() {
     enabled: Boolean(token), retry: false,
     queryFn: () => apiFetch<Resultats>(`/chantiers/${chantierId}/results`, { token }),
   });
-  const arbre = useQuery({
-    queryKey: ['execution-tree', chantierId],
-    enabled: Boolean(token), retry: false,
-    queryFn: () => apiFetch<{ lines: LigneExecution[] }>(`/chantiers/${chantierId}/execution-tree`, { token }),
-  });
   const codes = useQuery({
     queryKey: ['params-codes'], enabled: Boolean(token), retry: false,
     queryFn: () => apiFetch<CodeAnalytique[]>('/params/codes', { token }),
@@ -130,24 +137,69 @@ export default function MaterielChantierPage() {
     onSuccess: () => { setErr(null); setReservation(null); rafraichir(); },
     onError: echoue,
   });
+  const corrigerReservation = useMutation({
+    mutationFn: (v: { id: string; patch: Record<string, unknown> }) =>
+      apiFetch(`/materiel/affectations/${v.id}`, { method: 'PATCH', token, body: v.patch }),
+    onSuccess: () => { setErr(null); setReservationOuverte(null); rafraichir(); },
+    onError: echoue,
+  });
+  const releverTransport = useMutation({
+    mutationFn: (v: { equipmentId: string; type: 'amenee' | 'repli'; montant: string }) =>
+      apiFetch(`/materiel/${v.equipmentId}/utilisations`, {
+        method: 'POST', token,
+        body: {
+          chantierId, date: iso(new Date()), type: v.type,
+          quantite: '1', coutUnitaire: v.montant,
+          commentaire: v.type === 'amenee' ? 'Amenée sur chantier' : 'Repli du chantier',
+        },
+      }),
+    onSuccess: () => { setErr(null); rafraichir(); },
+    onError: echoue,
+  });
   const liberer = useMutation({
     mutationFn: (id: string) => apiFetch(`/materiel/affectations/${id}`, { method: 'DELETE', token }),
     onSuccess: () => { setErr(null); rafraichir(); },
     onError: echoue,
   });
   const relever = useMutation({
-    mutationFn: () => apiFetch(`/materiel/${releve?.equipmentId}/utilisations`, {
-      method: 'POST', token,
-      body: {
-        chantierId,
-        date: releve?.date,
-        quantite: releve?.quantite || '0',
-        coutUnitaire: releve?.coutUnitaire || null,
-        executionLineId: releve?.executionLineId || null,
-        codeAnalytiqueId: releve?.codeAnalytiqueId,
-      },
-    }),
-    onSuccess: () => { setErr(null); setReleve(null); rafraichir(); },
+    mutationFn: () => (releve?.periode
+      ? apiFetch<{ crees: number; ignores: number }>(
+        `/materiel/${releve.equipmentId}/utilisations/periode`,
+        {
+          method: 'POST', token,
+          body: {
+            chantierId,
+            debut: releve.date,
+            fin: releve.fin,
+            quantite: releve.quantite || '0',
+            joursOuvres: releve.joursOuvres,
+            coutUnitaire: releve.coutUnitaire || null,
+            executionLineId: releve.executionLineId || null,
+            codeAnalytiqueId: releve.codeAnalytiqueId,
+          },
+        },
+      )
+      : apiFetch(`/materiel/${releve?.equipmentId}/utilisations`, {
+        method: 'POST', token,
+        body: {
+          chantierId,
+          date: releve?.date,
+          quantite: releve?.quantite || '0',
+          coutUnitaire: releve?.coutUnitaire || null,
+          executionLineId: releve?.executionLineId || null,
+          codeAnalytiqueId: releve?.codeAnalytiqueId,
+        },
+      })),
+    onSuccess: (r) => {
+      // Les jours déjà saisis ne sont pas écrasés : on le DIT, sinon on croirait la semaine
+      // enregistrée alors qu'elle ne l'est qu'à moitié.
+      const bilan = r as { crees?: number; ignores?: number } | undefined;
+      setBilanPeriode(bilan?.crees !== undefined
+        ? `${bilan.crees} journée(s) enregistrée(s)`
+          + (bilan.ignores ? `, ${bilan.ignores} déjà saisie(s) et laissée(s) telle(s) quelle(s).` : '.')
+        : null);
+      setErr(null); setReleve(null); rafraichir();
+    },
     onError: echoue,
   });
   const supprimerReleve = useMutation({
@@ -157,7 +209,6 @@ export default function MaterielChantierPage() {
   });
 
   const materielNature = resultats.data?.byNature.find((n) => n.nature === 'equipment');
-  const ouvrages = (arbre.data?.lines ?? []).filter((l) => l.type === 'ouvrage');
   const parcParId = useMemo(
     () => new Map((parc.data ?? []).map((m) => [m.id, m])),
     [parc.data],
@@ -188,6 +239,9 @@ export default function MaterielChantierPage() {
               coutUnitaire: '',
               executionLineId: '',
               codeAnalytiqueId: null,
+              periode: false,
+              fin: iso(new Date()),
+              joursOuvres: true,
             })}
           >
             Relever une utilisation
@@ -212,6 +266,7 @@ export default function MaterielChantierPage() {
       </p>
 
       {err && <Alerte>{err}</Alerte>}
+      {bilanPeriode && <Alerte ton="succes">{bilanPeriode}</Alerte>}
       {enLocation.length > 0 && (
         <Alerte ton="info">
           <ShoppingCart size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} />
@@ -259,15 +314,26 @@ export default function MaterielChantierPage() {
               <th style={{ width: 110 }}>Du</th>
               <th style={{ width: 110 }}>Au</th>
               <th style={{ width: 130, textAlign: 'right' }}>Coût utilisation</th>
+              <th style={{ width: 150, textAlign: 'right' }}>Amenée / repli</th>
               <th style={{ width: 110 }}>Propriété</th>
-              <th style={{ width: 40 }} />
+              <th style={{ width: 70 }} />
             </tr>
           </thead>
           <tbody>
             {(affectations.data ?? []).map((a) => {
               const m = parcParId.get(a.equipment_id);
+              const amenee = (utilisations.data ?? []).some(
+                (u) => u.equipment_id === a.equipment_id && u.type === 'amenee');
+              const repli = (utilisations.data ?? []).some(
+                (u) => u.equipment_id === a.equipment_id && u.type === 'repli');
               return (
-                <tr key={a.id}>
+                <tr
+                  key={a.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setReservationOuverte(a)}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
+                >
                   <td className="code-cell">{a.materiel_code}</td>
                   <td>{a.materiel}</td>
                   <td className="muted">{jour(a.date_debut)}</td>
@@ -278,12 +344,29 @@ export default function MaterielChantierPage() {
                       {a.unite_cout === 'jour' ? ' / j' : ' / h'}
                     </span>
                   </td>
+                  <td style={{ textAlign: 'right', fontSize: 11 }}>
+                    {/* Un transport relevé est payé ; tant qu'il ne l'est pas, il reste promis. */}
+                    <span style={{ color: amenee ? 'var(--success)' : undefined }}>
+                      {euro(a.cout_amenee)}{amenee ? ' ✓' : ''}
+                    </span>
+                    {' / '}
+                    <span style={{ color: repli ? 'var(--success)' : undefined }}>
+                      {euro(a.cout_repli)}{repli ? ' ✓' : ''}
+                    </span>
+                  </td>
                   <td>
                     {m?.propriete === 'location'
                       ? <Badge ton="attention">Location{m.fournisseur ? ` · ${m.fournisseur}` : ''}</Badge>
                       : <span className="muted">Parc</span>}
                   </td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="btn-ghost"
+                      title="Ouvrir la fiche du matériel"
+                      onClick={() => m && setFicheOuverte(m)}
+                    >
+                      <Pencil size={13} />
+                    </button>
                     <button className="btn-ghost" title="Libérer le matériel" onClick={() => liberer.mutate(a.id)}>
                       <Trash2 size={13} />
                     </button>
@@ -293,7 +376,7 @@ export default function MaterielChantierPage() {
             })}
             {affectations.data && affectations.data.length === 0 && (
               <LigneVide
-                colonnes={7}
+                colonnes={9}
                 icone={CalendarRange}
                 titre="Aucun matériel réservé pour ce chantier."
                 indice="« Réserver un matériel » bloque l’engin sur la période : il ne pourra pas être promis ailleurs."
@@ -313,6 +396,7 @@ export default function MaterielChantierPage() {
               <th style={{ width: 110 }}>Date</th>
               <th style={{ width: 100 }}>Code</th>
               <th>Matériel</th>
+              <th style={{ width: 110 }}>Nature</th>
               <th>Ouvrage</th>
               <th style={{ width: 90 }}>Poste</th>
               <th style={{ width: 90, textAlign: 'right' }}>Quantité</th>
@@ -326,6 +410,11 @@ export default function MaterielChantierPage() {
                 <td className="code-cell">{jour(u.work_date)}</td>
                 <td className="code-cell">{u.materiel_code}</td>
                 <td>{u.materiel}</td>
+                <td>
+                  {u.type === 'utilisation'
+                    ? <span className="muted">Utilisation</span>
+                    : <Badge ton="info">{u.type === 'amenee' ? 'Amenée' : 'Repli'}</Badge>}
+                </td>
                 <td className="muted">{u.ouvrage_label ?? '—'}</td>
                 <td>{u.code_analytique
                   ? <span className="code-cell">{u.code_analytique}</span>
@@ -348,7 +437,7 @@ export default function MaterielChantierPage() {
             ))}
             {utilisations.data && utilisations.data.length === 0 && (
               <LigneVide
-                colonnes={8}
+                colonnes={9}
                 icone={ClipboardCheck}
                 titre="Aucune utilisation relevée."
                 indice="Tant que rien n’est relevé, le matériel reste en engagé : il est promis, mais le chantier ne l’a pas encore payé."
@@ -357,6 +446,94 @@ export default function MaterielChantierPage() {
           </tbody>
         </table>
       </div>
+
+      {reservationOuverte && (
+        <Modale
+          titre={`${reservationOuverte.materiel_code} — ${reservationOuverte.materiel}`}
+          sousTitre="La durée et le transport appartiennent à la mission : une amenée coûte plus cher de loin que d’à côté."
+          largeur="m"
+          onClose={() => setReservationOuverte(null)}
+          actions={(
+            <Bouton
+              chargement={corrigerReservation.isPending}
+              onClick={() => corrigerReservation.mutate({
+                id: reservationOuverte.id,
+                patch: {
+                  dateDebut: reservationOuverte.date_debut,
+                  dateFin: reservationOuverte.date_fin,
+                  coutAmenee: reservationOuverte.cout_amenee,
+                  coutRepli: reservationOuverte.cout_repli,
+                },
+              })}
+            >
+              Enregistrer
+            </Bouton>
+          )}
+        >
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div className="field" style={{ marginBottom: 0, width: 150 }}>
+              <label>Du</label>
+              <input
+                type="date" value={reservationOuverte.date_debut}
+                onChange={(e) => setReservationOuverte({ ...reservationOuverte, date_debut: e.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, width: 150 }}>
+              <label>Au</label>
+              <input
+                type="date" value={reservationOuverte.date_fin}
+                onChange={(e) => setReservationOuverte({ ...reservationOuverte, date_fin: e.target.value })}
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, alignItems: 'flex-end' }}>
+            <div className="field" style={{ marginBottom: 0, width: 140 }}>
+              <label>Amenée (€)</label>
+              <input
+                type="number" step="0.01" style={{ textAlign: 'right' }}
+                value={Number(reservationOuverte.cout_amenee)}
+                onChange={(e) => setReservationOuverte({ ...reservationOuverte, cout_amenee: e.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, width: 140 }}>
+              <label>Repli (€)</label>
+              <input
+                type="number" step="0.01" style={{ textAlign: 'right' }}
+                value={Number(reservationOuverte.cout_repli)}
+                onChange={(e) => setReservationOuverte({ ...reservationOuverte, cout_repli: e.target.value })}
+              />
+            </div>
+            <Bouton
+              variante="secondaire"
+              onClick={() => releverTransport.mutate({
+                equipmentId: reservationOuverte.equipment_id,
+                type: 'amenee',
+                montant: reservationOuverte.cout_amenee,
+              })}
+            >
+              Relever l’amenée
+            </Bouton>
+            <Bouton
+              variante="secondaire"
+              onClick={() => releverTransport.mutate({
+                equipmentId: reservationOuverte.equipment_id,
+                type: 'repli',
+                montant: reservationOuverte.cout_repli,
+              })}
+            >
+              Relever le repli
+            </Bouton>
+          </div>
+          <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0 }}>
+            Le coût d’utilisation et les montants proposés par défaut se modifient sur la fiche du
+            matériel : ils valent pour tous les chantiers.
+          </p>
+        </Modale>
+      )}
+
+      {ficheOuverte && (
+        <MaterielModal materiel={ficheOuverte} onClose={() => { setFicheOuverte(null); rafraichir(); }} />
+      )}
 
       {reservation && (
         <Modale
@@ -423,6 +600,20 @@ export default function MaterielChantierPage() {
             </Bouton>
           )}
         >
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            <Bouton
+              variante={releve.periode ? 'secondaire' : 'primaire'}
+              onClick={() => setReleve({ ...releve, periode: false })}
+            >
+              Une journée
+            </Bouton>
+            <Bouton
+              variante={releve.periode ? 'primaire' : 'secondaire'}
+              onClick={() => setReleve({ ...releve, periode: true })}
+            >
+              Une période
+            </Bouton>
+          </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 220 }}>
               <label>Matériel</label>
@@ -436,17 +627,36 @@ export default function MaterielChantierPage() {
               </select>
             </div>
             <div className="field" style={{ marginBottom: 0, width: 150 }}>
-              <label>Date</label>
+              <label>{releve.periode ? 'Du' : 'Date'}</label>
               <input
                 type="date" value={releve.date}
                 onChange={(e) => setReleve({ ...releve, date: e.target.value })}
               />
             </div>
+            {releve.periode && (
+              <div className="field" style={{ marginBottom: 0, width: 150 }}>
+                <label>Au</label>
+                <input
+                  type="date" value={releve.fin}
+                  onChange={(e) => setReleve({ ...releve, fin: e.target.value })}
+                />
+              </div>
+            )}
           </div>
+          {releve.periode && (
+            <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+              <input
+                type="checkbox" checked={releve.joursOuvres}
+                onChange={(e) => setReleve({ ...releve, joursOuvres: e.target.checked })}
+              />
+              Jours ouvrés seulement (samedi et dimanche sautés)
+            </label>
+          )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, alignItems: 'flex-end' }}>
             <div className="field" style={{ marginBottom: 0, width: 130 }}>
               <label>
-                Quantité ({parcParId.get(releve.equipmentId)?.unite_cout === 'heure' ? 'heures' : 'journées'})
+                Quantité{releve.periode ? ' / jour' : ''}{' '}
+                ({parcParId.get(releve.equipmentId)?.unite_cout === 'heure' ? 'heures' : 'journées'})
               </label>
               <input
                 type="number" step="0.25" style={{ textAlign: 'right' }}
@@ -468,17 +678,11 @@ export default function MaterielChantierPage() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
             <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 220 }}>
               <label>Ouvrage (facultatif)</label>
-              <select
-                value={releve.executionLineId}
-                onChange={(e) => setReleve({ ...releve, executionLineId: e.target.value })}
-              >
-                <option value="">— Non rattaché —</option>
-                {ouvrages.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.code ? `${o.code} · ` : ''}{o.designation ?? ''}
-                  </option>
-                ))}
-              </select>
+              <SelectOuvrage
+                chantierId={chantierId}
+                valeur={releve.executionLineId}
+                onChange={(id) => setReleve({ ...releve, executionLineId: id })}
+              />
             </div>
             <div className="field" style={{ marginBottom: 0, width: 160 }}>
               <label>Code analytique</label>

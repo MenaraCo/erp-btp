@@ -10,6 +10,7 @@ import {
 import { apiFetch, apiDownload, apiFetchBlobUrl, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { euro } from '@/lib/format';
+import { SelectOuvrage } from './SelectOuvrage';
 import { STATUT_AVANCEMENT, STATUT_COMMANDE, statut } from '@/lib/statuts';
 import { Alerte, Badge, BadgeStatut } from './ui';
 import { teinteChantier } from '@/components/CalendrierMois';
@@ -139,20 +140,6 @@ const NATURES_SAISIE = [
   { value: 'site_overhead', label: 'Frais de chantier' },
 ];
 
-interface LigneExecution {
-  id: string; code: string | null; designation: string; children?: LigneExecution[];
-}
-interface MarcheTree { lines: LigneExecution[] }
-interface Arbre { marches: MarcheTree[] }
-
-/** Ouvrages à plat, indentés — un sélecteur se lit mieux ainsi qu'un arbre. */
-function aplatir(lignes: LigneExecution[], niveau = 0): Array<{ id: string; label: string }> {
-  return lignes.flatMap((l) => [
-    { id: l.id, label: `${'— '.repeat(niveau)}${l.code ? `${l.code} · ` : ''}${l.designation}` },
-    ...aplatir(l.children ?? [], niveau + 1),
-  ]);
-}
-
 function jour(v: string | null): string {
   return v ? new Date(v).toLocaleDateString('fr-FR') : '—';
 }
@@ -172,17 +159,20 @@ function jour(v: string | null): string {
  */
 function FicheRessourceModal({
   ligne,
-  ouvrages,
+  chantierId,
   lecture,
   onChange,
   onClose,
 }: {
   ligne: Ligne;
-  ouvrages: Array<{ id: string; label: string }>;
+  chantierId: string;
   lecture: boolean;
   onChange: (patch: Record<string, string | null>) => void;
   onClose: () => void;
 }) {
+  // L'ouvrage imputé vient de l'étude d'exécution du chantier, comme pour les heures et le
+  // matériel : une commande se compare à un ouvrage, pas à une liste tenue à part.
+  const [ouvrage, setOuvrage] = useState(ligne.execution_line_id ?? '');
   const champ = (
     label: string,
     valeur: string | null,
@@ -236,13 +226,12 @@ function FicheRessourceModal({
           {lecture
             ? <div style={{ fontSize: 13, padding: '4px 0' }}>{ligne.ouvrage || <span className="muted">—</span>}</div>
             : (
-              <select
-                defaultValue={ligne.execution_line_id ?? ''}
-                onChange={(e) => onChange({ executionLineId: e.target.value || null })}
-              >
-                <option value="">— Non réparti —</option>
-                {ouvrages.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-              </select>
+              <SelectOuvrage
+                chantierId={chantierId}
+                valeur={ouvrage}
+                libelleVide="— Non réparti —"
+                onChange={(id) => { setOuvrage(id); onChange({ executionLineId: id || null }); }}
+              />
             )}
         </div>
         {champ('Référence fournisseur', ligne.ref_fournisseur, 'refFournisseur', 'Réf. au catalogue du fournisseur')}
@@ -403,12 +392,6 @@ export function FicheCommande({
     onError: (e) => setErr(e instanceof ApiError ? e.message : 'Réouverture impossible.'),
   });
   const chantierId = fiche.data?.commande.chantier_id ?? '';
-  const arbre = useQuery({
-    queryKey: ['execution-tree', chantierId],
-    enabled: Boolean(token && chantierId),
-    retry: false,
-    queryFn: () => apiFetch<Arbre>(`/chantiers/${chantierId}/execution-tree`, { token }),
-  });
   const plan = useQuery({
     queryKey: ['analytical-plan'],
     enabled: Boolean(token),
@@ -416,7 +399,6 @@ export function FicheCommande({
       '/analytical/plan', { token },
     ),
   });
-  const ouvrages = (arbre.data?.marches ?? []).flatMap((m) => aplatir(m.lines));
   // Le sélecteur montre le code seul une fois replié : l'intitulé n'apparaît qu'au déroulé.
   const codes: CodeAnalytique[] = (plan.data ?? []).flatMap((n) =>
     n.lots.flatMap((l) => l.familles.flatMap((fa) =>
@@ -1019,7 +1001,7 @@ export function FicheCommande({
         return ligne ? (
           <FicheRessourceModal
             ligne={ligne}
-            ouvrages={ouvrages}
+            chantierId={chantierId}
             lecture={!brouillon}
             onChange={(patch) => majLigne.mutate({ id: ligne.id, patch })}
             onClose={() => setLigneOuverte(null)}
