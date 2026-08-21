@@ -7,6 +7,7 @@ import { useMutation } from '@tanstack/react-query';
 import { ChevronDown, Check } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { hauteurFlottante } from '@/lib/flottant';
 
 /**
  * Statut commercial du devis, en UN seul contrôle : la pastille affiche l'état courant et ouvre
@@ -67,7 +68,7 @@ export function StatusControl({
 }) {
   const token = useAuth().token;
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -106,7 +107,9 @@ export function StatusControl({
   const toggle = () => {
     if (readOnly || next.length === 0) return;
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 6, left: r.left });
+    // Le menu bascule au-dessus quand le bouton est en bas de l'écran, sinon ses entrées
+    // tombent hors du cadre et deviennent inatteignables.
+    if (r) setPos({ ...hauteurFlottante(r, 320, 8, 6), left: r.left });
     setOpen((v) => !v);
   };
 
@@ -145,7 +148,7 @@ export function StatusControl({
           ref={menuRef}
           style={{
             position: 'fixed', top: pos.top, left: pos.left, zIndex: 3000,
-            minWidth: 190, padding: 4, borderRadius: 10,
+            minWidth: 190, maxHeight: pos.maxHeight, overflowY: 'auto', padding: 4, borderRadius: 10,
             background: '#fff', border: '1px solid var(--border)',
             boxShadow: '0 10px 30px rgba(15,23,42,.13), 0 2px 6px rgba(15,23,42,.06)',
           }}

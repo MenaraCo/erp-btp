@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Info, OctagonAlert } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { hauteurFlottante } from '@/lib/flottant';
 
 /**
  * Contrôles du devis — le carnet de santé de l'étude, consultable à tout moment.
@@ -40,7 +41,7 @@ const ORDRE: Niveau[] = ['bloquant', 'avertissement', 'info'];
 export function ControlesPanel({ versionId }: { versionId: string | null }) {
   const { token } = useAuth();
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; right: number; maxHeight: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -77,7 +78,12 @@ export function ControlesPanel({ versionId }: { versionId: string | null }) {
 
   const toggle = () => {
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    if (r) {
+      // Bascule au-dessus si le bouton est en bas de l'écran : un panneau qui sort du cadre est
+      // hors d'atteinte (il est `fixed`, la page ne le fait pas défiler).
+      const v = hauteurFlottante(r, Math.round(window.innerHeight * 0.7), 8, 6);
+      setPos({ top: v.top, maxHeight: v.maxHeight, right: Math.max(8, window.innerWidth - r.right) });
+    }
     setOpen((v) => !v);
   };
 
@@ -123,7 +129,7 @@ export function ControlesPanel({ versionId }: { versionId: string | null }) {
           ref={panelRef}
           style={{
             position: 'fixed', top: pos.top, right: pos.right, zIndex: 3000,
-            width: 420, maxHeight: '70vh', overflowY: 'auto',
+            width: 420, maxHeight: pos.maxHeight, overflowY: 'auto',
             borderRadius: 12, background: '#fff', border: '1px solid var(--border)',
             boxShadow: '0 14px 40px rgba(15,23,42,.15), 0 2px 8px rgba(15,23,42,.06)',
           }}

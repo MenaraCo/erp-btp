@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { PositionFlottante, positionFlottante, suivreAncre } from '@/lib/flottant';
 
 export interface CodeAnalytique {
   id: string;
@@ -19,6 +20,9 @@ export interface CodeAnalytique {
  * Un `<select>` natif ne sait pas afficher deux textes différents selon qu'il est ouvert ou
  * fermé — d'où ce composant.
  */
+const LARGEUR = 300;
+const HAUTEUR = 280;
+
 export function SelectCodeAnalytique({
   valeur,
   codes,
@@ -34,9 +38,28 @@ export function SelectCodeAnalytique({
 }) {
   const [ouvert, setOuvert] = useState(false);
   const [filtre, setFiltre] = useState('');
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  /** Entrée surlignée au clavier : -1 = « à renseigner », puis l'index dans la liste filtrée. */
+  const [actif, setActif] = useState(-1);
+  const [pos, setPos] = useState<PositionFlottante | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const bouton = useRef<HTMLButtonElement>(null);
+  const surligne = useRef<HTMLButtonElement | null>(null);
+
+  const placer = useCallback(() => {
+    const r = bouton.current?.getBoundingClientRect();
+    if (r) setPos(positionFlottante(r, LARGEUR, HAUTEUR));
+  }, []);
+
+  // L'entrée surlignée reste visible : sans cela, la flèche descend hors du cadre de la liste.
+  useEffect(() => {
+    if (ouvert) surligne.current?.scrollIntoView({ block: 'nearest' });
+  }, [actif, ouvert]);
+
+  // Tant que la liste est ouverte, elle suit sa ligne : défiler ne doit pas la décrocher.
+  useEffect(() => {
+    if (!ouvert) return undefined;
+    return suivreAncre(placer);
+  }, [ouvert, placer]);
 
   useEffect(() => {
     if (!ouvert) return undefined;
@@ -73,15 +96,10 @@ export function SelectCodeAnalytique({
         onClick={() => {
           if (ouvert) { setOuvert(false); return; }
           // Position calculée au clic : la liste est rendue en PORTAIL, sinon le tableau la rogne.
-          const r = bouton.current?.getBoundingClientRect();
-          if (r) {
-            const largeur = 300;
-            setPos({
-              top: r.bottom + 4,
-              left: Math.max(8, Math.min(r.left, window.innerWidth - largeur - 8)),
-            });
-          }
+          // Le placement partagé bascule au-dessus quand la ligne est en bas de l'écran.
+          placer();
           setFiltre('');
+          setActif(-1);
           setOuvert(true);
         }}
         title={choisi ? `${choisi.code} — ${choisi.label}` : 'Obligatoire pour envoyer la commande'}
@@ -98,7 +116,7 @@ export function SelectCodeAnalytique({
       {ouvert && pos && createPortal(
         <div id="liste-codes-analytiques" style={{
           position: 'fixed', top: pos.top, left: pos.left, zIndex: 2000,
-          width: 300, maxHeight: 280, overflow: 'auto',
+          width: LARGEUR, maxHeight: pos.maxHeight, overflow: 'auto',
           background: 'var(--card, #fff)', border: '1px solid var(--border)', borderRadius: 8,
           boxShadow: '0 8px 24px rgba(15,23,42,.16)', padding: 6,
         }}>
@@ -106,22 +124,43 @@ export function SelectCodeAnalytique({
             autoFocus
             value={filtre}
             placeholder="Code ou intitulé…"
-            onChange={(e) => setFiltre(e.target.value)}
+            onChange={(e) => { setFiltre(e.target.value); setActif(-1); }}
+            // Flèches, Entrée, Échap : on choisit au clavier sans lâcher la saisie du filtre.
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setActif((i) => Math.min(i + 1, visibles.length - 1));
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActif((i) => Math.max(i - 1, -1));
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const c = visibles[actif];
+                onChange?.(actif >= 0 && c ? c.id : null);
+                setOuvert(false);
+              }
+            }}
             style={{ width: '100%', marginBottom: 6 }}
           />
           <button
             type="button"
+            ref={(el) => { if (actif === -1) surligne.current = el; }}
             onClick={() => { onChange?.(null); setOuvert(false); }}
-            style={entree}
+            style={{ ...entree, background: actif === -1 ? 'var(--surface)' : 'transparent' }}
           >
             <span className="muted">— à renseigner —</span>
           </button>
-          {visibles.map((c) => (
+          {visibles.map((c, i) => (
             <button
               key={c.id}
               type="button"
+              ref={(el) => { if (actif === i) surligne.current = el; }}
+              onMouseEnter={() => setActif(i)}
               onClick={() => { onChange?.(c.id); setOuvert(false); }}
-              style={{ ...entree, background: c.id === valeur ? 'var(--surface)' : 'transparent' }}
+              style={{
+                ...entree,
+                background: actif === i || (actif === -1 && c.id === valeur) ? 'var(--surface)' : 'transparent',
+              }}
             >
               <span className="code-cell" style={{ marginRight: 8 }}>{c.code}</span>
               <span>{c.label}</span>

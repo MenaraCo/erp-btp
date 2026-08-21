@@ -9,6 +9,7 @@ import {
   ActionSquare, CELL_CTR, CodeInput, UnitSelect, focusNextCell, infoBtn,
 } from '@/components/GrilleSaisie';
 import { visibleForClient } from '@/lib/client-view';
+import { hauteurFlottante } from '@/lib/flottant';
 
 export interface SaleLineInfo { pv: string; forced: boolean }
 export type NatureBreak = Record<'labor' | 'material' | 'equipment' | 'subcontract', string>;
@@ -778,14 +779,15 @@ function AddMenu({ triggerStyle, triggerTitle, triggerLabel = '+', children }: {
   children: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const close = () => setOpen(false);
   const toggle = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (open) { setOpen(false); return; }
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, r.right - 132) });
+    // Placement partagé : bascule au-dessus si la ligne est en bas de l'écran.
+    if (r) setPos({ ...hauteurFlottante(r, 260), left: Math.max(8, r.right - 132) });
     setOpen(true);
   };
   return (
@@ -794,7 +796,7 @@ function AddMenu({ triggerStyle, triggerTitle, triggerLabel = '+', children }: {
       {open && pos && createPortal(
         <>
           <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 3000 }} />
-          <div style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 3001, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(15,23,42,0.18)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 3001, maxHeight: pos.maxHeight, overflowY: 'auto', background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(15,23,42,0.18)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'center' }}>
             {children(close)}
           </div>
         </>,

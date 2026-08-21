@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { PositionFlottante, positionFlottante, suivreAncre } from '@/lib/flottant';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -34,6 +35,9 @@ const ORIGINES: Record<string, string> = {
  * La liste propose d'abord ce qui a été chiffré POUR CE CHANTIER — le plus probable — puis les
  * catalogues de l'entreprise.
  */
+const LARGEUR = 420;
+const HAUTEUR = 300;
+
 export function SelectRessource({
   valeur,
   chantierId,
@@ -56,7 +60,7 @@ export function SelectRessource({
    * doit jamais écrire ce que personne n'a tapé.
    */
   const touche = useRef(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<PositionFlottante | null>(null);
   const champ = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setSaisie(valeur ?? ''); touche.current = false; }, [valeur]);
@@ -84,15 +88,17 @@ export function SelectRessource({
     ),
   });
 
-  const placer = () => {
+  // Placement partagé : bascule au-dessus quand la ligne est en bas de l'écran, et borne la
+  // hauteur à l'espace libre — sinon la liste sort du cadre et devient inatteignable.
+  const placer = useCallback(() => {
     const r = champ.current?.getBoundingClientRect();
-    if (!r) return;
-    const largeur = 420;
-    setPos({
-      top: r.bottom + 4,
-      left: Math.max(8, Math.min(r.left, window.innerWidth - largeur - 8)),
-    });
-  };
+    if (r) setPos(positionFlottante(r, LARGEUR, HAUTEUR));
+  }, []);
+
+  useEffect(() => {
+    if (!ouvert) return undefined;
+    return suivreAncre(placer);
+  }, [ouvert, placer]);
 
   const choisir = (code: string) => {
     setSaisie(code);
@@ -124,7 +130,7 @@ export function SelectRessource({
       {ouvert && pos && !readOnly && createPortal(
         <div id="liste-ressources" style={{
           position: 'fixed', top: pos.top, left: pos.left, zIndex: 2000,
-          width: 420, maxHeight: 300, overflow: 'auto',
+          width: LARGEUR, maxHeight: pos.maxHeight, overflow: 'auto',
           background: 'var(--card, #fff)', border: '1px solid var(--border)', borderRadius: 8,
           boxShadow: '0 8px 24px rgba(15,23,42,.16)', padding: 6,
         }}>
