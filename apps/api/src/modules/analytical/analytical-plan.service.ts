@@ -118,18 +118,30 @@ export class AnalyticalPlanService {
       for (const c of codes) {
         (codeByFamille.get(c.famille_id) ?? codeByFamille.set(c.famille_id, []).get(c.famille_id)!).push(c);
       }
+      // La nature est portée par la FAMILLE, pas par le lot : un lot de travaux (« Peinture »)
+      // contient à la fois des matériaux, de la sous-traitance et de la main-d'œuvre. Grouper par
+      // la nature du lot rangeait toute la peinture dans « Matériaux » — y compris les heures —
+      // et le tableau de bord devenait faux à la lecture comme au total.
+      const natureDe = (f: FamilleRow, lot: LotRow) => f.nature ?? lot.nature;
+
       return ANALYTICAL_NATURES.map((nature) => ({
         nature,
         label: NATURE_LABELS[nature],
+        // Un lot n'apparaît sous une nature que s'il y porte au moins une famille : il peut donc
+        // se montrer sous deux natures, avec à chaque fois ses seules familles concernées.
         lots: lots
-          .filter((l) => l.nature === nature)
           .map((l) => ({
+            lot: l,
+            familles: (famByLot.get(l.id) ?? []).filter((f) => natureDe(f, l) === nature),
+          }))
+          .filter((x) => x.familles.length > 0)
+          .map(({ lot: l, familles: fams }) => ({
             id: l.id,
             code: l.code,
             label: l.label,
-            familles: (famByLot.get(l.id) ?? []).map((f) => ({
+            familles: fams.map((f) => ({
               id: f.id,
-              nature: f.nature,
+              nature: natureDe(f, l),
               code: f.code,
               label: f.label,
               codes: (codeByFamille.get(f.id) ?? []).map((c) => ({

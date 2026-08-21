@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient, UseMutationResult } from '@tanstack/react-query';
 import { ChevronRight, ChevronDown, CheckCircle2, Clock, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { PanneauVentilation } from '@/components/PanneauVentilation';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
 
@@ -108,6 +109,10 @@ export default function StructurePage() {
       {tree.data?.marches.map((m) => (
         <MarcheBlock key={m.id} marche={m} chantierId={chantierId} token={token} />
       ))}
+
+      {/* Ranger une dépense se fait ici, dans la structure — pas dans le tableau de résultats,
+          qui donne à lire et non à corriger. */}
+      <PanneauVentilation chantierId={chantierId} />
     </div>
   );
 }

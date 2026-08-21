@@ -3,11 +3,15 @@ import {
 } from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
+import { TypeVentilable, VentilationService } from './ventilation.service';
 import { ChantierService } from './chantier.service';
 
 @Controller()
 export class ChantierController {
-  constructor(private readonly chantiers: ChantierService) {}
+  constructor(
+    private readonly chantiers: ChantierService,
+    private readonly ventilation: VentilationService,
+  ) {}
 
   @Post('chantiers')
   @RequiresCapability('site_tracking.budget')
@@ -58,6 +62,30 @@ export class ChantierController {
     @Body() body: { codeAnalytiqueId?: string | null },
   ) {
     return this.chantiers.ventileResource(chantierId, resourceId, body?.codeAnalytiqueId ?? null);
+  }
+
+  /** Tout ce qui n'a pas de code analytique sur ce chantier : budget, engagé et réalisé. */
+  @Get('chantiers/:chantierId/a-ventiler')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  aVentiler(@Param('chantierId') chantierId: string) {
+    return this.ventilation.aVentiler(chantierId);
+  }
+
+  /**
+   * Impute ou RÉ-IMPUTE une ligne. Le code analytique ne regarde que notre comptabilité : le
+   * corriger sur une commande envoyée ne change rien à ce que le fournisseur a reçu.
+   */
+  @Patch('chantiers/:chantierId/ventilation/:type/:id')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  ventiler(
+    @Param('chantierId') chantierId: string,
+    @Param('type') type: TypeVentilable,
+    @Param('id') id: string,
+    @Body() body: { codeAnalytiqueId?: string | null },
+  ) {
+    return this.ventilation.imputer(chantierId, type, id, body?.codeAnalytiqueId ?? null);
   }
 
   @Get('chantiers/:chantierId/execution-tree')

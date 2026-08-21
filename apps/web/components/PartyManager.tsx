@@ -8,7 +8,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { usePermissions } from '@/lib/capabilities';
 import { SortHeader, SortState, nextSort, applySort } from './SortHeader';
 import { IconBtn } from './IconBtn';
-import { CompanySearch } from './CompanySearch';
+import { Party as PartyFiche, PartyModal } from './PartyModal';
 
 interface Party {
   id: string;
@@ -24,14 +24,6 @@ interface Page {
   rows: Party[];
   total: number;
 }
-interface FormState {
-  code: string;
-  name: string;
-  vatNumber: string;
-  email: string;
-  phone: string;
-}
-const EMPTY: FormState = { code: '', name: '', vatNumber: '', email: '', phone: '' };
 
 export function PartyManager({
   resource,
@@ -50,42 +42,12 @@ export function PartyManager({
   // ce peut être le deviseur, la secrétaire, le directeur… d'où une permission dédiée.
   const peutValider = usePermissions().can('directory.validate');
   const qc = useQueryClient();
-  const [form, setForm] = useState<FormState>(EMPTY);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const list = useQuery({
     queryKey: [resource],
     enabled: Boolean(token),
     queryFn: () => apiFetch<Page>(`/${resource}?sort=code&pageSize=100`, { token }),
-  });
-
-  function reset() {
-    setForm(EMPTY);
-    setEditingId(null);
-    setShowForm(false);
-    setError(null);
-  }
-
-  const save = useMutation({
-    mutationFn: () => {
-      const body = {
-        code: form.code,
-        name: form.name,
-        vatNumber: form.vatNumber || null,
-        email: form.email || null,
-        phone: form.phone || null,
-      };
-      return editingId
-        ? apiFetch(`/${resource}/${editingId}`, { method: 'PATCH', body, token })
-        : apiFetch(`/${resource}`, { method: 'POST', body, token });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: [resource] });
-      reset();
-    },
-    onError: (e) => setError(e instanceof ApiError ? e.message : "Échec de l'enregistrement"),
   });
 
   const remove = useMutation({
@@ -99,24 +61,8 @@ export function PartyManager({
     onError: (e) => setError(e instanceof ApiError ? e.message : 'Validation impossible.'),
   });
 
-  function startCreate() {
-    setForm(EMPTY);
-    setEditingId(null);
-    setError(null);
-    setShowForm(true);
-  }
-  function startEdit(p: Party) {
-    setForm({
-      code: p.code,
-      name: p.name,
-      vatNumber: p.vat_number ?? '',
-      email: p.email ?? '',
-      phone: p.phone ?? '',
-    });
-    setEditingId(p.id);
-    setError(null);
-    setShowForm(true);
-  }
+  // `undefined` = fenêtre fermée, `null` = création, une fiche = modification.
+  const [fiche, setFiche] = useState<Party | null | undefined>(undefined);
 
   const rawRows = list.data?.rows ?? [];
   const [sort, setSort] = useState<SortState>({ key: null, dir: 'asc' });
@@ -127,70 +73,14 @@ export function PartyManager({
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>{title}</h1>
-        {!showForm && peutEcrire && (
-          <button className="btn" onClick={startCreate}>
+        {peutEcrire && (
+          <button className="btn" onClick={() => { setError(null); setFiche(null); }}>
             + Nouveau {singular}
           </button>
         )}
       </div>
 
-      {showForm && (
-        <div className="card" style={{ marginTop: 12 }}>
-          <h2>{editingId ? `Modifier le ${singular}` : `Nouveau ${singular}`}</h2>
-          {error && <div className="error">{error}</div>}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!form.name) {
-                setError('Le nom est obligatoire.');
-                return;
-              }
-              save.mutate();
-            }}
-          >
-            <div className="field">
-              <CompanySearch
-                label={`Rechercher le ${singular} (annuaire officiel)`}
-                onSelect={(c) => setForm((prev) => ({
-                  ...prev,
-                  name: c.name,
-                  vatNumber: c.vatIntra ?? prev.vatNumber,
-                }))}
-              />
-            </div>
-            {editingId && (
-              <div className="field">
-                <label>Code</label>
-                <input value={form.code} disabled title="Attribué automatiquement" />
-              </div>
-            )}
-            <div className="field">
-              <label>Nom *</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </div>
-            <div className="field">
-              <label>N° TVA</label>
-              <input value={form.vatNumber} onChange={(e) => setForm({ ...form, vatNumber: e.target.value })} />
-            </div>
-            <div className="field">
-              <label>E-mail</label>
-              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            </div>
-            <div className="field">
-              <label>Téléphone</label>
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" type="submit" disabled={save.isPending}>
-                {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
-              </button>
-              <button className="link" type="button" onClick={reset}>
-                Annuler
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      {error && <div className="error">{error}</div>}
 
       <div className="card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
         {list.isLoading && <p className="muted" style={{ padding: 16 }}>Chargement…</p>}
@@ -236,7 +126,7 @@ export function PartyManager({
                     )}
                     {peutEcrire && (
                       <>
-                        <IconBtn title={`Modifier ${p.name}`} color="#64748b" onClick={() => startEdit(p)}>
+                        <IconBtn title={`Modifier ${p.name}`} color="#64748b" onClick={() => setFiche(p)}>
                           <Pencil size={13} />
                         </IconBtn>
                         <IconBtn
@@ -256,6 +146,15 @@ export function PartyManager({
         )}
         {list.data && rows.length === 0 && <p className="muted" style={{ padding: 16 }}>Aucun {singular}.</p>}
       </div>
+
+      {fiche !== undefined && (
+        <PartyModal
+          resource={resource as 'clients' | 'suppliers'}
+          singular={singular}
+          party={fiche as PartyFiche | null}
+          onClose={() => setFiche(undefined)}
+        />
+      )}
     </div>
   );
 }

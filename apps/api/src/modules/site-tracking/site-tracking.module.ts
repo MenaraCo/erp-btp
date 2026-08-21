@@ -4,6 +4,7 @@ import { NumberingModule } from '../../core/numbering/numbering.module';
 import { MailerModule } from '../../core/mailer/mailer.module';
 import { EstimatingModule } from '../estimating/estimating.module';
 import { ChantierService } from './chantier.service';
+import { VentilationService } from './ventilation.service';
 import { ChantierController } from './chantier.controller';
 import { EmployeeService } from './employee.service';
 import { InterimService } from './interim.service';
@@ -41,7 +42,7 @@ import { AnalyticsController } from './analytics.controller';
  */
 @Module({
   imports: [TenancyModule, NumberingModule, MailerModule, EstimatingModule],
-  providers: [ChantierService, TimesheetService,
+  providers: [ChantierService, VentilationService, TimesheetService,
     EmployeeService, InterimService, MaterielService,
     PlanningService,
     PersonnelService, AbsenceService, AbsencesPdfService, PurchasingService, ApprovisionnementService,
@@ -60,7 +61,7 @@ import { AnalyticsController } from './analytics.controller';
     AnalyticsController,
     LibraryTransferController,
   ],
-  exports: [ChantierService, TimesheetService,
+  exports: [ChantierService, VentilationService, TimesheetService,
     EmployeeService, InterimService, MaterielService,
     PlanningService,
     PersonnelService, AbsenceService, AbsencesPdfService, PurchasingService, ApprovisionnementService,
