@@ -331,7 +331,11 @@ function TabEntreprise({ token }: { token: string }) {
 interface GroupeDoublon {
   type: 'lot' | 'famille' | 'code';
   libelle: string;
-  entrees: Array<{ id: string; code: string; label: string; usages: number }>;
+  entrees: Array<{
+    id: string; code: string; label: string; usages: number; rattachement: string | null;
+  }>;
+  /** La fiche que le serveur conseille de garder — null quand il n'ose pas trancher. */
+  gardeId: string | null;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -376,6 +380,52 @@ function TabDoublons() {
         factures et pointages de l’autre, puis supprime le doublon.
       </p>
 
+      {groupes.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button
+            className="btn"
+            disabled={fusion.isPending}
+            onClick={() => {
+              const surs = groupes.filter((g) => g.gardeId);
+              const paires = surs.flatMap((g) => g.entrees
+                .filter((e) => e.id !== g.gardeId)
+                .map((e) => ({ type: g.type, gardeId: g.gardeId as string, supprimeId: e.id })));
+              const restants = groupes.length - surs.length;
+              if (!paires.length) return;
+              if (!confirm(
+                `Fusionner ${paires.length} doublon(s) dans les ${surs.length} fiches conseillées ?\n\n`
+                + `L’application garde la fiche classée dans le plan et lui réaffecte les fiches qui `
+                + `ne le sont pas. Action définitive.`
+                + (restants
+                  ? `\n\n${restants} groupe(s) ne seront PAS touchés : plusieurs de leurs fiches sont `
+                    + `classées, elles peuvent désigner deux postes différents. À traiter à la main.`
+                  : ''),
+              )) return;
+              erreur.onOk();
+              // Une fusion à la fois : elles touchent les mêmes tables, et lancer quarante
+              // écritures concurrentes sur le plan reviendrait à se disputer avec soi-même.
+              void (async () => {
+                for (const p of paires) {
+                  try {
+                    await fusion.mutateAsync(p);
+                  } catch {
+                    // L'erreur est déjà affichée ; on s'arrête là plutôt que d'insister.
+                    break;
+                  }
+                }
+              })();
+            }}
+          >
+            Tout fusionner sur la fiche conseillée
+          </button>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {groupes.length} groupe(s), dont {groupes.filter((g) => g.gardeId).length} sans ambiguïté
+            {groupes.some((g) => !g.gardeId)
+              && ' — les autres ont plusieurs fiches classées et restent à décider'}.
+          </span>
+        </div>
+      )}
+
       {isLoading ? (
         <p className="muted" style={{ fontSize: 12 }}>Analyse du plan…</p>
       ) : groupes.length === 0 ? (
@@ -386,20 +436,35 @@ function TabDoublons() {
         </Card>
       ) : (
         groupes.map((g) => (
-          <Card key={`${g.type}-${g.libelle}`} title={`${TYPE_LABEL[g.type] ?? g.type} — « ${g.libelle} »`}>
+          <Card
+            key={`${g.type}-${g.libelle}`}
+            title={`${TYPE_LABEL[g.type] ?? g.type} — « ${g.libelle} »${g.gardeId ? '' : '  ⚠ à décider'}`}
+          >
+            {!g.gardeId && (
+              <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
+                Plusieurs de ces fiches sont classées dans le plan : elles désignent peut-être deux
+                postes distincts qui partagent un numéro. Vérifiez avant de fusionner.
+              </p>
+            )}
             <table className="grid">
               <thead>
-                <tr><th>Code</th><th>Désignation</th><th style={{ textAlign: 'right' }}>Usages</th><th /></tr>
+                <tr>
+                  <th>Code</th><th>Désignation</th><th>Classée dans</th>
+                  <th style={{ textAlign: 'right' }}>Usages</th><th />
+                </tr>
               </thead>
               <tbody>
                 {g.entrees.map((e) => (
                   <tr key={e.id}>
                     <td className="code-cell">{e.code}</td>
                     <td>{e.label}</td>
+                    <td className={e.rattachement ? undefined : 'muted'} style={{ fontSize: 12 }}>
+                      {e.rattachement ?? 'non classée'}
+                    </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{e.usages}</td>
                     <td style={{ textAlign: 'right' }}>
                       <button
-                        className="btn-secondary btn"
+                        className={g.gardeId === e.id ? 'btn' : 'btn-secondary btn'}
                         style={{ padding: '2px 10px', fontSize: 10.5 }}
                         disabled={fusion.isPending}
                         title={`Garder « ${e.label} » et y fusionner les autres`}
@@ -416,7 +481,7 @@ function TabDoublons() {
                           }
                         }}
                       >
-                        Garder celle-ci
+                        {g.gardeId === e.id ? 'Garder celle-ci (conseillé)' : 'Garder celle-ci'}
                       </button>
                     </td>
                   </tr>

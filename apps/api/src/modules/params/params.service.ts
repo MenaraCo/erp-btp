@@ -516,37 +516,52 @@ export class ParamsService {
 
   /* ================== DOUBLONS DÉJÀ EN PLACE ================== */
 
-  /**
-   * Tables qui référencent chaque niveau du plan. La fusion doit toutes les réaffecter avant de
-   * supprimer le doublon — en oublier une casserait une clé étrangère, ou pire, ferait disparaître
-   * silencieusement des coûts de l'agrégation analytique.
-   */
-  private static readonly REFERENCES: Record<string, { table: string; refs: Array<[string, string]> }> = {
-    lot: {
-      table: 'analytical_lot',
-      refs: [['analytical_famille', 'lot_id'], ['ouvrage', 'lot_id']],
-    },
-    famille: {
-      table: 'analytical_famille',
-      refs: [['analytical_code', 'famille_id']],
-    },
-    code: {
-      table: 'analytical_code',
-      refs: [
-        ['resource', 'code_analytique_id'],
-        ['nomenclature_resource', 'code_analytique_id'],
-        ['purchase_order_line', 'code_analytique_id'],
-        ['supplier_invoice', 'code_analytique_id'],
-        ['timesheet', 'code_analytique_id'],
-      ],
-    },
+  /** Table porteuse de chaque niveau du plan. Les colonnes qui la référencent, elles, se lisent. */
+  private static readonly TABLE_DU_NIVEAU: Record<string, string> = {
+    lot: 'analytical_lot',
+    famille: 'analytical_famille',
+    code: 'analytical_code',
+  };
+
+  /** Le niveau au-dessus, celui qui classe : une entrée qui n'y est pas rattachée est perdue. */
+  private static readonly RATTACHEMENT: Record<string, { colonne: string; table: string }> = {
+    code: { colonne: 'famille_id', table: 'analytical_famille' },
+    famille: { colonne: 'lot_id', table: 'analytical_lot' },
   };
 
   /**
-   * Entrées du plan qui désignent visiblement la même chose — même libellé une fois normalisé.
+   * Tout ce qui pointe sur une table, lu dans le catalogue PostgreSQL.
    *
-   * La garde à l'écriture empêche d'en créer de nouveaux ; elle ne dit rien de ceux déjà en base,
-   * hérités d'imports ou d'une époque sans contrôle. Ce relevé les met sous les yeux.
+   * Cette liste s'écrivait à la main. Elle nommait cinq tables quand seize référençaient déjà le
+   * code analytique : fusionner un doublon aurait vidé en silence le lien des budgets, du parc
+   * matériel, de l'intérim, de la paye et des stocks — la clé étrangère étant en SET NULL, rien
+   * n'aurait protesté. Une liste qu'il faut penser à tenir à jour finit toujours par mentir ; le
+   * catalogue, lui, connaît chaque table ajoutée depuis, et celles qu'on ajoutera demain.
+   */
+  private async referencesVers(em: EntityManager, table: string): Promise<Array<[string, string]>> {
+    const lignes: Array<{ table_source: string; colonne: string }> = await em.query(
+      `SELECT c.conrelid::regclass::text AS table_source, a.attname AS colonne
+         FROM pg_constraint c
+         JOIN unnest(c.conkey) k(att) ON true
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.att
+        WHERE c.contype = 'f' AND c.confrelid = $1::regclass
+        ORDER BY 1, 2`,
+      [table],
+    );
+    return lignes.map((l) => [l.table_source, l.colonne] as [string, string]);
+  }
+
+  /**
+   * Entrées du plan qui désignent visiblement la même chose.
+   *
+   * Trois façons de se ressembler, parce qu'un doublon ne se présente pas toujours pareil :
+   * le même libellé une fois normalisé ; le même code à la ponctuation près (« SD-200 » et
+   * « SD 200 ») ; et le code d'origine conservé en tête du libellé, signature d'un ré-import —
+   * « MNR-200 | 200 — SD_CAR » désigne le code « 200 » de la société, mais aucun de ses deux
+   * champs ne lui ressemble, si bien que le relevé ne le voyait pas.
+   *
+   * Les ressemblances se chaînent : A tient à B par le libellé, B à C par le code, les trois
+   * forment un seul groupe. Sans cela on présenterait la même famille en deux relevés séparés.
    */
   async listerDoublons() {
     const tenantId = this.context.requireTenantId();
@@ -554,24 +569,84 @@ export class ParamsService {
       const groupes: Array<{
         type: string;
         libelle: string;
-        entrees: Array<{ id: string; code: string; label: string; usages: number }>;
+        entrees: Array<{
+          id: string; code: string; label: string; usages: number; rattachement: string | null;
+        }>;
+        /** La fiche à garder — ou null quand le relevé n'ose pas trancher. */
+        gardeId: string | null;
       }> = [];
 
-      for (const [type, { table, refs }] of Object.entries(ParamsService.REFERENCES)) {
-        const lignes: Array<{ id: string; code: string; label: string }> = await em.query(
-          `SELECT id, code, label FROM ${table} ORDER BY code`,
+      for (const [type, table] of Object.entries(ParamsService.TABLE_DU_NIVEAU)) {
+        const refs = await this.referencesVers(em, table);
+        // Le rattachement au niveau supérieur départage : une entrée non classée ne remonte dans
+        // aucun total analytique. C'est elle qu'on fusionne, pas celle qui est à sa place.
+        const parent = ParamsService.RATTACHEMENT[type];
+        const lignes: Array<{
+          id: string; code: string; label: string; rattachement: string | null;
+        }> = await em.query(
+          parent
+            ? `SELECT e.id, e.code, e.label, p.label AS rattachement
+                 FROM ${table} e LEFT JOIN ${parent.table} p ON p.id = e.${parent.colonne}
+                ORDER BY e.code`
+            : `SELECT id, code, label, NULL::varchar AS rattachement FROM ${table} ORDER BY code`,
         );
-        const parLibelle = new Map<string, typeof lignes>();
+
+        // Chaque clé de ressemblance rassemble ceux qui la partagent ; les groupes se soudent.
+        const attache = new Map<string, string>();
+        const racine = (id: string): string => {
+          let r = id;
+          while (attache.get(r) && attache.get(r) !== r) r = attache.get(r) as string;
+          return r;
+        };
+        const souder = (a: string, b: string) => {
+          const [ra, rb] = [racine(a), racine(b)];
+          if (ra !== rb) attache.set(rb, ra);
+        };
+        for (const l of lignes) attache.set(l.id, l.id);
+
+        const parCle = new Map<string, string>();
+        const rapprocher = (cle: string | null, id: string) => {
+          if (!cle) return;
+          const vu = parCle.get(cle);
+          if (vu) souder(vu, id);
+          else parCle.set(cle, id);
+        };
+        const codeNormalise = (code: string | null) => {
+          const c = (code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          return c ? `c:${c}` : null;
+        };
         for (const l of lignes) {
-          const cle = normaliserLibelle(l.label);
-          if (!cle) continue;
-          const liste = parLibelle.get(cle);
-          if (liste) liste.push(l);
-          else parLibelle.set(cle, [l]);
+          const libelle = normaliserLibelle(l.label);
+          rapprocher(libelle ? `l:${libelle}` : null, l.id);
+          rapprocher(codeNormalise(l.code), l.id);
         }
-        for (const [cle, liste] of parLibelle) {
+
+        // Un ré-import garde le code d'origine en tête du libellé : « 200 — SD_CAR ». Ce préfixe
+        // ne vaut que s'il désigne un code QUI EXISTE : sinon cinq familles importées sous
+        // « Peinture — P_ACC », « Peinture — P_CONS »… se retrouveraient soudées entre elles par
+        // un préfixe commun qui n'est pas un code du tout, mais le nom de leur lot.
+        const parCode = new Map<string, string>();
+        for (const l of lignes) {
+          const c = codeNormalise(l.code);
+          if (c && !parCode.has(c)) parCode.set(c, l.id);
+        }
+        for (const l of lignes) {
+          const origine = /^\s*([A-Za-z0-9._-]{1,20})\s+[—–-]\s+/.exec(l.label ?? '');
+          if (!origine) continue;
+          const vise = parCode.get(codeNormalise(origine[1]) ?? '');
+          if (vise && vise !== l.id) souder(vise, l.id);
+        }
+
+        const familles = new Map<string, typeof lignes>();
+        for (const l of lignes) {
+          const r = racine(l.id);
+          const liste = familles.get(r);
+          if (liste) liste.push(l);
+          else familles.set(r, [l]);
+        }
+
+        for (const liste of familles.values()) {
           if (liste.length < 2) continue;
-          // Le nombre d'usages guide le choix du survivant : on garde celui qui porte le plus.
           const entrees = [];
           for (const e of liste) {
             let usages = 0;
@@ -581,7 +656,22 @@ export class ParamsService {
             }
             entrees.push({ ...e, usages });
           }
-          groupes.push({ type, libelle: cle, entrees });
+          const classees = entrees.filter((e) => e.rattachement !== null);
+          // Un seul cas se conseille les yeux fermés : une fiche à sa place dans le plan, et des
+          // fiches qui ne sont rangées nulle part — les restes d'un import. Dès que deux fiches
+          // sont classées, ce sont deux postes vivants, peut-être homonymes sans être identiques :
+          // « 216 — CH_MO » (main d'œuvre) et « SD_Mortier » portent le même numéro d'origine et
+          // n'ont rien à voir. Les fusionner effacerait un poste ; le relevé s'abstient.
+          const garde = classees.length === 1 ? classees[0]
+            : classees.length === 0
+              ? [...entrees].sort((a, b) => b.usages - a.usages || a.code.length - b.code.length)[0]
+              : null;
+          groupes.push({
+            type,
+            libelle: normaliserLibelle(liste[0].label) || liste[0].code,
+            entrees,
+            gardeId: garde?.id ?? null,
+          });
         }
       }
       return groupes;
@@ -596,25 +686,25 @@ export class ParamsService {
    * l'agrégation analytique s'en trouverait fausse sans que rien ne le signale.
    */
   async fusionnerDoublon(type: string, gardeId: string, supprimeId: string) {
-    const conf = ParamsService.REFERENCES[type];
-    if (!conf) throw new BadRequestException(`Type de référentiel inconnu : « ${type} ».`);
+    const table = ParamsService.TABLE_DU_NIVEAU[type];
+    if (!table) throw new BadRequestException(`Type de référentiel inconnu : « ${type} ».`);
     if (gardeId === supprimeId) {
       throw new BadRequestException('Choisissez deux entrées différentes.');
     }
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, async (em) => {
-      await this.assertExists(em, conf.table, gardeId);
-      await this.assertExists(em, conf.table, supprimeId);
+      await this.assertExists(em, table, gardeId);
+      await this.assertExists(em, table, supprimeId);
 
       let reaffectes = 0;
-      for (const [t, col] of conf.refs) {
+      for (const [t, col] of await this.referencesVers(em, table)) {
         const r = await em.query(
           `UPDATE ${t} SET ${col} = $1 WHERE ${col} = $2`,
           [gardeId, supprimeId],
         );
         reaffectes += r[1] ?? 0;
       }
-      await em.query(`DELETE FROM ${conf.table} WHERE id = $1`, [supprimeId]);
+      await em.query(`DELETE FROM ${table} WHERE id = $1`, [supprimeId]);
       return { reaffectes };
     });
   }

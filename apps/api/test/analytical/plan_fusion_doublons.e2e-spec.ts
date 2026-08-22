@@ -133,4 +133,115 @@ describe('Plan analytique — fusionner les doublons hérités', () => {
       .send({ label: 'Assurance décennale' })
       .expect(409);
   });
+  it('repere_un_code_reimporte_qui_garde_son_code_d_origine_dans_le_libelle', async () => {
+    // Signature d'un ré-import de bibliothèque : la fiche reprise porte un code neuf et range
+    // l'ancien en tête de son libellé. Ni le code ni le libellé ne ressemblent à ceux de la fiche
+    // société — le relevé ne voyait donc rien, pendant que la même dépense se comptait deux fois.
+    await codeHerite('300', 'SD_Carrelage');
+    await codeHerite('MNR-300', '300 — SD_CAR');
+
+    const groupes = (await as('get', '/params/doublons').expect(200)).body;
+    const g = groupes.find((x: { type: string; entrees: Array<{ code: string }> }) =>
+      x.type === 'code' && x.entrees.some((e) => e.code === 'MNR-300'));
+    expect(g).toBeDefined();
+    expect(g.entrees.map((e: { code: string }) => e.code).sort()).toEqual(['300', 'MNR-300']);
+  });
+
+  it('rapproche_aussi_deux_codes_qui_ne_different_que_par_la_ponctuation', async () => {
+    await codeHerite('SD 410', 'Ragréage extérieur');
+    await codeHerite('SD-410', 'Ragréage terrasse');
+
+    const groupes = (await as('get', '/params/doublons').expect(200)).body;
+    const g = groupes.find((x: { entrees: Array<{ code: string }> }) =>
+      x.entrees.some((e) => e.code === 'SD 410'));
+    expect(g.entrees.map((e: { code: string }) => e.code).sort()).toEqual(['SD 410', 'SD-410']);
+  });
+
+  it('reaffecte_meme_les_tables_qu_aucune_liste_ecrite_a_la_main_ne_nommait', async () => {
+    // La fusion s'appuyait sur une liste de tables tenue à la main. Elle en nommait cinq quand
+    // seize référençaient le code analytique : le stock, le parc matériel, l'intérim, la paye et
+    // les budgets n'y étaient pas, et leur lien — en SET NULL — se serait vidé sans un bruit.
+    const garde = await codeHerite('500', 'Enduit');
+    const supprime = await codeHerite('501', 'ENDUIT');
+    await runInTenant(ds, tenantId, async (em) => {
+      await em.query(
+        `INSERT INTO stock_article (tenant_id, code, label, unit, code_analytique_id)
+         VALUES ($1, 'ART-F', 'Sac d''enduit', 'SAC', $2)`,
+        [tenantId, supprime],
+      );
+      await em.query(
+        `INSERT INTO equipment (tenant_id, code, label, code_analytique_id)
+         VALUES ($1, 'ENG-F', 'Ponceuse', $2)`,
+        [tenantId, supprime],
+      );
+    });
+
+    const r = (await as('post', '/params/doublons/fusionner')
+      .send({ type: 'code', gardeId: garde, supprimeId: supprime }).expect(201)).body;
+    expect(r.reaffectes).toBe(2);
+
+    const restes = await runInTenant(ds, tenantId, (em) =>
+      em.query(
+        `SELECT (SELECT count(*)::int FROM stock_article WHERE code_analytique_id = $1) AS art,
+                (SELECT count(*)::int FROM equipment     WHERE code_analytique_id = $1) AS eng`,
+        [garde],
+      ));
+    expect(restes[0]).toEqual({ art: 1, eng: 1 });
+  });
+  it('s_abstient_de_conseiller_quand_deux_fiches_classees_partagent_un_numero', async () => {
+    // Le piège des données réelles : « 216 — CH_MO » (main d'œuvre gros œuvre, ré-importée mais
+    // bien classée) et « SD_Mortier » (code 216 de la société) se ressemblent par le seul numéro
+    // d'origine. Ce sont deux postes vivants ; les fusionner en effacerait un.
+    const autreLot = (await as('post', '/params/lots').send({ code: 'GO', label: 'Gros œuvre' }).expect(201)).body;
+    const autreFamille = (await as('post', '/params/familles')
+      .send({ lotId: autreLot.id, code: 'MO', label: 'Main d’œuvre' }).expect(201)).body;
+    await codeHerite('216', 'SD_Mortier');
+    await runInTenant(ds, tenantId, (em) =>
+      em.query(
+        `INSERT INTO analytical_code (tenant_id, famille_id, code, label, nature)
+         VALUES ($1, $2, 'MNR-216', '216 — CH_MO', 'labor')`,
+        [tenantId, autreFamille.id],
+      ));
+
+    const groupes = (await as('get', '/params/doublons').expect(200)).body;
+    const g = groupes.find((x: { entrees: Array<{ code: string }> }) =>
+      x.entrees.some((e) => e.code === 'MNR-216'));
+    expect(g.entrees).toHaveLength(2);
+    // Le relevé les montre — mais ne désigne personne, et la fusion en masse les laissera tranquilles.
+    expect(g.gardeId).toBeNull();
+  });
+
+  it('conseille_la_fiche_classee_quand_l_autre_ne_l_est_pas', async () => {
+    await codeHerite('700', 'Bardage bois');
+    const orpheline = await runInTenant(ds, tenantId, (em) =>
+      em.query(
+        `INSERT INTO analytical_code (tenant_id, code, label, nature)
+         VALUES ($1, 'MNR-700', '700 — FAC_BAR', 'material') RETURNING id`,
+        [tenantId],
+      ));
+
+    const groupes = (await as('get', '/params/doublons').expect(200)).body;
+    const g = groupes.find((x: { entrees: Array<{ code: string }> }) =>
+      x.entrees.some((e) => e.code === 'MNR-700'));
+    const classee = g.entrees.find((e: { code: string }) => e.code === '700');
+    expect(g.gardeId).toBe(classee.id);
+    expect(classee.rattachement).toBe('Collage');
+    expect(g.entrees.find((e: { code: string }) => e.code === 'MNR-700').rattachement).toBeNull();
+    expect(orpheline[0].id).toBeDefined();
+  });
+  it('ne_soude_pas_des_familles_que_leur_seul_prefixe_commun_rapproche', async () => {
+    // Un import range ses familles sous le nom de leur lot : « Peinture — P_ACC »,
+    // « Peinture — P_CONS », « Peinture — P_REV ». Le préfixe est identique et pourtant ce sont
+    // trois familles bien distinctes. Un préfixe ne vaut que s'il désigne un code qui existe.
+    const lot = (await as('post', '/params/lots').send({ code: 'PEI', label: 'Peinture' }).expect(201)).body;
+    for (const [code, label] of [['P_ACC', 'Peinture — P_ACC'], ['P_CONS', 'Peinture — P_CONS'],
+      ['P_REV', 'Peinture — P_REV']]) {
+      await as('post', '/params/familles').send({ lotId: lot.id, code, label }).expect(201);
+    }
+
+    const groupes = (await as('get', '/params/doublons').expect(200)).body;
+    const familles = groupes.filter((g: { type: string }) => g.type === 'famille');
+    expect(familles.flatMap((g: { entrees: Array<{ label: string }> }) => g.entrees)
+      .filter((e: { label: string }) => e.label.startsWith('Peinture — '))).toHaveLength(0);
+  });
 });
