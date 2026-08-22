@@ -52,7 +52,9 @@ interface TableauBudgets {
   resultatBrut: Metriques;
   resultatNet: Metriques;
   total: Metriques;
+  enveloppe: { depassementsAssumes: string; apportsAvenants: string };
 }
+interface AvenantOption { id: string; numero: number | string; designation?: string | null; total_ht: string }
 interface RessourceBudget {
   id: string; code: string; label: string; unit: string | null; nature: string;
   codeAnalytiqueId: string | null; codeAnalytique: string | null;
@@ -140,6 +142,12 @@ export default function BudgetsPage() {
   const codes = useQuery({
     queryKey: ['params-codes'], enabled: Boolean(token), retry: false,
     queryFn: () => apiFetch<CodeAnalytique[]>('/params/codes', { token }),
+  });
+  // Les avenants du chantier : la façon ordinaire d'agrandir l'enveloppe, celle qui apporte
+  // aussi la recette correspondante.
+  const avenants = useQuery({
+    queryKey: ['chantier-avenants', chantierId], enabled: Boolean(token), retry: false,
+    queryFn: () => apiFetch<AvenantOption[]>(`/chantiers/${chantierId}/avenants`, { token }),
   });
 
   /** Un mouvement de budget déplace la CIBLE : tout ce qui la lit doit se rafraîchir. */
@@ -248,6 +256,16 @@ export default function BudgetsPage() {
             }`}
           />
         </div>
+      )}
+
+      {d && Number(d.enveloppe.depassementsAssumes) !== 0 && (
+        <Alerte ton="danger">
+          <strong>{euro(d.enveloppe.depassementsAssumes)}</strong> de budget ajouté hors avenant
+          (dépassements assumés). Cet argent ne vient d'aucune recette nouvelle : il se prend sur le
+          résultat. {Number(d.enveloppe.apportsAvenants) !== 0 && (
+            <>Les avenants, eux, ont apporté {euro(d.enveloppe.apportsAvenants)}.</>
+          )}
+        </Alerte>
       )}
 
       {d && (
@@ -521,6 +539,7 @@ export default function BudgetsPage() {
         <ModaleSaisie
           codes={codes.data ?? []}
           ressources={ressources.data ?? []}
+          avenants={avenants.data ?? []}
           pending={mSaisir.isPending}
           erreur={err}
           onClose={() => setSaisie(false)}
@@ -692,10 +711,11 @@ function ModaleFigeage({
 
 /* ─────────── saisie d'un budget ─────────── */
 function ModaleSaisie({
-  codes, ressources, pending, erreur, onClose, onSubmit,
+  codes, ressources, avenants, pending, erreur, onClose, onSubmit,
 }: {
   codes: CodeAnalytique[];
   ressources: RessourceBudget[];
+  avenants: AvenantOption[];
   pending: boolean;
   erreur: string | null;
   onClose: () => void;
@@ -708,10 +728,15 @@ function ModaleSaisie({
   const [quantite, setQuantite] = useState('');
   const [montant, setMontant] = useState('');
   const [motif, setMotif] = useState('');
+  const [avenantId, setAvenantId] = useState('');
 
   const ressource = ressources.find((r) => r.id === ressourceId) ?? null;
   const codeEffectif = ressource?.codeAnalytiqueId ?? codeId;
-  const valide = Boolean(codeEffectif) && libelle.trim() !== '' && montant.trim() !== '' && Number(montant) !== 0;
+  const dotation = Number(montant) > 0;
+  const valide = Boolean(codeEffectif) && libelle.trim() !== '' && montant.trim() !== ''
+    && Number(montant) !== 0
+    // Une dotation sans avenant doit être motivée : c'est la contrepartie de son acceptation.
+    && (!dotation || Boolean(avenantId) || motif.trim() !== '');
 
   return (
     <Modale
@@ -732,6 +757,8 @@ function ModaleSaisie({
               quantite: quantite || '0',
               montant,
               motif: motif.trim() || null,
+              avenantId: avenantId || null,
+              depassementAssume: dotation && !avenantId,
             })
           }
         >
@@ -745,6 +772,11 @@ function ModaleSaisie({
         reprise. Le <strong>compte prorata</strong> et la <strong>retenue de garantie</strong> se saisissent
         donc sur un code de type « produit », en négatif.
       </p>
+      <Alerte ton="info">
+        On ne crée pas de budget : une <strong>dotation</strong> doit dire d'où vient l'argent — d'un
+        <strong> avenant</strong>, ou d'un <strong>dépassement assumé</strong> qui se prendra sur le
+        résultat. Pour déplacer une enveloppe existante, utilisez plutôt <strong>Riper du budget</strong>.
+      </Alerte>
       <div className="field">
         <label>Date de valeur</label>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -787,9 +819,29 @@ function ModaleSaisie({
           <input type="number" step="any" value={montant} onChange={(e) => setMontant(e.target.value)} style={{ textAlign: 'right' }} />
         </div>
       </div>
+      {Number(montant) > 0 && (
+        <>
+          <div className="field">
+            <label>D'où vient l'argent ?</label>
+            <select value={avenantId} onChange={(e) => setAvenantId(e.target.value)}>
+              <option value="">Dépassement assumé — pris sur le résultat</option>
+              {avenants.map((a) => (
+                <option key={a.id} value={a.id}>
+                  Avenant n° {a.numero} — {euro(a.total_ht)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {!avenantId && (
+            <span className="muted" style={{ fontSize: 11 }}>
+              Sans avenant, le motif devient obligatoire : un dépassement anonyme est indéfendable.
+            </span>
+          )}
+        </>
+      )}
       <div className="field">
-        <label>Motif (facultatif)</label>
-        <input value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="ex. avenant client accepté" />
+        <label>Motif {Number(montant) > 0 && !avenantId ? '(obligatoire)' : '(facultatif)'}</label>
+        <input value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="ex. sol impropre découvert au terrassement" />
       </div>
     </Modale>
   );

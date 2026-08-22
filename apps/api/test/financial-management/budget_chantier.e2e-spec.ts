@@ -99,7 +99,11 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
     expect(Number(avant.total.mouvements)).toBeCloseTo(0, 2);
 
     await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
-      .send({ codeAnalytiqueId: codeAdhesif, libelle: 'Enveloppe adhésif', montant: '500' })
+      // Agrandir l'enveloppe se justifie : ici, un dépassement assumé et motivé.
+      .send({
+        codeAnalytiqueId: codeAdhesif, libelle: 'Enveloppe adhésif', montant: '500',
+        depassementAssume: true, motif: 'Surface à recouvrir revue à la hausse',
+      })
       .expect(201);
 
     const apres = (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
@@ -171,7 +175,10 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
 
     // Une dotation ultérieure éloigne le global de l'initial : c'est exactement ce qu'on veut voir.
     await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
-      .send({ codeAnalytiqueId: codeColle, libelle: 'Aléa', montant: '300' })
+      .send({
+        codeAnalytiqueId: codeColle, libelle: 'Aléa', montant: '300',
+        depassementAssume: true, motif: 'Aléa de chantier',
+      })
       .expect(201);
 
     const apres = (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
@@ -206,7 +213,10 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
     expect(v1).toBeDefined();
 
     await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
-      .send({ codeAnalytiqueId: codeAdhesif, libelle: 'Aléa de chantier', montant: '400' })
+      .send({
+        codeAnalytiqueId: codeAdhesif, libelle: 'Aléa de chantier', montant: '400',
+        depassementAssume: true, motif: 'Reprise imprévue',
+      })
       .expect(201);
     const v2 = (await as('post', `/chantiers/${chantierId}/budgets/photos`)
       .send({ niveau: 'etude', commentaire: 'Révision après aléa' }).expect(201)).body;
@@ -238,5 +248,33 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
     await as('post', `/chantiers/${chantierId}/budgets/photos`)
       .send({ niveau: 'brouillon' }).expect(400);
     await as('post', `/chantiers/${chantierId}/budgets/photos`).send({}).expect(400);
+  });
+
+  it('une_dotation_sans_contrepartie_est_refusee_on_ne_cree_pas_de_budget', async () => {
+    const r = await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
+      .send({ codeAnalytiqueId: codeColle, libelle: 'Rallonge', montant: '1000' })
+      .expect(400);
+    expect(String(r.body.message)).toContain('enveloppe');
+
+    // Reprendre reste libre : une diminution ne crée rien.
+    await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
+      .send({ codeAnalytiqueId: codeColle, libelle: 'Économie sur la colle', montant: '-100' })
+      .expect(201);
+  });
+
+  it('une_dotation_assumee_passe_mais_se_signale_dans_l_enveloppe', async () => {
+    await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
+      .send({
+        codeAnalytiqueId: codeColle, libelle: 'Aléa de sol', montant: '500',
+        depassementAssume: true, motif: 'Sol impropre découvert au terrassement',
+      })
+      .expect(201);
+    // Sans motif, même assumé, on refuse : un dépassement anonyme est indéfendable.
+    await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
+      .send({ codeAnalytiqueId: codeColle, libelle: 'Autre', montant: '10', depassementAssume: true })
+      .expect(400);
+
+    const b = (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
+    expect(Number(b.enveloppe.depassementsAssumes)).toBeGreaterThanOrEqual(500);
   });
 });

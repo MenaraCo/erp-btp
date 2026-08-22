@@ -154,7 +154,10 @@ describe('Suivi de chantier — charges, frais généraux, produits et résultat
   it('un_frais_general_saisi_pese_sur_le_resultat_net_mais_pas_sur_le_resultat_brut', async () => {
     const avant = await budgets();
     await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
-      .send({ codeAnalytiqueId: codeFg, libelle: 'Assurance chantier', montant: '200' })
+      .send({
+        codeAnalytiqueId: codeFg, libelle: 'Assurance chantier', montant: '200',
+        depassementAssume: true, motif: 'Police d’assurance spécifique au chantier',
+      })
       .expect(201);
 
     const apres = await budgets();

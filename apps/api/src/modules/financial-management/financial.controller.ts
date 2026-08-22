@@ -182,6 +182,14 @@ export class FinancialController {
     return this.budget.tableau(chantierId, reference || null);
   }
 
+  /** Avenants du chantier : ce qui peut légitimement agrandir l'enveloppe budgétaire. */
+  @Get('chantiers/:chantierId/avenants')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  getAvenantsChantier(@Param('chantierId') chantierId: string) {
+    return this.budget.avenants(chantierId);
+  }
+
   /** Toutes les photos de budget du chantier : étude, contre-étude, exécution et leurs révisions. */
   @Get('chantiers/:chantierId/budgets/photos')
   @RequiresCapability('site_tracking.budget')

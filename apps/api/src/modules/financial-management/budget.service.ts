@@ -31,6 +31,10 @@ export interface SaisieBudget {
   quantite?: string | number;
   montant: string | number;
   motif?: string | null;
+  /** L'avenant qui apporte cet argent : la seule façon ordinaire d'agrandir l'enveloppe. */
+  avenantId?: string | null;
+  /** Dépassement décidé malgré tout : accepté, mais nommé, motivé et signalé. */
+  depassementAssume?: boolean;
 }
 
 export interface RipageBudget {
@@ -262,9 +266,22 @@ export class BudgetService {
         resultatNet[m] = brut.minus(fg[m]).toString();
       }
 
+      const [enveloppe] = await em.query(
+        `SELECT COALESCE(SUM(montant) FILTER (WHERE depassement_assume), 0)::numeric(16,2) AS depassements,
+                COALESCE(SUM(montant) FILTER (WHERE avenant_id IS NOT NULL), 0)::numeric(16,2) AS avenants
+           FROM chantier_budget_movement
+          WHERE chantier_id = $1 AND statut = 'traite' AND nature <> 'produit'`,
+        [chantierId],
+      );
+
       return {
         chantierId,
         fixedAt: reference?.fixed_at ?? null,
+        /** Ce qui a fait GROSSIR l'enveloppe, et à quel titre : rien ne doit apparaître sans raison. */
+        enveloppe: {
+          depassementsAssumes: enveloppe?.depassements ?? '0',
+          apportsAvenants: enveloppe?.avenants ?? '0',
+        },
         reference: reference
           ? {
             id: reference.id, niveau: reference.niveau, version: reference.version,
@@ -437,15 +454,46 @@ export class BudgetService {
     return runInTenant(this.dataSource, tenantId, async (em) => {
       await this.assertChantier(em, chantierId);
       const cible = await this.resoudre(em, chantierId, input.ressourceId ?? null, input.codeAnalytiqueId);
+
+      /*
+       * L'ENVELOPPE. Une dotation isolée fait apparaître de l'argent : le budget grossit, l'écart
+       * s'efface, et le chantier a l'air de tenir sa cible alors qu'on vient de la déplacer. On ne
+       * l'interdit pas — on exige de dire d'où vient l'argent : d'un avenant, ou d'un dépassement
+       * assumé. Reprendre (montant négatif) et riper restent libres : ils ne créent rien.
+       */
+      if (montant.isPositive()) {
+        const avenant = input.avenantId
+          ? (await em.query(
+            `SELECT a.id FROM avenant a JOIN marche m ON m.id = a.marche_id
+              WHERE a.id = $1 AND m.chantier_id = $2 AND a.status <> 'cancelled'`,
+            [input.avenantId, chantierId],
+          ))[0]
+          : null;
+        if (input.avenantId && !avenant) {
+          throw new NotFoundException('Avenant introuvable sur ce chantier.');
+        }
+        if (!avenant && !input.depassementAssume) {
+          throw new BadRequestException(
+            'Une dotation agrandit l’enveloppe : rattachez-la à un avenant, reprenez le montant '
+            + 'ailleurs par un ripage, ou assumez explicitement le dépassement (avec son motif).',
+          );
+        }
+        if (!avenant && !input.motif?.trim()) {
+          throw new BadRequestException('Un dépassement assumé se motive : dites pourquoi.');
+        }
+      }
+
       const [row] = await em.query(
         `INSERT INTO chantier_budget_movement
            (tenant_id, chantier_id, date, type, code_analytique_id, nomenclature_resource_id,
-            nature, libelle, quantite, montant, motif, actor_user_id)
-         VALUES (current_tenant(), $1, COALESCE($2::date, CURRENT_DATE), 'saisie', $3, $4, $5, $6, $7, $8, $9, $10)
+            nature, libelle, quantite, montant, motif, avenant_id, depassement_assume, actor_user_id)
+         VALUES (current_tenant(), $1, COALESCE($2::date, CURRENT_DATE), 'saisie', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id`,
         [
           chantierId, input.date ?? null, cible.codeId, cible.ressourceId, cible.nature,
-          input.libelle.trim(), input.quantite ?? 0, montant.toFixed(2), input.motif ?? null, userId,
+          input.libelle.trim(), input.quantite ?? 0, montant.toFixed(2), input.motif ?? null,
+          input.avenantId ?? null,
+          montant.isPositive() && !input.avenantId ? true : false, userId,
         ],
       );
       return { id: row.id };
@@ -611,6 +659,26 @@ export class BudgetService {
         id: baseline.id, niveau: baseline.niveau, version: baseline.version,
         fixedAt: baseline.fixed_at, lignes: cumul.size, resultatNet: resultatNet.toFixed(2),
       };
+    });
+  }
+
+  /**
+   * Les avenants du chantier, tous marchés confondus : c'est la provenance légitime d'une
+   * augmentation d'enveloppe, et l'écran de saisie doit pouvoir la désigner d'une liste.
+   */
+  avenants(chantierId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertChantier(em, chantierId);
+      return em.query(
+        `SELECT a.id, a.numero, a.designation, a.total_ht::numeric(16,2) AS total_ht,
+                a.status, m.code AS marche_code
+           FROM avenant a
+           JOIN marche m ON m.id = a.marche_id
+          WHERE m.chantier_id = $1 AND a.status <> 'cancelled'
+          ORDER BY m.code, a.numero`,
+        [chantierId],
+      );
     });
   }
 
