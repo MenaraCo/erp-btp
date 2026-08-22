@@ -519,27 +519,24 @@ export class DevisService {
     );
 
     const totalsMap = new Map<string, Record<string, string>>();
-    await Promise.all(
-      rows
-        .filter((r) => r.latest_version_id)
-        .map(async (r) => {
-          try {
-            const fv = await this.vente.computeForVersion(r.latest_version_id as string);
-            const pvHt = Number(fv.totalPvHt);
-            const margeNette = Number(fv.margeNette);
-            totalsMap.set(r.id as string, {
-              debourse: fv.totalDebourse,
-              revient: fv.totalRevient,
-              pvHt: fv.totalPvHt,
-              margeNette: fv.margeNette,
-              margeNettePct:
-                pvHt !== 0 ? ((margeNette / pvHt) * 100).toFixed(1) : '0.0',
-            });
-          } catch {
-            /* version sans lignes — totaux à zéro */
-          }
-        }),
-    );
+    // En file, pas de front : chaque calcul ouvre sa propre transaction, et les lancer tous
+    // ensemble épuise le pool de connexions sur une liste un peu fournie.
+    for (const r of rows.filter((x) => x.latest_version_id)) {
+      try {
+        const fv = await this.vente.computeForVersion(r.latest_version_id as string);
+        const pvHt = Number(fv.totalPvHt);
+        const margeNette = Number(fv.margeNette);
+        totalsMap.set(r.id as string, {
+          debourse: fv.totalDebourse,
+          revient: fv.totalRevient,
+          pvHt: fv.totalPvHt,
+          margeNette: fv.margeNette,
+          margeNettePct: pvHt !== 0 ? ((margeNette / pvHt) * 100).toFixed(1) : '0.0',
+        });
+      } catch {
+        /* version sans lignes — totaux à zéro */
+      }
+    }
 
     return rows.map((r) => {
       const { latest_version_id: _, ...rest } = r;

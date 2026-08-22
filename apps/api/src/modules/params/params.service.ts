@@ -119,13 +119,13 @@ export class ParamsService {
 
   async reorderUnits(ids: string[]) {
     const tenantId = this.context.requireTenantId();
-    return runInTenant(this.dataSource, tenantId, (em) =>
-      Promise.all(
-        ids.map((id, idx) =>
-          em.query(`UPDATE unit_mesure SET sort_order = $2 WHERE id = $1`, [id, idx + 1]),
-        ),
-      ),
-    );
+    // Une mise à jour après l'autre : toutes ces requêtes passent par LA connexion de la
+    // transaction, et `pg` ne sait pas en traiter deux de front sur le même socket.
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      for (const [idx, id] of ids.entries()) {
+        await em.query(`UPDATE unit_mesure SET sort_order = $2 WHERE id = $1`, [id, idx + 1]);
+      }
+    });
   }
 
   /* ======================== LOTS ======================== */

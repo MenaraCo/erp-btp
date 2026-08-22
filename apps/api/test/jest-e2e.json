@@ -1,14 +1,26 @@
 {
-  "moduleFileExtensions": ["js", "json", "ts"],
+  "moduleFileExtensions": [
+    "js",
+    "json",
+    "ts"
+  ],
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      {
+        "isolatedModules": true
+      }
+    ]
   },
   "globalSetup": "<rootDir>/support/global-setup.cjs",
   "globalTeardown": "<rootDir>/support/global-teardown.cjs",
-  "setupFiles": ["<rootDir>/support/env.setup.cjs"],
+  "setupFiles": [
+    "<rootDir>/support/env.setup.cjs"
+  ],
   "maxWorkers": 1,
-  "testTimeout": 60000
+  "testTimeout": 120000,
+  "workerIdleMemoryLimit": "512MB"
 }

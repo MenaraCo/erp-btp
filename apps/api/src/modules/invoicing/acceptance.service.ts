@@ -80,8 +80,12 @@ export class AcceptanceService {
           ORDER BY d.updated_at DESC`,
       ),
     );
-    return Promise.all(
-      rows.map(async (r) => ({
+    // Un calcul de feuille de vente par ligne, chacun dans SA transaction : lancés tous à la
+    // fois, ils saturent le pool de connexions et la liste finit par attendre. En file, elle
+    // reste prévisible.
+    const fiches = [];
+    for (const r of rows) {
+      fiches.push({
         devisId: r.devis_id,
         numero: r.numero,
         designation: r.designation,
@@ -91,8 +95,9 @@ export class AcceptanceService {
         clientName: r.client_name,
         montantHt: (await this.vente.computeForVersion(r.version_id)).totalPvHt,
         updatedAt: r.updated_at,
-      })),
-    );
+      });
+    }
+    return fiches;
   }
 
   /** Commandes déjà acceptées : marché + chantier issus d'un devis, pour le suivi de l'écran. */

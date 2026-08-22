@@ -64,6 +64,11 @@ export async function buildSocleApp(): Promise<INestApplication> {
   // Même validation qu'en production : une règle vérifiée nulle part n'est pas une règle.
   applyGlobalPipes(app);
   await app.init();
+  // Un serveur qui ÉCOUTE, une bonne fois. Sans cela, supertest ouvre puis referme un port
+  // éphémère à chaque requête : sur 120 suites, des milliers de ports en TIME_WAIT, et une
+  // requête finit par atterrir ailleurs — d'où des 404 sur des routes qui existent, et des
+  // « socket hang up » qui n'ont rien à voir avec le code testé.
+  await app.listen(0);
   return app;
 }
 

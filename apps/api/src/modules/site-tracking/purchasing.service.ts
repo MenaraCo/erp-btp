@@ -419,8 +419,12 @@ export class PurchasingService {
         [orderId],
       );
       if (rows.length === 0) throw new NotFoundException(`Unknown purchase order "${orderId}"`);
-      const [lines, deliveries, invoices] = await Promise.all([
-        em.query(
+      // Séquentiel, et non `Promise.all` : les trois requêtes partagent LA connexion de la
+      // transaction. Lancées de front, `pg` les entrelace sur le même socket — les résultats se
+      // mélangent, la connexion revient au pool dans un état douteux, et une requête plus tard,
+      // ailleurs, renvoie un jeu vide (d'où des 403/404 aléatoires). Le gain de parallélisme sur
+      // trois lectures indexées ne vaut pas ce risque.
+      const lines = await em.query(
           `SELECT l.*, el.designation AS ouvrage, ac.code AS code_analytique,
                   COALESCE(n.code, r.code) AS ressource_code,
                   COALESCE(l.unite_achat, n.unite_achat) AS unite_achat,
@@ -433,18 +437,17 @@ export class PurchasingService {
              LEFT JOIN analytical_code ac ON ac.id = l.code_analytique_id
              LEFT JOIN nomenclature_resource n ON n.id = l.nomenclature_resource_id
             WHERE l.order_id = $1 ORDER BY l.sort_order ASC, l.created_at ASC`,
-          [orderId],
-        ),
-        em.query(
-          `SELECT id, code, received_at FROM delivery_note WHERE order_id = $1 ORDER BY created_at ASC`,
-          [orderId],
-        ),
-        em.query(
-          `SELECT id, code, nature, amount_ht, invoice_date FROM supplier_invoice
-            WHERE order_id = $1 ORDER BY created_at ASC`,
-          [orderId],
-        ),
-      ]);
+        [orderId],
+      );
+      const deliveries = await em.query(
+        `SELECT id, code, received_at FROM delivery_note WHERE order_id = $1 ORDER BY created_at ASC`,
+        [orderId],
+      );
+      const invoices = await em.query(
+        `SELECT id, code, nature, amount_ht, invoice_date FROM supplier_invoice
+          WHERE order_id = $1 ORDER BY created_at ASC`,
+        [orderId],
+      );
       return { commande: rows[0], lignes: lines, receptions: deliveries, factures: invoices };
     });
   }
