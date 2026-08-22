@@ -10,7 +10,7 @@ import { FinancialForecastService } from './financial-forecast.service';
 import { PortfolioService } from './portfolio.service';
 import { MonthlyService } from './monthly.service';
 import { PilotageService } from './pilotage.service';
-import { BudgetService, RipageBudget, SaisieBudget } from './budget.service';
+import { BudgetService, NiveauBudget, RipageBudget, SaisieBudget } from './budget.service';
 
 @Controller()
 export class FinancialController {
@@ -174,8 +174,20 @@ export class FinancialController {
   @Get('chantiers/:chantierId/budgets')
   @RequiresCapability('site_tracking.budget')
   @RequiresPermission('site_tracking.read')
-  getBudgets(@Param('chantierId') chantierId: string) {
-    return this.budget.tableau(chantierId);
+  getBudgets(
+    @Param('chantierId') chantierId: string,
+    /** Photo de budget à mettre en regard ; par défaut la dernière figée. */
+    @Query('reference') reference?: string,
+  ) {
+    return this.budget.tableau(chantierId, reference || null);
+  }
+
+  /** Toutes les photos de budget du chantier : étude, contre-étude, exécution et leurs révisions. */
+  @Get('chantiers/:chantierId/budgets/photos')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  getPhotosBudget(@Param('chantierId') chantierId: string) {
+    return this.budget.baselines(chantierId);
   }
 
   /** Ressources du chantier avec leur budget : la liste où l'on choisit source et cible d'un ripage. */
@@ -211,11 +223,21 @@ export class FinancialController {
     return this.budget.riper(chantierId, body);
   }
 
-  @Post('chantiers/:chantierId/budgets/initial')
+  /**
+   * Fige une photo du budget global : étude, contre-étude ou exécution. Chaque appel crée une
+   * VERSION — réviser ne remplace pas, il succède, et la référence précédente reste comparable.
+   */
+  @Post('chantiers/:chantierId/budgets/photos')
   @RequiresCapability('site_tracking.budget')
   @RequiresPermission('site_tracking.write')
-  fixerBudgetInitial(@Param('chantierId') chantierId: string) {
-    return this.budget.fixerBudgetInitial(chantierId);
+  figerBudget(
+    @Param('chantierId') chantierId: string,
+    @Body() body: { niveau?: NiveauBudget; commentaire?: string | null },
+  ) {
+    if (!body?.niveau) {
+      throw new BadRequestException('Indiquez le niveau : étude, contre-étude ou exécution.');
+    }
+    return this.budget.figerBudget(chantierId, body.niveau, body.commentaire ?? null);
   }
 
   /* ─── Bons de budget : ce qui vient du devis attend d'être traité (guide §5.10) ─── */

@@ -167,8 +167,8 @@ describe('Suivi de chantier — charges, frais généraux, produits et résultat
     expect(Number(so.budgetObjectif)).toBeCloseTo(450, 2); // 100 FG + 150 frais annexe + 200 saisis
   });
 
-  it('le_budget_initial_fige_aussi_la_recette_pour_garder_un_resultat_de_reference', async () => {
-    await as('post', `/chantiers/${chantierId}/budgets/initial`).expect(201);
+  it('une_photo_de_budget_fige_aussi_la_recette_pour_garder_un_resultat_de_reference', async () => {
+    await as('post', `/chantiers/${chantierId}/budgets/photos`).send({ niveau: 'etude' }).expect(201);
     const b = await budgets();
     expect(Number(b.produits.total.initial)).toBeCloseTo(Number(b.produits.total.global), 2);
     expect(Number(b.resultatNet.initial)).toBeCloseTo(Number(b.resultatNet.global), 2);

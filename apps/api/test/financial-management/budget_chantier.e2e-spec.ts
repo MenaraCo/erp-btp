@@ -160,9 +160,11 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
       .expect(400);
   });
 
-  it('budget_initial_fige_le_global_du_moment_et_ne_bouge_plus', async () => {
-    const fige = (await as('post', `/chantiers/${chantierId}/budgets/initial`).expect(201)).body;
+  it('une_photo_de_budget_fige_le_global_du_moment_et_ne_bouge_plus', async () => {
+    const fige = (await as('post', `/chantiers/${chantierId}/budgets/photos`)
+      .send({ niveau: 'etude', commentaire: 'Budget arrêté après étude' }).expect(201)).body;
     expect(fige.fixedAt).toBeTruthy();
+    expect(fige.version).toBe(1);
 
     const apresFixation = (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
     expect(Number(apresFixation.total.initial)).toBeCloseTo(Number(apresFixation.total.global), 2);
@@ -194,5 +196,47 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
     // Le ripage vient d'être annulé : la ressource retrouve son budget d'étude.
     expect(Number(colle.global)).toBeCloseTo(1000, 2);
     expect(colle.codeAnalytique).toBe('280');
+  });
+
+  it('reviser_un_budget_cree_une_version_sans_effacer_la_photo_precedente', async () => {
+    // La photo du départ existe déjà (test précédent). On dote, puis on refige : la nouvelle
+    // version succède, l'ancienne reste — c'est elle qui dit ce qu'on visait au départ.
+    const avant = (await as('get', `/chantiers/${chantierId}/budgets/photos`).expect(200)).body;
+    const v1 = avant.find((p: { niveau: string; version: number }) => p.niveau === 'etude' && p.version === 1);
+    expect(v1).toBeDefined();
+
+    await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
+      .send({ codeAnalytiqueId: codeAdhesif, libelle: 'Aléa de chantier', montant: '400' })
+      .expect(201);
+    const v2 = (await as('post', `/chantiers/${chantierId}/budgets/photos`)
+      .send({ niveau: 'etude', commentaire: 'Révision après aléa' }).expect(201)).body;
+    expect(v2.version).toBe(2);
+
+    const photos = (await as('get', `/chantiers/${chantierId}/budgets/photos`).expect(200)).body;
+    const etudes = photos.filter((p: { niveau: string }) => p.niveau === 'etude');
+    expect(etudes).toHaveLength(2);
+    // Seule la dernière fait référence ; l'autre reste consultable.
+    expect(etudes.find((p: { version: number }) => p.version === 2).en_vigueur).toBe(true);
+    expect(etudes.find((p: { version: number }) => p.version === 1).en_vigueur).toBe(false);
+    // Et les deux photos ne disent pas la même chose : la seconde a encaissé l'aléa.
+    const chargesV1 = Number(etudes.find((p: { version: number }) => p.version === 1).total_charges);
+    const chargesV2 = Number(etudes.find((p: { version: number }) => p.version === 2).total_charges);
+    expect(chargesV2 - chargesV1).toBeGreaterThanOrEqual(400);
+
+    // Le tableau se compare par défaut à la DERNIÈRE photo, et sur demande à celle du départ.
+    const parDefaut = (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
+    expect(parDefaut.reference.version).toBe(2);
+    const contreV1 = (await as('get', `/chantiers/${chantierId}/budgets?reference=${v1.id}`).expect(200)).body;
+    expect(contreV1.reference.version).toBe(1);
+    // La colonne de référence montre bien la photo DEMANDÉE : ses charges et ses frais généraux.
+    const attendu = Number(v1.total_charges) + Number(v1.total_frais_generaux);
+    expect(Number(contreV1.total.initial)).toBeCloseTo(attendu, 2);
+    expect(Number(contreV1.total.initial)).toBeLessThan(Number(parDefaut.total.initial));
+  });
+
+  it('refuse_un_niveau_de_budget_inconnu', async () => {
+    await as('post', `/chantiers/${chantierId}/budgets/photos`)
+      .send({ niveau: 'brouillon' }).expect(400);
+    await as('post', `/chantiers/${chantierId}/budgets/photos`).send({}).expect(400);
   });
 });

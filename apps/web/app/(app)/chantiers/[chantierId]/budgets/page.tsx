@@ -21,8 +21,14 @@ interface NoeudFamille { id: string; code: string; label: string; metrics: Metri
 interface NoeudLot { id: string; code: string; label: string; metrics: Metriques; familles: NoeudFamille[] }
 interface NoeudNature { nature: string; label: string; metrics: Metriques; lots: NoeudLot[] }
 interface LigneCode { id: string; code: string; label: string; famille?: string | null; metrics: Metriques }
+interface PhotoBudget {
+  id: string; niveau: string; niveauLabel: string; version: number; commentaire: string | null;
+  fixed_at: string; auteur: string | null; en_vigueur: boolean;
+  total_charges: string; total_frais_generaux: string; total_produits: string; resultat_net: string;
+}
 interface TableauBudgets {
   fixedAt: string | null;
+  reference: { id: string; niveau: string; version: number; fixedAt: string; label: string } | null;
   charges: {
     label: string;
     natures: NoeudNature[];
@@ -101,6 +107,8 @@ export default function BudgetsPage() {
   const [ripage, setRipage] = useState(false);
   const [figer, setFiger] = useState(false);
   const [vue, setVue] = useState<'plat' | 'axe'>('plat');
+  /** Photo de budget mise en regard ; vide = la dernière figée. */
+  const [reference, setReference] = useState('');
 
   const chantier = useQuery({
     queryKey: ['chantier', chantierId],
@@ -108,9 +116,16 @@ export default function BudgetsPage() {
     queryFn: () => apiFetch<{ code: string }>(`/chantiers/${chantierId}`, { token }),
   });
   const budgets = useQuery({
-    queryKey: ['budgets', chantierId],
+    queryKey: ['budgets', chantierId, reference],
     enabled: Boolean(token), retry: false,
-    queryFn: () => apiFetch<TableauBudgets>(`/chantiers/${chantierId}/budgets`, { token }),
+    queryFn: () => apiFetch<TableauBudgets>(
+      `/chantiers/${chantierId}/budgets${reference ? `?reference=${reference}` : ''}`, { token },
+    ),
+  });
+  const photos = useQuery({
+    queryKey: ['budgets-photos', chantierId],
+    enabled: Boolean(token), retry: false,
+    queryFn: () => apiFetch<PhotoBudget[]>(`/chantiers/${chantierId}/budgets/photos`, { token }),
   });
   const ressources = useQuery({
     queryKey: ['budgets-ressources', chantierId],
@@ -131,6 +146,7 @@ export default function BudgetsPage() {
   const rafraichir = () => {
     for (const key of [
       ['budgets', chantierId], ['budgets-ressources', chantierId], ['budgets-historique', chantierId],
+      ['budgets-photos', chantierId],
       ['chantier-analytical', chantierId], ['chantier-results', chantierId],
       ['chantier-forecast', chantierId], ['pilotage', chantierId], ['a-ventiler', chantierId],
       ['portfolio'],
@@ -151,7 +167,8 @@ export default function BudgetsPage() {
     onSuccess: () => { setErr(null); setRipage(false); rafraichir(); }, onError: onErr,
   });
   const mFiger = useMutation({
-    mutationFn: () => apiFetch(`/chantiers/${chantierId}/budgets/initial`, { method: 'POST', token }),
+    mutationFn: (body: { niveau: string; commentaire: string | null }) =>
+      apiFetch(`/chantiers/${chantierId}/budgets/photos`, { method: 'POST', token, body }),
     onSuccess: () => { setErr(null); setFiger(false); rafraichir(); }, onError: onErr,
   });
   const mSupprimer = useMutation({
@@ -192,7 +209,7 @@ export default function BudgetsPage() {
             Riper du budget
           </Bouton>
           <Bouton variante="primaire" icone={Lock} onClick={() => { setErr(null); setFiger(true); }}>
-            Fixer le budget initial
+            Figer une photo
           </Bouton>
         </div>
       </div>
@@ -225,7 +242,9 @@ export default function BudgetsPage() {
             valeur={euro(d.resultatNet.global)}
             ton={resultatNet < 0 ? 'danger' : 'succes'}
             detail={`Brut ${euro(d.resultatBrut.global)} · ${
-              d.fixedAt ? `initial figé le ${dt(d.fixedAt)}, écart ${euro(ecartInitial)}` : 'budget initial non figé'
+              d.reference
+                ? `${d.reference.label} figé le ${dt(d.reference.fixedAt)}, écart ${euro(ecartInitial)}`
+                : 'aucune photo de budget figée'
             }`}
           />
         </div>
@@ -237,7 +256,20 @@ export default function BudgetsPage() {
             <h2 style={{ marginTop: 0, marginBottom: 0 }}>Budgets par code analytique</h2>
             {/* Deux lectures du même tableau : à plat pour la synthèse (une ligne par poste,
                 comme un compte de résultat), dépliable quand il faut savoir d'où vient un écart. */}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+              {(photos.data ?? []).length > 0 && (
+                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+                  <span className="muted">Comparer à</span>
+                  <select value={reference} onChange={(e) => setReference(e.target.value)}>
+                    <option value="">Dernière photo figée</option>
+                    {(photos.data ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.niveauLabel} v{p.version} — {new Date(p.fixed_at).toLocaleDateString('fr-FR')}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <Bouton variante={vue === 'plat' ? 'primaire' : 'secondaire'} onClick={() => setVue('plat')}>
                 Vue à plat
               </Bouton>
@@ -264,8 +296,10 @@ export default function BudgetsPage() {
                   <th style={{ textAlign: 'right' }}>Budget d'étude</th>
                   <th style={{ textAlign: 'right' }}>Mouvements</th>
                   <th style={{ textAlign: 'right' }}>Budget global</th>
-                  <th style={{ textAlign: 'right' }}>Budget initial</th>
-                  <th style={{ textAlign: 'right' }}>Écart / initial</th>
+                  <th style={{ textAlign: 'right' }}>
+                    {d.reference ? `${d.reference.label} (${dt(d.reference.fixedAt).slice(0, 12)})` : 'Photo figée'}
+                  </th>
+                  <th style={{ textAlign: 'right' }}>Écart / photo</th>
                 </tr>
               </thead>
               <tbody>
@@ -364,6 +398,58 @@ export default function BudgetsPage() {
         </div>
       )}
 
+      {/* Les photos : c'est la mémoire des cibles successives — ce qu'on visait à l'étude, après
+          la contre-étude, et à chaque révision. Aucune n'est jamais écrasée. */}
+      {(photos.data ?? []).length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Photos de budget</h2>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="grid" style={{ margin: 0, minWidth: 780 }}>
+              <thead>
+                <tr>
+                  <th>Niveau</th>
+                  <th>Version</th>
+                  <th>Figée le</th>
+                  <th>Par</th>
+                  <th>Commentaire</th>
+                  <th style={{ textAlign: 'right' }}>Charges</th>
+                  <th style={{ textAlign: 'right' }}>Frais généraux</th>
+                  <th style={{ textAlign: 'right' }}>Produits</th>
+                  <th style={{ textAlign: 'right' }}>Résultat net</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(photos.data ?? []).map((p) => (
+                  <tr key={p.id} style={{ background: p.id === d?.reference?.id ? 'var(--surface)' : undefined }}>
+                    <td>{p.niveauLabel}</td>
+                    <td>
+                      v{p.version}{' '}
+                      {p.en_vigueur && <span className="badge success" style={{ fontSize: 10 }}>en vigueur</span>}
+                    </td>
+                    <td className="muted" style={{ fontSize: 12 }}>{dt(p.fixed_at)}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{p.auteur ?? ''}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{p.commentaire ?? ''}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(p.total_charges)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(p.total_frais_generaux)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(p.total_produits)}</td>
+                    <td style={{
+                      textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700,
+                      color: Number(p.resultat_net) < 0 ? 'var(--danger)' : undefined,
+                    }}>
+                      {euro(p.resultat_net)}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <Bouton variante="secondaire" onClick={() => setReference(p.id)}>Comparer</Bouton>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Journal : un ripage sans trace est un ripage indéfendable trois mois plus tard. */}
       <div className="card" style={{ marginTop: 16 }}>
         <h2 style={{ marginTop: 0 }}>Historique des mouvements de budget</h2>
@@ -452,27 +538,14 @@ export default function BudgetsPage() {
         />
       )}
       {figer && (
-        <Modale
-          titre="Fixer le budget initial"
-          sousTitre="La référence de comparaison pour toute la vie du chantier"
-          largeur="s"
+        <ModaleFigeage
+          global={t?.global ?? '0'}
+          photos={photos.data ?? []}
+          pending={mFiger.isPending}
+          erreur={err}
           onClose={() => setFiger(false)}
-          actions={
-            <Bouton onClick={() => mFiger.mutate()} chargement={mFiger.isPending}>
-              Figer le budget global d'aujourd'hui
-            </Bouton>
-          }
-        >
-          <p style={{ marginTop: 0 }}>
-            Le budget global actuel (<strong>{euro(t?.global ?? '0')}</strong>) devient le budget initial.
-          </p>
-          {budgets.data?.fixedAt && (
-            <Alerte ton="info">
-              Un budget initial a déjà été figé le {dt(budgets.data.fixedAt)} : le refiger remplace cette
-              référence. On ne garde qu'un « initial », sinon le mot ne veut plus rien dire.
-            </Alerte>
-          )}
-        </Modale>
+          onSubmit={(body) => mFiger.mutate(body)}
+        />
       )}
     </div>
   );
@@ -558,6 +631,62 @@ function LignesNature({ nature }: { nature: NoeudNature }) {
         </Fragment>
       ))}
     </>
+  );
+}
+
+/* ─────────── figer une photo de budget ─────────── */
+function ModaleFigeage({
+  global, photos, pending, erreur, onClose, onSubmit,
+}: {
+  global: string;
+  photos: PhotoBudget[];
+  pending: boolean;
+  erreur: string | null;
+  onClose: () => void;
+  onSubmit: (body: { niveau: string; commentaire: string | null }) => void;
+}) {
+  const [niveau, setNiveau] = useState('etude');
+  const [commentaire, setCommentaire] = useState('');
+  const precedentes = photos.filter((p) => p.niveau === niveau);
+
+  return (
+    <Modale
+      titre="Figer une photo de budget"
+      sousTitre="Une référence de comparaison, datée et signée"
+      largeur="m"
+      onClose={onClose}
+      actions={
+        <Bouton chargement={pending} onClick={() => onSubmit({ niveau, commentaire: commentaire.trim() || null })}>
+          Figer le budget global d'aujourd'hui
+        </Bouton>
+      }
+    >
+      {erreur && <Alerte>{erreur}</Alerte>}
+      <p style={{ marginTop: 0 }}>
+        Le budget global actuel (<strong>{euro(global)}</strong>) est photographié tel quel — charges,
+        frais généraux et produits compris.
+      </p>
+      <div className="field">
+        <label>Niveau</label>
+        <select value={niveau} onChange={(e) => setNiveau(e.target.value)}>
+          <option value="etude">Budget d'étude</option>
+          <option value="contre_etude">Budget de contre-étude</option>
+          <option value="execution">Budget d'exécution</option>
+        </select>
+      </div>
+      <div className="field">
+        <label>Commentaire (facultatif)</label>
+        <input value={commentaire} onChange={(e) => setCommentaire(e.target.value)}
+          placeholder="ex. budget arrêté après la contre-étude" />
+      </div>
+      {precedentes.length > 0 && (
+        <Alerte ton="info">
+          Ce niveau compte déjà {precedentes.length} photo{precedentes.length > 1 ? 's' : ''} : celle-ci
+          deviendra la version {precedentes.length + 1}. Les précédentes restent consultables et
+          comparables — rien n'est écrasé.
+        </Alerte>
+      )}
+    </Modale>
   );
 }
 

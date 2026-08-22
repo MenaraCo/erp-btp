@@ -11,6 +11,18 @@ import { budgetEtude, UNALLOC_PREFIX } from './budget-etude';
 /** Les quatre colonnes du tableau des budgets, dans l'ordre de lecture. */
 const METRICS = ['etude', 'mouvements', 'global', 'initial'] as const;
 
+/**
+ * Les moments qu'une photo de budget peut immortaliser. Ce ne sont pas des états successifs d'un
+ * même objet mais trois références qui coexistent : on compare volontiers l'exécution du moment
+ * au budget d'étude ET à la contre-étude, pour voir ce que chaque étape a coûté ou rapporté.
+ */
+export const NIVEAUX_BUDGET = {
+  etude: 'Budget d’étude',
+  contre_etude: 'Budget de contre-étude',
+  execution: 'Budget d’exécution',
+} as const;
+export type NiveauBudget = keyof typeof NIVEAUX_BUDGET;
+
 export interface SaisieBudget {
   date?: string;
   codeAnalytiqueId: string;
@@ -82,7 +94,7 @@ export class BudgetService {
    * net = vente − déboursé − FG = le BÉNÉFICE de la feuille de vente. Aucune saisie n'est requise
    * pour que le chantier dise la même chose que le devis qui l'a vendu.
    */
-  async tableau(chantierId: string) {
+  async tableau(chantierId: string, baselineId?: string | null) {
     const tenantId = this.context.requireTenantId();
     await this.plan.ensurePlan(tenantId);
     const tree = await this.plan.getTree(tenantId);
@@ -93,13 +105,30 @@ export class BudgetService {
 
       const etude = await budgetEtude(em, chantierId, 'code');
       const mouvements = await this.parCode(em, chantierId, 'chantier_budget_movement');
-      const initial = await this.parCode(em, chantierId, 'chantier_budget_initial');
-      const fige = (
-        await em.query(
-          `SELECT MAX(fixed_at) AS fixed_at FROM chantier_budget_initial WHERE chantier_id = $1`,
-          [chantierId],
+      // La colonne de référence est une PHOTO : celle demandée, sinon la dernière figée. Comparer
+      // à « la dernière » par défaut est ce qu'on veut neuf fois sur dix ; comparer à celle du
+      // départ reste possible d'un clic, et c'est tout l'intérêt de les garder toutes.
+      const [reference] = await em.query(
+        `SELECT id, niveau, version, fixed_at, commentaire FROM chantier_budget_baseline
+          WHERE chantier_id = $1 AND ($2::uuid IS NULL OR id = $2)
+          ORDER BY fixed_at DESC LIMIT 1`,
+        [chantierId, baselineId ?? null],
+      );
+      const initial: LigneParCode[] = reference
+        ? await em.query(
+          `SELECT l.code_analytique_id AS code_id, l.nature,
+                  COALESCE(c.categorie,
+                           CASE WHEN l.nature = 'produit' THEN 'produit'
+                                WHEN l.nature = 'frais_generaux' THEN 'frais_generaux'
+                                ELSE 'charge' END) AS categorie,
+                  SUM(l.montant)::numeric(16,2) AS montant
+             FROM chantier_budget_baseline_line l
+             LEFT JOIN analytical_code c ON c.id = l.code_analytique_id
+            WHERE l.baseline_id = $1
+            GROUP BY l.code_analytique_id, l.nature, c.categorie`,
+          [reference.id],
         )
-      )[0];
+        : [];
       // Recettes de l'étude : ce que les marchés (devis gagnés) et leurs avenants ont vendu.
       const [vente] = await em.query(
         `SELECT COALESCE(SUM(m.total_ht), 0)::numeric(16,2) AS marches,
@@ -235,7 +264,14 @@ export class BudgetService {
 
       return {
         chantierId,
-        fixedAt: fige?.fixed_at ?? null,
+        fixedAt: reference?.fixed_at ?? null,
+        reference: reference
+          ? {
+            id: reference.id, niveau: reference.niveau, version: reference.version,
+            fixedAt: reference.fixed_at, commentaire: reference.commentaire,
+            label: `${NIVEAUX_BUDGET[reference.niveau as NiveauBudget] ?? reference.niveau} v${reference.version}`,
+          }
+          : null,
         charges: {
           label: 'Charges',
           natures: aggregate.natures,
@@ -316,7 +352,7 @@ export class BudgetService {
   private parCode(
     em: EntityManager,
     chantierId: string,
-    table: 'chantier_budget_movement' | 'chantier_budget_initial',
+    table: 'chantier_budget_movement',
   ): Promise<LigneParCode[]> {
     return em.query(
       `SELECT b.code_analytique_id AS code_id, b.nature,
@@ -327,7 +363,7 @@ export class BudgetService {
               SUM(b.montant)::numeric(16,2) AS montant
          FROM ${table} b
          LEFT JOIN analytical_code c ON c.id = b.code_analytique_id
-        WHERE b.chantier_id = $1${table === 'chantier_budget_movement' ? " AND b.statut = 'traite'" : ''}
+        WHERE b.chantier_id = $1 AND b.statut = 'traite'
         GROUP BY b.code_analytique_id, b.nature, c.categorie`,
       [chantierId],
     );
@@ -478,7 +514,10 @@ export class BudgetService {
    * Le refiger écrase la photo précédente — on ne garde qu'une référence, sinon « initial » ne
    * veut plus rien dire.
    */
-  fixerBudgetInitial(chantierId: string) {
+  figerBudget(chantierId: string, niveau: NiveauBudget, commentaire?: string | null) {
+    if (!NIVEAUX_BUDGET[niveau]) {
+      throw new BadRequestException(`Niveau de budget inconnu : ${niveau}`);
+    }
     const tenantId = this.context.requireTenantId();
     const userId = this.context.getUserId() ?? null;
     return runInTenant(this.dataSource, tenantId, async (em) => {
@@ -529,23 +568,75 @@ export class BudgetService {
         ajoute(codeRecette?.id ?? null, 'produit', venteTotale);
       }
 
-      await em.query(`DELETE FROM chantier_budget_initial WHERE chantier_id = $1`, [chantierId]);
+      // Une nouvelle VERSION, jamais un écrasement : la photo précédente reste consultable, et
+      // l'on peut toujours dire ce qu'on visait au départ.
+      const [{ version }] = await em.query(
+        `SELECT COALESCE(MAX(version), 0) + 1 AS version FROM chantier_budget_baseline
+          WHERE chantier_id = $1 AND niveau = $2`,
+        [chantierId, niveau],
+      );
+      const categories = await this.categoriesParCode(em);
+      const totaux = { charge: new Decimal(0), frais_generaux: new Decimal(0), produit: new Decimal(0) };
+      const blocDe = (codeId: string | null, nature: string): keyof typeof totaux => {
+        if (codeId) return (categories.get(codeId) ?? 'charge') as keyof typeof totaux;
+        if (nature === 'produit') return 'produit';
+        if (nature === 'site_overhead' || nature === 'frais_generaux') return 'frais_generaux';
+        return 'charge';
+      };
+      for (const e of cumul.values()) totaux[blocDe(e.codeId, e.nature)] = totaux[blocDe(e.codeId, e.nature)].plus(e.montant);
+      const resultatNet = totaux.produit.minus(totaux.charge).minus(totaux.frais_generaux);
+
+      const [baseline] = await em.query(
+        `INSERT INTO chantier_budget_baseline
+           (tenant_id, chantier_id, niveau, version, commentaire,
+            total_charges, total_frais_generaux, total_produits, resultat_net, actor_user_id)
+         VALUES (current_tenant(), $1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, niveau, version, fixed_at`,
+        [
+          chantierId, niveau, version, commentaire ?? null,
+          totaux.charge.toFixed(2), totaux.frais_generaux.toFixed(2),
+          totaux.produit.toFixed(2), resultatNet.toFixed(2), userId,
+        ],
+      );
       for (const e of cumul.values()) {
         if (e.montant.isZero()) continue;
         await em.query(
-          `INSERT INTO chantier_budget_initial
-             (tenant_id, chantier_id, code_analytique_id, nature, montant, actor_user_id)
-           VALUES (current_tenant(), $1, $2, $3, $4, $5)`,
-          [chantierId, e.codeId, e.nature, e.montant.toFixed(2), userId],
+          `INSERT INTO chantier_budget_baseline_line
+             (tenant_id, baseline_id, code_analytique_id, nature, montant)
+           VALUES (current_tenant(), $1, $2, $3, $4)`,
+          [baseline.id, e.codeId, e.nature, e.montant.toFixed(2)],
         );
       }
-      const fige = (
-        await em.query(
-          `SELECT MAX(fixed_at) AS fixed_at FROM chantier_budget_initial WHERE chantier_id = $1`,
-          [chantierId],
-        )
-      )[0];
-      return { fixedAt: fige?.fixed_at ?? null, lignes: cumul.size };
+      return {
+        id: baseline.id, niveau: baseline.niveau, version: baseline.version,
+        fixedAt: baseline.fixed_at, lignes: cumul.size, resultatNet: resultatNet.toFixed(2),
+      };
+    });
+  }
+
+  /** Toutes les photos du chantier, la plus récente en tête ; la dernière d'un niveau fait référence. */
+  baselines(chantierId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertChantier(em, chantierId);
+      const rows = await em.query(
+        `SELECT b.id, b.niveau, b.version, b.commentaire, b.fixed_at,
+                b.total_charges::numeric(16,2) AS total_charges,
+                b.total_frais_generaux::numeric(16,2) AS total_frais_generaux,
+                b.total_produits::numeric(16,2) AS total_produits,
+                b.resultat_net::numeric(16,2) AS resultat_net,
+                COALESCE(u.full_name, u.email) AS auteur,
+                (b.version = MAX(b.version) OVER (PARTITION BY b.niveau)) AS en_vigueur
+           FROM chantier_budget_baseline b
+           LEFT JOIN user_account u ON u.id = b.actor_user_id
+          WHERE b.chantier_id = $1
+          ORDER BY b.fixed_at DESC`,
+        [chantierId],
+      );
+      return rows.map((r: { niveau: string }) => ({
+        ...r,
+        niveauLabel: NIVEAUX_BUDGET[r.niveau as NiveauBudget] ?? r.niveau,
+      }));
     });
   }
 
