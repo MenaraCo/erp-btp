@@ -7,6 +7,7 @@ import { visibleForClient, ClientViewLine } from './devis-client-view';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { VenteService } from './vente.service';
 import { computeLineNumbers } from './devis-numbering';
+import { dessinerEnTete, modelePdf } from '../../core/pdf/modele-pdf';
 
 interface DevisLineRow {
   id: string;
@@ -52,6 +53,8 @@ interface HeaderData {
   version: { version_no: number };
   affaire: { code: string; name: string; moa: string | null; lieu: Record<string, unknown> | null };
   colors: { primary: string; accent: string };
+  /** Mise en page choisie par la société (Préférences). */
+  modele?: string;
 }
 
 /**
@@ -100,7 +103,8 @@ export class DevisPdfService {
            FROM company ORDER BY code ASC LIMIT 1`,
       );
       const prefs = await em.query(
-        `SELECT couleur_principale, couleur_accent, nb_decimales FROM company_preferences LIMIT 1`,
+        `SELECT couleur_principale, couleur_accent, nb_decimales, modele_pdf
+           FROM company_preferences LIMIT 1`,
       );
       const clientId = v[0].affaire_client_id;
       const client: ClientRow[] = clientId
@@ -130,6 +134,7 @@ export class DevisPdfService {
         moa: data.row.moa,
         lieu: data.row.lieu_execution,
       },
+      modele: data.prefs?.modele_pdf ?? 'classique',
       colors: {
         primary: data.prefs?.couleur_principale || '#1a3a5c',
         accent: data.prefs?.couleur_accent || '#e8550a',
@@ -257,37 +262,24 @@ export class DevisPdfService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      /* ────────── En-tête société ────────── */
-      let headTop = M;
-      if (c?.logo_data) {
-        try {
-          doc.image(Buffer.from(c.logo_data, 'base64'), M, headTop, { fit: [130, 46] });
-          headTop += 52;
-        } catch {
-          // logo illisible : on continue sans bloquer l'édition
-        }
-      }
-      doc.fontSize(13).font('Helvetica-Bold').fillColor(h.colors.primary)
-        .text(c?.name ?? '', M, headTop, { width: PAGE_W / 2 });
-      doc.fontSize(8).font('Helvetica').fillColor('#555');
-      for (const l of companyLines) {
-        doc.text(l, M, doc.y, { width: PAGE_W / 2 });
-      }
-
-      /* ────────── Cartouche devis (à droite) ────────── */
-      const boxW = 210;
-      const boxX = RIGHT - boxW;
-      doc.roundedRect(boxX, M, boxW, 74, 4).fillAndStroke('#f8fafc', '#cbd5e1');
-      doc.fillColor(h.colors.primary).fontSize(bordereau ? 12 : 15).font('Helvetica-Bold')
-        .text(bordereau ? 'BORDEREAU DE PRIX' : 'DEVIS', boxX + 10, M + 8, { width: boxW - 20 });
-      doc.fontSize(8).font('Helvetica').fillColor('#334155');
-      const ref = h.devis.numero ?? h.affaire.code;
-      doc.text(`N° ${ref}${h.version.version_no > 1 ? `  (v${h.version.version_no})` : ''}`, boxX + 10, M + 28, { width: boxW - 20 });
-      doc.text(`Date : ${new Date(h.devis.created_at).toLocaleDateString('fr-FR')}`, boxX + 10, doc.y, { width: boxW - 20 });
-      doc.text(`Édité le ${new Date().toLocaleDateString('fr-FR')}`, boxX + 10, doc.y, { width: boxW - 20 });
+      /* ────────── En-tête : société + cartouche du document, selon le modèle choisi ────────── */
+      const style = modelePdf(h.modele);
+      const basEnTete = dessinerEnTete(doc, style, h.colors, {
+        titre: bordereau ? 'BORDEREAU DE PRIX' : 'DEVIS',
+        references: [
+          `N° ${h.devis.numero ?? h.affaire.code}${h.version.version_no > 1 ? `  (v${h.version.version_no})` : ''}`,
+          `Date : ${new Date(h.devis.created_at).toLocaleDateString('fr-FR')}`,
+          `Édité le ${new Date().toLocaleDateString('fr-FR')}`,
+        ],
+        societe: {
+          nom: c?.name ?? '',
+          lignes: companyLines,
+          logo: c?.logo_data ? Buffer.from(c.logo_data, 'base64') : null,
+        },
+      });
 
       /* ────────── Destinataire ────────── */
-      let y = Math.max(doc.y, M + 84) + 12;
+      let y = basEnTete;
       if (h.client) {
         const cliW = 240;
         const cliX = RIGHT - cliW;

@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
+import { MODELES_PDF } from '../../core/pdf/modele-pdf';
 import {
   CodeInput,
   CompanyInfoInput,
@@ -173,6 +174,15 @@ export class ParamsController {
   @RequiresPermission('estimating.devis.write')
   deleteFamille(@Param('id') id: string) {
     return this.params.deleteFamille(id);
+  }
+
+  /** Les modèles de document proposés : la société en choisit un pour toutes ses éditions. */
+  @Get('modeles-pdf')
+  @RequiresPermission('estimating.devis.read')
+  listModelesPdf() {
+    return Object.values(MODELES_PDF).map((m) => ({
+      cle: m.cle, nom: m.nom, description: m.description,
+    }));
   }
 
   /* ===================== CODES ANALYTIQUES ===================== */

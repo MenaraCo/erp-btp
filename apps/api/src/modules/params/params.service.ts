@@ -54,6 +54,8 @@ export interface PreferencesInput {
   mailDevisCorps?: string;
   couleurPrincipale?: string;
   couleurAccent?: string;
+  /** Mise en page des documents édités : classique, contemporain, compact ou bandeau. */
+  modelePdf?: string;
   tauxTva?: number[];
   defaultTab?: string;
   nbDecimales?: number;
@@ -473,6 +475,7 @@ export class ParamsService {
            devis_numero_digits= COALESCE($12::smallint, devis_numero_digits),
            mail_devis_objet   = COALESCE($13, mail_devis_objet),
            mail_devis_corps   = COALESCE($14, mail_devis_corps),
+           modele_pdf         = COALESCE($15, modele_pdf),
            updated_at         = now()
          WHERE company_id = $1`,
         [
@@ -490,6 +493,7 @@ export class ParamsService {
           input.devisNumeroDigits ?? null,
           input.mailDevisObjet ?? null,
           input.mailDevisCorps ?? null,
+          input.modelePdf ?? null,
         ],
       );
       // Retourner le résultat dans la MÊME transaction (évite le deadlock de connexion)

@@ -89,7 +89,8 @@ const CAT_OPTS = [
 ];
 const catLabel = (v?: string) => CAT_OPTS.find((c) => c.v === (v ?? 'charge'))?.l ?? 'Charge';
 interface Company { id: string; code: string; name: string; has_logo?: boolean; address?: string; postal_code?: string; city?: string; phone?: string; email?: string; legal_form?: string; siret?: string; vat_intra?: string; rcs?: string; capital?: string }
-interface Preferences { id: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; devis_numero_annee?: boolean; devis_numero_digits?: number; mail_devis_objet?: string; mail_devis_corps?: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
+interface ModelePdfOption { cle: string; nom: string; description: string }
+interface Preferences { id: string; modele_pdf?: string; taux_fg_default: string; taux_ben_default: string; devis_prefix: string; devis_separator: string; devis_numero_annee?: boolean; devis_numero_digits?: number; mail_devis_objet?: string; mail_devis_corps?: string; couleur_principale: string; couleur_accent: string; taux_tva: number[]; default_tab: string; nb_decimales: number }
 
 /* ─────────── tabs ─────────── */
 
@@ -1108,6 +1109,13 @@ function TabPreferences({ token }: { token: string }) {
     queryFn: () => api<Preferences>('/params/preferences'),
     enabled: Boolean(token),
   });
+  // Les modèles proposés viennent du serveur : leur description doit dire la même chose que ce
+  // que l'éditeur PDF dessine réellement.
+  const { data: modelesPdf = [] } = useQuery<ModelePdfOption[]>({
+    queryKey: ['params-modeles-pdf'],
+    queryFn: () => api<ModelePdfOption[]>('/params/modeles-pdf'),
+    enabled: Boolean(token),
+  });
 
   // Champs texte simples (FG, bénéfice, prefix, séparateur, couleur)
   const [form, setForm] = useState<Record<string, string>>({});
@@ -1163,6 +1171,7 @@ function TabPreferences({ token }: { token: string }) {
         mailDevisCorps: f('mail_devis_corps') || null,
         couleurPrincipale: f('couleur_principale') || null,
         couleurAccent: f('couleur_accent') || null,
+        modelePdf: f('modele_pdf') || null,
         tauxTva: currentTva,
         defaultTab: currentTab,
         nbDecimales: currentNbDec,
@@ -1375,6 +1384,44 @@ function TabPreferences({ token }: { token: string }) {
             }}
           />
         </Row>
+        {/* ── Modèle des documents édités ── */}
+        <div style={{ marginTop: 18 }}>
+          <strong style={{ fontSize: 13 }}>Modèle des documents PDF</strong>
+          <p className="muted" style={{ margin: '2px 0 10px', fontSize: 11 }}>
+            Devis, bons de commande, factures et situations partent du même expéditeur : ils suivent
+            tous le modèle choisi ici, teinté de vos deux couleurs. Le modèle ne change jamais ce qui
+            est écrit — montants et mentions légales n'ont rien d'une affaire de goût.
+          </p>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {modelesPdf.map((m) => {
+              const choisi = (f('modele_pdf') || 'classique') === m.cle;
+              return (
+                <label
+                  key={m.cle}
+                  style={{
+                    display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px',
+                    border: `1px solid ${choisi ? 'var(--accent)' : 'var(--border)'}`,
+                    borderRadius: 6, cursor: 'pointer',
+                    background: choisi ? 'var(--bg-alt)' : undefined,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="modele-pdf"
+                    checked={choisi}
+                    onChange={() => setForm({ ...form, modele_pdf: m.cle })}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    <strong style={{ fontSize: 13 }}>{m.nom}</strong>
+                    <span className="muted" style={{ display: 'block', fontSize: 11 }}>{m.description}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Aperçu live */}
         <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-alt)', fontSize: 11 }}>
           <strong style={{ color: 'var(--primary)' }}>Aperçu couleur principale</strong>

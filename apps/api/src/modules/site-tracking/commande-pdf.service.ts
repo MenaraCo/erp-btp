@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import PDFDocument from 'pdfkit';
+import { dessinerEnTete, modelePdf } from '../../core/pdf/modele-pdf';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
 
@@ -57,7 +58,7 @@ export class CommandePdfService {
            FROM company ORDER BY code ASC LIMIT 1`,
       ))[0] ?? null;
       const prefs = (await em.query(
-        `SELECT couleur_principale, couleur_accent FROM company_preferences LIMIT 1`,
+        `SELECT couleur_principale, couleur_accent, modele_pdf FROM company_preferences LIMIT 1`,
       ))[0] ?? null;
 
       return this.dessiner({
@@ -67,6 +68,7 @@ export class CommandePdfService {
         couleurs: {
           primary: prefs?.couleur_principale ?? '#1a3a5c',
           accent: prefs?.couleur_accent ?? '#e8550a',
+          modele: prefs?.modele_pdf ?? 'classique',
         },
       });
     });
@@ -76,7 +78,7 @@ export class CommandePdfService {
     commande: Record<string, unknown>;
     lignes: Array<Record<string, unknown>>;
     company: Record<string, unknown> | null;
-    couleurs: { primary: string; accent: string };
+    couleurs: { primary: string; accent: string; modele?: string };
   }): Promise<Buffer> {
     const { commande: o, lignes, company: c, couleurs } = d;
     const nf = (v: unknown, dec = 2) =>
@@ -92,47 +94,30 @@ export class CommandePdfService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      /* ── En-tête société ── */
-      let headTop = M;
-      if (c?.logo_data) {
-        try {
-          doc.image(Buffer.from(String(c.logo_data), 'base64'), M, headTop, { fit: [130, 46] });
-          headTop += 52;
-        } catch {
-          // Logo illisible : le document part quand même, c'est l'essentiel.
-        }
-      }
-      doc.fontSize(13).font('Helvetica-Bold').fillColor(couleurs.primary)
-        .text(String(c?.name ?? ''), M, headTop, { width: PAGE_W / 2 });
-      doc.fontSize(8).font('Helvetica').fillColor('#555');
-      for (const l of [
-        String(c?.address ?? ''),
-        [c?.postal_code, c?.city].filter(Boolean).join(' '),
-        [c?.phone && `Tél. ${c.phone}`, c?.email].filter(Boolean).join('  ·  '),
-      ].filter((s) => s && s.trim())) {
-        doc.text(l, M, doc.y, { width: PAGE_W / 2 });
-      }
-
-      /* ── Cartouche commande ── */
-      const boxW = 210;
-      const boxX = RIGHT - boxW;
-      doc.roundedRect(boxX, M, boxW, 78, 4).fillAndStroke('#f8fafc', '#cbd5e1');
-      doc.fillColor(couleurs.primary).fontSize(14).font('Helvetica-Bold')
-        .text('BON DE COMMANDE', boxX + 10, M + 8, { width: boxW - 20 });
-      doc.fontSize(8).font('Helvetica').fillColor('#334155');
-      doc.text(`N° ${o.code}`, boxX + 10, M + 30, { width: boxW - 20 });
-      doc.text(`Date : ${jour(o.validated_at ?? o.created_at)}`, boxX + 10, doc.y, { width: boxW - 20 });
-      if (o.delivery_date) {
-        doc.font('Helvetica-Bold').fillColor(couleurs.accent)
-          .text(`Livraison souhaitée : ${jour(o.delivery_date)}`, boxX + 10, doc.y, { width: boxW - 20 });
-        doc.font('Helvetica').fillColor('#334155');
-      }
-      if (o.chantier_code) {
-        doc.text(`Chantier : ${o.chantier_code}`, boxX + 10, doc.y, { width: boxW - 20 });
-      }
+      /* ── En-tête : société + cartouche, dans le modèle choisi par la société ── */
+      const style = modelePdf(couleurs.modele);
+      const references = [
+        `N° ${o.code}`,
+        `Date : ${jour(o.validated_at ?? o.created_at)}`,
+        ...(o.delivery_date ? [`Livraison souhaitée : ${jour(o.delivery_date)}`] : []),
+        ...(o.chantier_code ? [`Chantier : ${o.chantier_code}`] : []),
+      ];
+      const basEnTete = dessinerEnTete(doc, style, couleurs, {
+        titre: 'BON DE COMMANDE',
+        references,
+        societe: {
+          nom: String(c?.name ?? ''),
+          lignes: [
+            String(c?.address ?? ''),
+            [c?.postal_code, c?.city].filter(Boolean).join(' '),
+            [c?.phone && `Tél. ${c.phone}`, c?.email].filter(Boolean).join('  ·  '),
+          ].filter((l) => l && l.trim()),
+          logo: c?.logo_data ? Buffer.from(String(c.logo_data), 'base64') : null,
+        },
+      });
 
       /* ── Fournisseur ── */
-      let y = Math.max(doc.y, M + 88) + 14;
+      let y = basEnTete;
       doc.fontSize(7).font('Helvetica-Bold').fillColor('#94a3b8').text('FOURNISSEUR', M, y);
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a')
         .text(String(o.fournisseur ?? '—'), M, doc.y + 2, { width: 260 });

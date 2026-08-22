@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import request from 'supertest';
 import { createTestDataSource } from '../support/datasource';
 import { buildSocleApp, entitleUser } from '../support/socle-app';
+import { runInTenant } from '../../src/core/tenancy/tenant-transaction';
 
 describe('Estimating 1.6 — édition PDF du devis', () => {
   let app: INestApplication;
@@ -96,5 +97,46 @@ describe('Estimating 1.6 — édition PDF du devis', () => {
       })
       .expect(200);
     expect((res.body as Buffer).subarray(0, 4).toString('latin1')).toBe('%PDF');
+  });
+
+  it('le_modele_de_document_choisi_par_la_societe_change_la_mise_en_page', async () => {
+    const version = (
+      await hdr(request(app.getHttpServer()).post('/affaires')).send({ code: 'PDF-2', name: 'Villa' })
+    ).body.version;
+    await hdr(request(app.getHttpServer()).post(`/versions/${version.id}/lines`))
+      .send({ type: 'titre', code: '1', designation: 'Gros œuvre' });
+
+    const telecharger = async (): Promise<Buffer> => {
+      const r = await hdr(request(app.getHttpServer()).get(`/versions/${version.id}/devis.pdf`))
+        .buffer(true)
+        .parse((response, cb) => {
+          const data: Buffer[] = [];
+          response.on('data', (c: Buffer) => data.push(Buffer.from(c)));
+          response.on('end', () => cb(null, Buffer.concat(data)));
+        })
+        .expect(200);
+      return r.body as Buffer;
+    };
+
+    // Les préférences appartiennent à une société : sans elle, il n'y a rien à préférer.
+    await runInTenant(ds, tenantId, (em) =>
+      em.query(
+        `INSERT INTO company (tenant_id, code, name) VALUES ($1, 'STE', 'Société de test')`,
+        [tenantId],
+      ));
+
+    // Les modèles proposés viennent du serveur : l'écran ne peut pas en inventer un.
+    const modeles = (await hdr(request(app.getHttpServer()).get('/params/modeles-pdf')).expect(200)).body;
+    expect(modeles.map((m: { cle: string }) => m.cle)).toContain('bandeau');
+
+    const classique = await telecharger();
+    await hdr(request(app.getHttpServer()).patch('/params/preferences'))
+      .send({ modelePdf: 'bandeau' }).expect(200);
+    const bandeau = await telecharger();
+
+    // Même contenu, mise en page différente : le bandeau dessine un aplat que le classique n'a pas.
+    expect(classique.subarray(0, 4).toString('latin1')).toBe('%PDF');
+    expect(bandeau.subarray(0, 4).toString('latin1')).toBe('%PDF');
+    expect(bandeau.length).not.toBe(classique.length);
   });
 });
