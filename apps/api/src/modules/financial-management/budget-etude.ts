@@ -9,6 +9,15 @@ export const UNALLOC_PREFIX = '__unalloc__:';
 /** Ce sur quoi on veut voir le budget d'étude : le code analytique, ou la ressource elle-même. */
 export type CleBudget = 'code' | 'ressource';
 
+/**
+ * Ce qu'on additionne : des euros (quantité × prix) ou des QUANTITÉS (les heures du budget de
+ * main-d'œuvre). Le même parcours d'arbre sert aux deux — un sous-ouvrage multiplie ses quantités
+ * comme il multiplie ses montants —, il suffit de compter chaque ressource pour 1 au lieu de son
+ * prix. Deux calculs séparés finiraient par diverger d'une décimale, et le budget d'heures ne
+ * correspondrait plus à celui d'euros.
+ */
+export type MesureBudget = 'montant' | 'quantite';
+
 export interface BudgetEtude {
   /** bucket → montant. Bucket = id du code analytique (ou de la ressource), sinon `__unalloc__:nature`. */
   parBucket: Map<string, Decimal>;
@@ -54,6 +63,7 @@ export async function budgetEtude(
   em: EntityManager,
   chantierId: string,
   cle: CleBudget = 'code',
+  mesure: MesureBudget = 'montant',
 ): Promise<BudgetEtude> {
   const lines: LineRow[] = await em.query(
     `SELECT id, parent_line_id, vendable, quantite_objectif
@@ -82,7 +92,7 @@ export async function budgetEtude(
     };
     if (c.kind === 'resource') {
       comp.quantity = c.quantite_objectif ?? 0;
-      comp.unitCost = c.unit_cost_objectif ?? 0;
+      comp.unitCost = mesure === 'quantite' ? 1 : c.unit_cost_objectif ?? 0;
       const defaut = `${UNALLOC_PREFIX}${c.nature ?? 'material'}`;
       comp.bucket = cle === 'ressource' ? c.resource_id ?? defaut : c.code_id ?? defaut;
     } else if (c.kind === 'sub_line') {

@@ -22,6 +22,8 @@ export interface CodeInput {
   nature?: string;
   /** charge | frais_generaux | produit — typage à la manière des A.R.C. (charges ou produits). */
   categorie?: string;
+  /** Les quantités de ce poste entrent-elles dans le décompte des heures de production ? */
+  heuresProduction?: boolean;
 }
 
 export interface CompanyInfoInput {
@@ -248,7 +250,7 @@ export class ParamsService {
     const tenantId = this.context.requireTenantId();
     return runInTenant(this.dataSource, tenantId, (em) =>
       em.query(
-        `SELECT c.id, c.code, c.label, c.famille_id, c.nature, c.categorie,
+        `SELECT c.id, c.code, c.label, c.famille_id, c.nature, c.categorie, c.heures_production,
                 f.code AS famille_code, f.label AS famille_label,
                 l.code AS lot_code
          FROM analytical_code c
@@ -265,13 +267,14 @@ export class ParamsService {
       await this.assertPasDeDoublon(em, 'analytical_code', 'code', input.code, input.label);
       // Nature par défaut = celle de la famille parente si non fournie
       const rows = await em.query(
-        `INSERT INTO analytical_code (tenant_id, famille_id, code, label, nature, categorie)
+        `INSERT INTO analytical_code
+           (tenant_id, famille_id, code, label, nature, categorie, heures_production)
          VALUES ($1,$2,$3,$4,
                  COALESCE($5, (SELECT nature FROM analytical_famille WHERE id = $2), 'material'),
-                 COALESCE($6, 'charge'))
-         RETURNING id, code, label, famille_id, nature, categorie`,
+                 COALESCE($6, 'charge'), COALESCE($7, false))
+         RETURNING id, code, label, famille_id, nature, categorie, heures_production`,
         [tenantId, input.familleId, input.code, input.label, input.nature ?? null,
-         input.categorie ?? null],
+         input.categorie ?? null, input.heuresProduction ?? null],
       );
       return rows[0];
     });
@@ -288,13 +291,15 @@ export class ParamsService {
            code       = COALESCE($3, code),
            label      = COALESCE($4, label),
            nature     = COALESCE($5, nature),
-           categorie  = COALESCE($6, categorie)
+           categorie  = COALESCE($6, categorie),
+           heures_production = COALESCE($7, heures_production)
          WHERE id = $1`,
         [id, input.familleId ?? null, input.code ?? null, input.label ?? null, input.nature ?? null,
-         input.categorie ?? null],
+         input.categorie ?? null, input.heuresProduction ?? null],
       );
       return (await em.query(
-        `SELECT id, code, label, famille_id, nature, categorie FROM analytical_code WHERE id = $1`,
+        `SELECT id, code, label, famille_id, nature, categorie, heures_production
+           FROM analytical_code WHERE id = $1`,
         [id],
       ))[0];
     });

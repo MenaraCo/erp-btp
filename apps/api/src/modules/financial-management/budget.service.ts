@@ -10,6 +10,8 @@ import { budgetEtude, UNALLOC_PREFIX } from './budget-etude';
 
 /** Les quatre colonnes du tableau des budgets, dans l'ordre de lecture. */
 const METRICS = ['etude', 'mouvements', 'global', 'initial'] as const;
+/** Les mêmes colonnes, mais en HEURES : l'enveloppe de main-d'œuvre telle que le chantier la vit. */
+const METRICS_HEURES = ['heuresEtude', 'heuresMouvements', 'heuresGlobal'] as const;
 
 /**
  * Les moments qu'une photo de budget peut immortaliser. Ce ne sont pas des états successifs d'un
@@ -54,6 +56,7 @@ interface LigneParCode {
   nature: string;
   categorie: string;
   montant: string;
+  quantite?: string;
 }
 
 interface RessourceRow {
@@ -108,6 +111,14 @@ export class BudgetService {
       await this.assertChantier(em, chantierId);
 
       const etude = await budgetEtude(em, chantierId, 'code');
+      // Les heures : même arbre, mêmes cascades, mais on compte les quantités. Seuls les postes
+      // marqués « heures de production » les portent — sinon on additionnerait des mètres carrés
+      // avec des heures de maçon.
+      const heures = await budgetEtude(em, chantierId, 'code', 'quantite');
+      const codesHeures = new Set<string>(
+        (await em.query(`SELECT id FROM analytical_code WHERE heures_production = true`))
+          .map((r: { id: string }) => r.id),
+      );
       const mouvements = await this.parCode(em, chantierId, 'chantier_budget_movement');
       // La colonne de référence est une PHOTO : celle demandée, sinon la dernière figée. Comparer
       // à « la dernière » par défaut est ce qu'on veut neuf fois sur dix ; comparer à celle du
@@ -168,6 +179,22 @@ export class BudgetService {
 
       for (const [bucket, montant] of etude.parBucket) {
         pousseCharge(bucket, ['etude', 'global'], montant);
+      }
+      const parCodeHeures = new Map<string, Record<string, Decimal>>();
+      const cumuleHeures = (
+        codeId: string, metriques: Array<'heuresEtude' | 'heuresMouvements' | 'heuresGlobal'>, q: Decimal,
+      ) => {
+        if (!codesHeures.has(codeId) || q.isZero()) return;
+        const acc = parCodeHeures.get(codeId)
+          ?? Object.fromEntries(METRICS_HEURES.map((m) => [m, new Decimal(0)]));
+        for (const m of metriques) acc[m] = acc[m].plus(q);
+        parCodeHeures.set(codeId, acc);
+      };
+      for (const [bucket, quantite] of heures.parBucket) {
+        cumuleHeures(bucket, ['heuresEtude', 'heuresGlobal'], quantite);
+      }
+      for (const [bucket, quantite] of heures.fraisParBucket) {
+        cumuleHeures(bucket, ['heuresEtude', 'heuresGlobal'], quantite);
       }
       const fg = this.accumulateur();
       const parCodeFg = new Map<string, Record<string, Decimal>>();
@@ -235,7 +262,10 @@ export class BudgetService {
         rows.push({ codeId: null, nature: ligne.nature as MeasureRow['nature'], metrics });
       };
 
-      for (const m of mouvements) ranger(m, ['mouvements', 'global']);
+      for (const m of mouvements) {
+        ranger(m, ['mouvements', 'global']);
+        if (m.code_id) cumuleHeures(m.code_id, ['heuresMouvements', 'heuresGlobal'], new Decimal(m.quantite ?? 0));
+      }
       for (const i of initial) ranger(i, ['initial']);
 
       const aggregate = aggregateAnalytical(tree, rows, [...METRICS]);
@@ -250,6 +280,13 @@ export class BudgetService {
       const lignesFg = await this.lignesParCode(em, sections.fraisGeneraux.codes, parCodeFg);
       const lignesProduits = await this.lignesParCode(em, sections.produits.codes, parCodeProduit);
       const lignesHorsPlan = await this.lignesParCode(em, [], parCodeHorsPlan);
+      const lignesHeures = await this.lignesParCode(em, [], parCodeHeures);
+      const totalHeures = Object.fromEntries(
+        METRICS_HEURES.map((m) => [
+          m,
+          [...parCodeHeures.values()].reduce((t, acc) => t.plus(acc[m] ?? 0), new Decimal(0)).toString(),
+        ]),
+      );
 
       /* ── Totaux et résultats ── */
       const totalCharges: Record<string, string> = {};
@@ -323,6 +360,11 @@ export class BudgetService {
           lignes: lignesProduits,
           total: this.rendu(produits),
         },
+        /**
+         * Le budget de MAIN-D'ŒUVRE en heures : la seule unité dans laquelle un conducteur sait
+         * dire s'il tient son planning.
+         */
+        heures: { label: 'Budget d’heures', lignes: lignesHeures, total: totalHeures },
         resultatBrut,
         resultatNet,
         /** Total général des charges + frais généraux : la dépense autorisée, tous postes confondus. */
@@ -377,7 +419,8 @@ export class BudgetService {
                        CASE WHEN b.nature = 'produit' THEN 'produit'
                             WHEN b.nature = 'frais_generaux' THEN 'frais_generaux'
                             ELSE 'charge' END) AS categorie,
-              SUM(b.montant)::numeric(16,2) AS montant
+              SUM(b.montant)::numeric(16,2) AS montant,
+              SUM(b.quantite)::numeric(16,3) AS quantite
          FROM ${table} b
          LEFT JOIN analytical_code c ON c.id = b.code_analytique_id
         WHERE b.chantier_id = $1 AND b.statut = 'traite'
@@ -390,10 +433,12 @@ export class BudgetService {
     return Object.fromEntries(METRICS.map((m) => [m, new Decimal(0)]));
   }
   private rendu(acc?: Record<string, Decimal>): Record<string, string> {
-    return Object.fromEntries(METRICS.map((m) => [m, (acc?.[m] ?? new Decimal(0)).toString()]));
+    // Les clés effectivement présentes priment : le même utilitaire sert aux euros et aux heures.
+    const clés = acc ? Object.keys(acc) : [...METRICS];
+    return Object.fromEntries(clés.map((m) => [m, (acc?.[m] ?? new Decimal(0)).toString()]));
   }
   private porteUneValeur(metrics: Record<string, string>): boolean {
-    return METRICS.some((m) => !new Decimal(metrics[m] ?? 0).isZero());
+    return Object.values(metrics).some((v) => !new Decimal(v ?? 0).isZero());
   }
 
   /**

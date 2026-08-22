@@ -53,6 +53,7 @@ interface TableauBudgets {
   resultatNet: Metriques;
   total: Metriques;
   enveloppe: { depassementsAssumes: string; apportsAvenants: string };
+  heures: { label: string; lignes: LigneCode[]; total: Metriques };
 }
 interface AvenantOption { id: string; numero: number | string; designation?: string | null; total_ht: string }
 interface RessourceBudget {
@@ -85,6 +86,10 @@ function jour(s: string | null): string {
 function porteUneValeur(m: Metriques): boolean {
   return ['etude', 'mouvements', 'global', 'initial'].some((k) => Number(m[k] ?? 0) !== 0);
 }
+/** Des heures se lisent avec une décimale : « 137,5 h », pas « 137,50 € ». */
+function heures(v: string | undefined): string {
+  return `${Number(v ?? 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
+}
 function ecart(m: Metriques): number {
   return Number(m.global ?? 0) - Number(m.initial ?? 0);
 }
@@ -108,7 +113,7 @@ export default function BudgetsPage() {
   const [saisie, setSaisie] = useState(false);
   const [ripage, setRipage] = useState(false);
   const [figer, setFiger] = useState(false);
-  const [vue, setVue] = useState<'plat' | 'axe'>('plat');
+  const [vue, setVue] = useState<'plat' | 'axe' | 'heures'>('plat');
   /** Photo de budget mise en regard ; vide = la dernière figée. */
   const [reference, setReference] = useState('');
 
@@ -294,6 +299,11 @@ export default function BudgetsPage() {
               <Bouton variante={vue === 'axe' ? 'primaire' : 'secondaire'} onClick={() => setVue('axe')}>
                 Vue par axe analytique
               </Bouton>
+              {d.heures.lignes.length > 0 && (
+                <Bouton variante={vue === 'heures' ? 'primaire' : 'secondaire'} onClick={() => setVue('heures')}>
+                  Budget d'heures
+                </Bouton>
+              )}
             </div>
           </div>
 
@@ -306,6 +316,44 @@ export default function BudgetsPage() {
             </Alerte>
           )}
 
+          {vue === 'heures' ? (
+            <div style={{ overflowX: 'auto', marginTop: 10 }}>
+              <p className="muted" style={{ marginTop: 0, fontSize: 12, maxWidth: 720 }}>
+                L'enveloppe de main-d'œuvre en <strong>heures</strong> — la seule unité dans laquelle on sait
+                dire si l'on tient le planning. Seuls les postes cochés « heures de production » y figurent.
+              </p>
+              <table className="grid" style={{ margin: 0, minWidth: 560 }}>
+                <thead>
+                  <tr>
+                    <th>Poste</th>
+                    <th style={{ textAlign: 'right' }}>Heures d'étude</th>
+                    <th style={{ textAlign: 'right' }}>Mouvements</th>
+                    <th style={{ textAlign: 'right' }}>Heures budgétées</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.heures.lignes.map((l) => (
+                    <tr key={l.id}>
+                      <td><span className="code-cell">{l.code}</span> {l.label}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{heures(l.metrics.heuresEtude)}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                        {Number(l.metrics.heuresMouvements ?? 0) === 0 ? '—' : heures(l.metrics.heuresMouvements)}
+                      </td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                        {heures(l.metrics.heuresGlobal)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ borderTop: '2px solid var(--border)' }}>
+                    <td><strong>Total</strong></td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{heures(d.heures.total.heuresEtude)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{heures(d.heures.total.heuresMouvements)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{heures(d.heures.total.heuresGlobal)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ) : (
           <div style={{ overflowX: 'auto', marginTop: 10 }}>
             <table className="grid" style={{ margin: 0, minWidth: 760 }}>
               <thead>
@@ -413,6 +461,7 @@ export default function BudgetsPage() {
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
 

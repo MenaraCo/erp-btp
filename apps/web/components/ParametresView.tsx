@@ -67,7 +67,7 @@ function Row({ children, style }: { children: React.ReactNode; style?: React.CSS
 interface Unit { id: string; abrev: string; label: string; sort_order: number }
 interface Lot { id: string; code: string; label: string }
 interface Famille { id: string; code: string; label: string; lot_id: string; nature: string; lot_code?: string; lot_label?: string }
-interface Code { id: string; code: string; label: string; famille_id: string; nature: string; categorie?: string; famille_code?: string; famille_label?: string }
+interface Code { id: string; code: string; label: string; famille_id: string; nature: string; categorie?: string; heures_production?: boolean; famille_code?: string; famille_label?: string }
 
 const NAT_OPTS = [
   { v: 'material', l: 'Matériaux' },
@@ -686,7 +686,10 @@ function TabCodes({ token }: { token: string }) {
   });
   const [nf, setNf] = useState({ familleId: '', code: '', label: '', nature: 'material', categorie: 'charge' });
   const [editing, setEditing] = useState<
-    { id: string; familleId: string; code: string; label: string; nature: string; categorie: string } | null
+    {
+      id: string; familleId: string; code: string; label: string; nature: string;
+      categorie: string; heuresProduction: boolean;
+    } | null
   >(null);
   const { selectedIds, toggle, toggleAll, clear } = useSelection();
 
@@ -704,7 +707,7 @@ function TabCodes({ token }: { token: string }) {
     onSuccess: () => { erreur.onOk(); inv(); setNf({ familleId: '', code: '', label: '', nature: 'material', categorie: 'charge' }); },
   });
   const update = useMutation({
-    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/codes/${e.id}`, { method: 'PATCH', body: { familleId: e.familleId || null, code: e.code, label: e.label, nature: e.nature, categorie: e.categorie } }),
+    mutationFn: (e: NonNullable<typeof editing>) => api(`/params/codes/${e.id}`, { method: 'PATCH', body: { familleId: e.familleId || null, code: e.code, label: e.label, nature: e.nature, categorie: e.categorie, heuresProduction: e.heuresProduction } }),
     onError: erreur.onError,
     onSuccess: () => { erreur.onOk(); inv(); setEditing(null); },
   });
@@ -780,13 +783,13 @@ function TabCodes({ token }: { token: string }) {
           </BulkBar>
         )}
         <RefTable
-          rows={codes.map((c) => [c.code, c.label, c.famille_code ? `${c.famille_code} — ${c.famille_label}` : '⚠ non rattaché', natLabel(c.nature), catLabel(c.categorie)])}
-          headers={['Code', 'Désignation', 'Famille', 'Nature', 'Catégorie']}
+          rows={codes.map((c) => [c.code, c.label, c.famille_code ? `${c.famille_code} — ${c.famille_label}` : '⚠ non rattaché', natLabel(c.nature), catLabel(c.categorie), c.heures_production ? 'Oui' : ''])}
+          headers={['Code', 'Désignation', 'Famille', 'Nature', 'Catégorie', 'Heures']}
           ids={codes.map((c) => c.id)}
           selectedIds={selectedIds}
           onToggle={toggle}
           onToggleAll={() => toggleAll(codes.map((c) => c.id))}
-          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id || '', code: codes[i].code, label: codes[i].label, nature: codes[i].nature, categorie: codes[i].categorie ?? 'charge' })}
+          onEdit={(i) => setEditing({ id: codes[i].id, familleId: codes[i].famille_id || '', code: codes[i].code, label: codes[i].label, nature: codes[i].nature, categorie: codes[i].categorie ?? 'charge', heuresProduction: Boolean(codes[i].heures_production) })}
           onDelete={(i) => { if (confirm('Supprimer ce code analytique ?')) del.mutate(codes[i].id); }}
         />
       </Card>
@@ -811,6 +814,15 @@ function TabCodes({ token }: { token: string }) {
           </Field>
           <Field label="Code"><input className="input" value={editing.code} onChange={(e) => setEditing({ ...editing, code: e.target.value })} /></Field>
           <Field label="Désignation"><input className="input" style={{ width: 300 }} value={editing.label} onChange={(e) => setEditing({ ...editing, label: e.target.value })} /></Field>
+          {/* Guide §13.1 : les quantités de ce poste entrent-elles dans le décompte des heures ? */}
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={editing.heuresProduction}
+              onChange={(e) => setEditing({ ...editing, heuresProduction: e.target.checked })}
+            />
+            Compte dans les heures de production (budget d’heures)
+          </label>
           <Row style={{ marginTop: 12, justifyContent: 'flex-end' }}>
             <button className="btn-secondary btn" onClick={() => setEditing(null)}>Annuler</button>
             <button className="btn" onClick={() => update.mutate(editing)}>Modifier</button>

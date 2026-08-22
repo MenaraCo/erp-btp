@@ -20,6 +20,7 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
   let chantierId: string;
   let codeColle: string;
   let codeAdhesif: string;
+  let lotMo: string;
   let ressourceId: string;
 
   function as(method: 'get' | 'post' | 'put' | 'delete', path: string) {
@@ -43,6 +44,7 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
     const lotId = (await as('post', '/params/lots').send({ code: 'GO', label: 'Gros œuvre' }).expect(201)).body.id;
     const familleId = (await as('post', '/params/familles')
       .send({ lotId, code: 'MAC', label: 'Maçonnerie', nature: 'material' }).expect(201)).body.id;
+    lotMo = (await as('post', '/params/lots').send({ code: 'MO', label: 'Main d’œuvre' }).expect(201)).body.id;
     codeColle = (await as('post', '/params/codes')
       .send({ familleId, code: '280', label: 'Colle' }).expect(201)).body.id;
     codeAdhesif = (await as('post', '/params/codes')
@@ -276,5 +278,31 @@ describe('Suivi de chantier — budgets, ripages horodatés et budget initial', 
 
     const b = (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
     expect(Number(b.enveloppe.depassementsAssumes)).toBeGreaterThanOrEqual(500);
+  });
+
+  it('le_budget_d_heures_compte_les_quantites_des_postes_marques_heures', async () => {
+    // Un poste de main-d'œuvre, coché « heures de production », et un ouvrage qui en consomme.
+    const familleMo = (await as('post', '/params/familles')
+      .send({ lotId: lotMo, code: 'MO-F', label: 'Main d’œuvre', nature: 'labor' }).expect(201)).body.id;
+    const codeMo = (await as('post', '/params/codes')
+      .send({ familleId: familleMo, code: '110', label: 'MO maçonnerie', heuresProduction: true })
+      .expect(201)).body.id;
+
+    // 20 heures dotées sur ce poste, motivées comme il se doit.
+    await as('post', `/chantiers/${chantierId}/budgets/mouvements`)
+      .send({
+        codeAnalytiqueId: codeMo, libelle: 'Renfort maçonnerie', quantite: '20', montant: '600',
+        depassementAssume: true, motif: 'Renfort décidé en réunion de chantier',
+      })
+      .expect(201);
+
+    const b = (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
+    const ligne = b.heures.lignes.find((l: { code: string }) => l.code === '110');
+    expect(Number(ligne.metrics.heuresGlobal)).toBeCloseTo(20, 2);
+    expect(Number(b.heures.total.heuresGlobal)).toBeCloseTo(20, 2);
+
+    // Un poste NON marqué ne pollue pas le décompte : on n'additionne pas des sacs et des heures.
+    const b2 = (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
+    expect(b2.heures.lignes.find((l: { code: string }) => l.code === '280')).toBeUndefined();
   });
 });
