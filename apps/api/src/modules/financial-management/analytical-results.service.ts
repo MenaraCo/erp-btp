@@ -190,6 +190,19 @@ export class AnalyticalResultsService {
       if (new Decimal(r.montant ?? 0).isZero()) continue;
       this.dispatch(rows, siteOverhead, r.code_id, r.nature ?? 'labor', 'realise', r.montant);
     }
+    // Stock : ce qui est sorti du magasin pour ce chantier, au prix moyen pondéré. Sans cette
+    // ligne, le magasin absorberait des coûts que le chantier a pourtant bien consommés.
+    const stock = await em.query(
+      `SELECT code_analytique_id AS code_id, SUM(montant)::numeric(16,2) AS montant
+         FROM stock_mouvement
+        WHERE chantier_id = $1 AND type = 'sortie'
+        GROUP BY code_analytique_id`,
+      [chantierId],
+    );
+    for (const r of stock) {
+      if (new Decimal(r.montant ?? 0).isZero()) continue;
+      this.dispatch(rows, siteOverhead, r.code_id, 'material', 'realise', r.montant);
+    }
     // Matériel : ce que l'engin a réellement servi sur le chantier, à son coût d'utilisation.
     const materiel = await em.query(
       `SELECT code_analytique_id AS code_id, SUM(cout)::numeric(16,2) AS montant

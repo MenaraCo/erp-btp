@@ -248,6 +248,18 @@ export const MODULES: AppModule[] = [
     ],
   },
   {
+    key: 'stocks',
+    parent: 'chantiers',
+    label: 'Stocks',
+    tagline: 'Dépôts, articles, mouvements valorisés au prix moyen',
+    home: '/stocks',
+    match: ['/stocks'],
+    capabilities: ['stock'],
+    features: [
+      { href: '/stocks', label: 'État du stock' },
+    ],
+  },
+  {
     key: 'personnel',
     parent: 'chantiers',
     label: 'Gestion du personnel',

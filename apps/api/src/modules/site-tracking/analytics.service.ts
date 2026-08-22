@@ -144,8 +144,16 @@ export class AnalyticsService {
       const engageMap = mapBy(engage, 'montant');
       const supplierMap = mapBy(supplier, 'montant');
 
+      // Sorties de stock vers ce chantier : du matériau consommé, au prix moyen pondéré.
+      const stockRealise = (await em.query(
+        `SELECT COALESCE(SUM(montant), 0)::numeric(16,2) AS total
+           FROM stock_mouvement WHERE chantier_id = $1 AND type = 'sortie'`,
+        [chantierId],
+      ))[0].total;
+
       const results: NatureResult[] = BUDGET_NATURES.map((nature) => {
         let realise = new Decimal(supplierMap[nature] ?? 0).plus(payeMap[nature] ?? 0);
+        if (nature === 'material') realise = realise.plus(new Decimal(stockRealise));
         let engageNature = new Decimal(engageMap[nature] ?? 0);
         if (nature === 'labor') {
           realise = realise.plus(new Decimal(laborTimesheets));
