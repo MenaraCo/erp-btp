@@ -20,4 +20,5 @@ export class DgdController {
   get(@Param('marcheId') marcheId: string) {
     return this.dgd.get(marcheId);
   }
+
 }

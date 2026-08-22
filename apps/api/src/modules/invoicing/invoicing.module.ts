@@ -9,6 +9,7 @@ import { SituationsService } from './situations.service';
 import { SituationsController } from './situations.controller';
 import { AvenantService } from './avenant.service';
 import { AvenantController } from './avenant.controller';
+import { DocumentPdfService } from './document-pdf.service';
 import { DgdService } from './dgd.service';
 import { DgdController } from './dgd.controller';
 import { CompanyService } from './company.service';
@@ -25,8 +26,7 @@ import { InvoiceController } from './invoice.controller';
     AvenantService,
     DgdService,
     CompanyService,
-    InvoiceService,
-  ],
+    InvoiceService, DocumentPdfService],
   controllers: [
     AcceptanceController,
     SituationsController,

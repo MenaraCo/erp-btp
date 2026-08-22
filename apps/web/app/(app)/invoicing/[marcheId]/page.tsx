@@ -4,9 +4,9 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Receipt } from 'lucide-react';
+import { FileText, Receipt } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { apiFetch, ApiError } from '@/lib/api';
+import { apiFetch, ApiError, API_URL } from '@/lib/api';
 import { euro } from '@/lib/format';
 import { Camembert, Courbe, PALETTE } from '@/components/Graphiques';
 import { Alerte, EtatVide } from '@/components/ui';
@@ -53,6 +53,7 @@ interface SituationLine {
 interface SituationDetail { situation: Situation; lines: SituationLine[] }
 interface Avenant { id: string; numero: number; label: string; total_ht: string }
 interface Dgd {
+  id: string;
   montant_marche_ht: string;
   travaux_cumul_ht: string;
   tva: string;
@@ -289,6 +290,7 @@ function SituationsTab({ marcheId, lines, totalHt, token }: {
                 <th style={{ textAlign: 'right' }}>TTC</th>
                 <th style={{ textAlign: 'right' }}>Retenue</th>
                 <th style={{ textAlign: 'right' }}>Net à payer</th>
+                <th style={{ width: 40, textAlign: 'center' }}>PDF</th>
               </tr>
             </thead>
             <tbody>
@@ -447,10 +449,22 @@ function SituationRows({
         <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(s.ttc)}</td>
         <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{euro(s.retenue_garantie)}</td>
         <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{euro(s.nap)}</td>
+        <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+          {/* La pièce telle que le client la recevra — pas un aperçu d'écran. */}
+          <a
+            href={`${API_URL}/situations/${s.id}/situation.pdf`}
+            target="_blank"
+            rel="noreferrer"
+            title="Éditer la situation en PDF"
+            style={{ color: 'var(--primary)' }}
+          >
+            <FileText size={14} />
+          </a>
+        </td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={9} style={{ background: 'var(--bg)', padding: 0 }}>
+          <td colSpan={10} style={{ background: 'var(--bg)', padding: 0 }}>
             {detail.isLoading && <p className="muted" style={{ padding: 12 }}>Chargement du détail…</p>}
             {detail.data && (
               <table className="grid" style={{ margin: 0 }}>
@@ -684,10 +698,21 @@ function DgdTab({ marcheId, token }: { marcheId: string; token: string | null })
         </table>
       )}
 
-      <div style={{ marginTop: 12 }}>
+      <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
         <button className="btn" disabled={generate.isPending} onClick={() => { setErr(null); generate.mutate(); }}>
           {generate.isPending ? 'Génération…' : d ? 'Régénérer le DGD' : 'Générer le DGD'}
         </button>
+        {d && (
+          <a
+            className="btn btn-secondary"
+            href={`${API_URL}/dgd/${d.id}/dgd.pdf`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <FileText size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+            Éditer le DGD
+          </a>
+        )}
       </div>
     </div>
   );
