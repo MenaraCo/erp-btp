@@ -115,7 +115,8 @@ export class AnalyticalResultsService {
               SUM(b.montant)::numeric(16,2) AS montant
          FROM chantier_budget_movement b
          LEFT JOIN analytical_code c ON c.id = b.code_analytique_id
-        WHERE b.chantier_id = $1 AND COALESCE(c.categorie, 'charge') <> 'produit'
+        WHERE b.chantier_id = $1 AND b.statut = 'traite'
+          AND COALESCE(c.categorie, 'charge') <> 'produit'
         GROUP BY 1, 2`,
       [chantierId],
     );

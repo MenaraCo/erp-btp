@@ -11,12 +11,13 @@ describe('Prévisionnel de chantier B.3 — moteur d’indicateurs branché (§5
   let userId: string;
   let chantierId: string;
 
-  function as(method: 'get' | 'post' | 'put', path: string) {
+  function as(method: 'get' | 'post' | 'put' | 'patch', path: string) {
     const server = app.getHttpServer();
     const base =
       method === 'get' ? request(server).get(path)
         : method === 'put' ? request(server).put(path)
-          : request(server).post(path);
+          : method === 'patch' ? request(server).patch(path)
+            : request(server).post(path);
     return base.set('Host', 'localhost').set('X-Tenant-Id', tenantId).set('X-User-Id', userId);
   }
 
@@ -44,6 +45,22 @@ describe('Prévisionnel de chantier B.3 — moteur d’indicateurs branché (§5
     }
     const acc = (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;
     chantierId = acc.chantier.id;
+    // Les frais généraux du devis arrivent dans un bon de budget : on les impute et on traite,
+    // sinon le chantier démarrerait avec un budget amputé de tout ce qui n'est pas déboursé.
+    const lot = (await as('post', '/params/lots').send({ code: 'FCT-L', label: 'Structure' }).expect(201)).body;
+    const fam = (await as('post', '/params/familles')
+      .send({ lotId: lot.id, code: 'FCT-F', label: 'Frais', nature: 'material' }).expect(201)).body;
+    const codeFg = (await as('post', '/params/codes')
+      .send({ familleId: fam.id, code: 'FCT-900', label: 'Frais généraux', categorie: 'frais_generaux' })
+      .expect(201)).body.id;
+    const bon = (await as('get', `/chantiers/${chantierId}/budgets/bons`).expect(200)).body[0];
+    for (const ligne of bon.lignes) {
+      await as('patch', `/chantiers/${chantierId}/budgets/bons/lignes/${ligne.id}`)
+        .send({ codeAnalytiqueId: codeFg }).expect(200);
+      await as('post', `/chantiers/${chantierId}/budgets/bons/lignes/${ligne.id}/acceptation`)
+        .send({ accepte: true }).expect(201);
+    }
+    await as('post', `/chantiers/${chantierId}/budgets/bons/${bon.id}/traiter`).expect(201);
     // budget d'étude validé → contre-étude, puis contre-étude validée → prévisionnel = objectif
     await as('post', `/marches/${acc.marche.id}/etude/validate`).expect(201);
     await as('post', `/marches/${acc.marche.id}/contre-etude/validate`).expect(201);

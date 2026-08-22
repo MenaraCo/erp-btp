@@ -427,38 +427,33 @@ export class ChantierService {
         count++;
       }
 
-      // Frais de chantier repris du devis : une ligne NON VENDABLE (donc budgétée en
-      // « site_overhead »), un composant par poste pour qu'on sache toujours d'où vient l'argent.
+      // Frais du devis (frais généraux, frais annexes) : ils ne sont PAS des ouvrages, et leur
+      // sort n'est pas décidé d'avance. Ils forment un BON DE BUDGET à traiter — poste analytique
+      // et signe à renseigner — plutôt qu'une ligne « Frais de chantier » qui trancherait à la
+      // place du conducteur (un compte prorata est souvent une recette en moins, pas un coût).
       const postes = (frais?.postes ?? []).filter((p) => !new Decimal(p.montant).isZero());
       if (postes.length > 0) {
-        const lineId = (
+        const [{ n }] = await em.query(
+          `SELECT count(*)::int AS n FROM chantier_budget_document`,
+        );
+        const numero = `BUD-${String(n + 1).padStart(4, '0')}`;
+        const documentId = (
           await em.query(
-            `INSERT INTO execution_line
-               (tenant_id, chantier_id, marche_id, parent_line_id, type, vendable, code, designation, unit,
-                quantite_etude, quantite_objectif, debourse_unitaire_etude, debourse_unitaire_objectif, sort_order)
-             VALUES ($1,$2,$3,NULL,'ouvrage',false,'FRAIS','Frais de chantier','ens',1,1,0,0,$4) RETURNING id`,
-            [tenantId, chantier.id, marcheId, top++],
+            `INSERT INTO chantier_budget_document
+               (tenant_id, chantier_id, marche_id, numero, libelle, source, statut)
+             VALUES ($1,$2,$3,$4,$5,'transfert','a_traiter') RETURNING id`,
+            [tenantId, chantier.id, marcheId, numero, 'Frais repris du devis'],
           )
         )[0].id as string;
-        let cSort = 0;
         for (const poste of postes) {
-          const nomencId = (
-            await em.query(
-              `INSERT INTO nomenclature_resource
-                 (tenant_id, chantier_id, marche_id, source_resource_id, code, label, unit, nature,
-                  unit_cost_etude, unit_cost_objectif, code_analytique_id)
-               VALUES ($1,$2,$3,NULL,$4,$5,'ens',$6,$7,$7,NULL) RETURNING id`,
-              [tenantId, chantier.id, marcheId, freeCode(poste.code), poste.label, poste.nature, poste.montant],
-            )
-          )[0].id as string;
           await em.query(
-            `INSERT INTO execution_component
-               (tenant_id, execution_line_id, kind, nomenclature_resource_id, quantite_etude, quantite_objectif, sort_order)
-             VALUES ($1,$2,'resource',$3,1,1,$4)`,
-            [tenantId, lineId, nomencId, cSort++],
+            `INSERT INTO chantier_budget_movement
+               (tenant_id, chantier_id, document_id, date, type, code_analytique_id,
+                nature, libelle, quantite, montant, statut, accepte)
+             VALUES ($1,$2,$3,CURRENT_DATE,'saisie',NULL,$4,$5,1,$6,'a_traiter',false)`,
+            [tenantId, chantier.id, documentId, poste.nature, poste.label, poste.montant],
           );
         }
-        count++;
       }
 
       await this.recompute(em, tenantId, chantier.id, true, marcheId);

@@ -327,7 +327,7 @@ export class BudgetService {
               SUM(b.montant)::numeric(16,2) AS montant
          FROM ${table} b
          LEFT JOIN analytical_code c ON c.id = b.code_analytique_id
-        WHERE b.chantier_id = $1
+        WHERE b.chantier_id = $1${table === 'chantier_budget_movement' ? " AND b.statut = 'traite'" : ''}
         GROUP BY b.code_analytique_id, b.nature, c.categorie`,
       [chantierId],
     );
@@ -365,7 +365,7 @@ export class BudgetService {
       const mvts: Array<{ resource_id: string; montant: string }> = await em.query(
         `SELECT nomenclature_resource_id AS resource_id, SUM(montant)::numeric(16,2) AS montant
            FROM chantier_budget_movement
-          WHERE chantier_id = $1 AND nomenclature_resource_id IS NOT NULL
+          WHERE chantier_id = $1 AND statut = 'traite' AND nomenclature_resource_id IS NOT NULL
           GROUP BY nomenclature_resource_id`,
         [chantierId],
       );
@@ -487,7 +487,8 @@ export class BudgetService {
       const mouvements: Array<{ code_id: string | null; nature: string; montant: string }> =
         await em.query(
           `SELECT code_analytique_id AS code_id, nature, SUM(montant)::numeric(16,2) AS montant
-             FROM chantier_budget_movement WHERE chantier_id = $1
+             FROM chantier_budget_movement
+            WHERE chantier_id = $1 AND statut = 'traite'
             GROUP BY code_analytique_id, nature`,
           [chantierId],
         );
@@ -564,7 +565,7 @@ export class BudgetService {
            LEFT JOIN analytical_code c ON c.id = m.code_analytique_id
            LEFT JOIN nomenclature_resource n ON n.id = m.nomenclature_resource_id
            LEFT JOIN user_account u ON u.id = m.actor_user_id
-          WHERE m.chantier_id = $1
+          WHERE m.chantier_id = $1 AND m.statut = 'traite'
           ORDER BY m.created_at DESC, m.montant DESC`,
         [chantierId],
       );
@@ -595,6 +596,183 @@ export class BudgetService {
     });
   }
 
+  /* ─────────── bons de budget (à traiter) ─────────── */
+
+  /**
+   * Les bons de budget : ce qui attend une décision.
+   *
+   * Un bon repris du devis arrive avec ses montants mais SANS poste analytique et sans signe
+   * arrêté — c'est au conducteur de dire si ce compte prorata est une dépense de plus ou une
+   * recette de moins. Tant qu'une ligne n'est pas traitée, elle ne pèse sur aucun total.
+   */
+  bons(chantierId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.assertChantier(em, chantierId);
+      const documents = await em.query(
+        `SELECT d.id, d.numero, d.date::text AS date, d.libelle, d.source, d.statut,
+                d.created_at, d.traite_at, m.code AS marche_code
+           FROM chantier_budget_document d
+           LEFT JOIN marche m ON m.id = d.marche_id
+          WHERE d.chantier_id = $1
+          ORDER BY (d.statut = 'a_traiter') DESC, d.created_at DESC`,
+        [chantierId],
+      );
+      if (documents.length === 0) return [];
+      const lignes = await em.query(
+        `SELECT b.id, b.document_id, b.libelle, b.montant::numeric(16,2) AS montant,
+                b.quantite::numeric(16,3) AS quantite, b.nature, b.statut, b.accepte,
+                b.code_analytique_id, c.code AS code_analytique, c.label AS code_label,
+                COALESCE(c.categorie, 'charge') AS categorie
+           FROM chantier_budget_movement b
+           LEFT JOIN analytical_code c ON c.id = b.code_analytique_id
+          WHERE b.document_id = ANY($1::uuid[])
+          ORDER BY b.created_at ASC`,
+        [documents.map((d: { id: string }) => d.id)],
+      );
+      return documents.map((d: { id: string }) => ({
+        ...d,
+        lignes: lignes.filter((l: { document_id: string }) => l.document_id === d.id),
+      }));
+    });
+  }
+
+  /** Règle une ligne en attente : son poste, son libellé, son montant (signé), sa quantité. */
+  majLigneBon(
+    chantierId: string,
+    ligneId: string,
+    input: { codeAnalytiqueId?: string | null; libelle?: string; montant?: string | number; quantite?: string | number },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const ligne = await this.ligneEnAttente(em, chantierId, ligneId);
+      let nature = ligne.nature as string;
+      if (input.codeAnalytiqueId !== undefined && input.codeAnalytiqueId !== null) {
+        const natures = await this.naturesParCode(em);
+        if (!natures.has(input.codeAnalytiqueId)) {
+          throw new NotFoundException('Code analytique introuvable.');
+        }
+        nature = natures.get(input.codeAnalytiqueId)!;
+      }
+      await em.query(
+        `UPDATE chantier_budget_movement
+            SET code_analytique_id = COALESCE($2, code_analytique_id),
+                libelle = COALESCE($3, libelle),
+                montant = COALESCE($4, montant),
+                quantite = COALESCE($5, quantite),
+                nature = $6
+          WHERE id = $1`,
+        [
+          ligneId, input.codeAnalytiqueId ?? null, input.libelle ?? null,
+          input.montant != null ? String(input.montant) : null,
+          input.quantite != null ? String(input.quantite) : null,
+          nature,
+        ],
+      );
+      return { maj: true };
+    });
+  }
+
+  /** Accepte (ou remet en attente) une ligne : c'est le geste qui la présente au traitement. */
+  accepterLigneBon(chantierId: string, ligneId: string, accepte: boolean) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.ligneEnAttente(em, chantierId, ligneId);
+      await em.query(`UPDATE chantier_budget_movement SET accepte = $2 WHERE id = $1`, [
+        ligneId, accepte,
+      ]);
+      return { accepte };
+    });
+  }
+
+  /** Retire une ligne d'un bon : tout ce qui arrive du devis n'est pas forcément à budgéter. */
+  supprimerLigneBon(chantierId: string, ligneId: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      await this.ligneEnAttente(em, chantierId, ligneId);
+      await em.query(`DELETE FROM chantier_budget_movement WHERE id = $1`, [ligneId]);
+      return { supprime: true };
+    });
+  }
+
+  /**
+   * Traite un bon : les lignes ACCEPTÉES et correctement renseignées deviennent du budget.
+   *
+   * Les autres restent en attente et sont rendues à l'appelant comme ANOMALIES, à la manière de
+   * l'écran de contrôle du guide (§5.11) : un traitement muet laisserait croire que tout est passé.
+   */
+  traiterBon(chantierId: string, documentId: string) {
+    const tenantId = this.context.requireTenantId();
+    const userId = this.context.getUserId() ?? null;
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const [doc] = await em.query(
+        `SELECT id, statut FROM chantier_budget_document WHERE id = $1 AND chantier_id = $2`,
+        [documentId, chantierId],
+      );
+      if (!doc) throw new NotFoundException('Bon de budget introuvable.');
+      if (doc.statut === 'traite') throw new BadRequestException('Ce bon est déjà traité.');
+
+      const lignes = await em.query(
+        `SELECT id, libelle, montant, accepte, code_analytique_id
+           FROM chantier_budget_movement
+          WHERE document_id = $1 AND statut = 'a_traiter'`,
+        [documentId],
+      );
+      const anomalies: Array<{ ligne: string; raison: string }> = [];
+      const aTraiter: string[] = [];
+      for (const l of lignes) {
+        if (!l.accepte) {
+          anomalies.push({ ligne: l.libelle, raison: 'Ligne non acceptée : elle reste en attente.' });
+          continue;
+        }
+        if (!l.code_analytique_id) {
+          anomalies.push({ ligne: l.libelle, raison: 'Aucun poste analytique : impossible de la budgéter.' });
+          continue;
+        }
+        if (new Decimal(l.montant ?? 0).isZero()) {
+          anomalies.push({ ligne: l.libelle, raison: 'Montant nul : rien à budgéter.' });
+          continue;
+        }
+        aTraiter.push(l.id);
+      }
+      if (aTraiter.length > 0) {
+        await em.query(
+          `UPDATE chantier_budget_movement SET statut = 'traite' WHERE id = ANY($1::uuid[])`,
+          [aTraiter],
+        );
+      }
+      const [reste] = await em.query(
+        `SELECT count(*)::int AS n FROM chantier_budget_movement
+          WHERE document_id = $1 AND statut = 'a_traiter'`,
+        [documentId],
+      );
+      if (reste.n === 0) {
+        await em.query(
+          `UPDATE chantier_budget_document
+              SET statut = 'traite', traite_at = now(), actor_user_id = COALESCE(actor_user_id, $2)
+            WHERE id = $1`,
+          [documentId, userId],
+        );
+      }
+      return { traitees: aTraiter.length, enAttente: reste.n, anomalies };
+    });
+  }
+
+  private async ligneEnAttente(em: EntityManager, chantierId: string, ligneId: string) {
+    const [ligne] = await em.query(
+      `SELECT id, nature, statut FROM chantier_budget_movement
+        WHERE id = $1 AND chantier_id = $2`,
+      [ligneId, chantierId],
+    );
+    if (!ligne) throw new NotFoundException('Ligne de budget introuvable.');
+    if (ligne.statut !== 'a_traiter') {
+      throw new BadRequestException(
+        'Cette ligne est déjà traitée : elle se corrige par un mouvement de budget, pas en la réécrivant.',
+      );
+    }
+    return ligne as { id: string; nature: string; statut: string };
+  }
+
   /* ─────────── interne ─────────── */
 
   /** Budget global disponible sur la source d'un ripage (étude + mouvements déjà passés). */
@@ -604,7 +782,7 @@ export class BudgetService {
       const [m] = await em.query(
         `SELECT COALESCE(SUM(montant), 0)::numeric(16,2) AS montant
            FROM chantier_budget_movement
-          WHERE chantier_id = $1 AND nomenclature_resource_id = $2`,
+          WHERE chantier_id = $1 AND statut = 'traite' AND nomenclature_resource_id = $2`,
         [chantierId, cible.ressourceId],
       );
       return (etude.parBucket.get(cible.ressourceId) ?? new Decimal(0)).plus(
@@ -615,7 +793,7 @@ export class BudgetService {
     const [m] = await em.query(
       `SELECT COALESCE(SUM(montant), 0)::numeric(16,2) AS montant
          FROM chantier_budget_movement
-        WHERE chantier_id = $1 AND code_analytique_id = $2`,
+        WHERE chantier_id = $1 AND statut = 'traite' AND code_analytique_id = $2`,
       [chantierId, cible.codeId],
     );
     return (etude.parBucket.get(cible.codeId!) ?? new Decimal(0)).plus(new Decimal(m?.montant ?? 0));

@@ -12,6 +12,7 @@ import { Alerte, Bouton, CarteKpi, EtatVide } from '@/components/ui';
 import { Modale } from '@/components/Modale';
 import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
 import { PanneauVentilation } from '@/components/PanneauVentilation';
+import { BonsDeBudget } from '@/components/BonsDeBudget';
 
 /* ─────────── types ─────────── */
 type Metriques = Record<string, string>;
@@ -195,6 +196,10 @@ export default function BudgetsPage() {
           </Bouton>
         </div>
       </div>
+
+      {/* Ce qui attend une décision passe AVANT les chiffres : un budget qu'on lit sans savoir
+          qu'il reste des lignes en attente est un budget qu'on lit faux. */}
+      <BonsDeBudget chantierId={chantierId} />
 
       {err && <Alerte>{err}</Alerte>}
       {budgets.isError && (

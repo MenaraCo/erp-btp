@@ -21,7 +21,6 @@ describe('Suivi de chantier — charges, frais généraux, produits et résultat
   let chantierId: string;
   let venteHt: number;
   let codeProrata: string;
-  let codeCharge: string;
   let codeFg: string;
 
   function as(method: 'get' | 'post' | 'put' | 'patch', path: string) {
@@ -33,7 +32,6 @@ describe('Suivi de chantier — charges, frais généraux, produits et résultat
     return base.set('Host', 'localhost').set('X-Tenant-Id', tenantId).set('X-User-Id', userId);
   }
 
-  type Metriques = Record<string, string>;
   const budgets = async () =>
     (await as('get', `/chantiers/${chantierId}/budgets`).expect(200)).body;
 
@@ -55,8 +53,6 @@ describe('Suivi de chantier — charges, frais généraux, produits et résultat
       .send({ familleId, code: '800', label: 'Recettes travaux', categorie: 'produit' }).expect(201));
     codeProrata = (await as('post', '/params/codes')
       .send({ familleId, code: '860', label: 'Compte prorata', categorie: 'produit' }).expect(201)).body.id;
-    codeCharge = (await as('post', '/params/codes')
-      .send({ familleId, code: '250', label: 'Frais divers de chantier' }).expect(201)).body.id;
 
     // Devis : déboursé 10 × 100 = 1 000, FG 10 % (=100), bénéfice 20 % → vente 1 320.
     const lib = (await as('post', '/libraries').send({ code: 'LR', name: 'LR' }).expect(201)).body;
@@ -93,6 +89,17 @@ describe('Suivi de chantier — charges, frais généraux, produits et résultat
     chantierId = acc.chantier.id;
     const marches = (await as('get', `/chantiers/${chantierId}/marches`).expect(200)).body;
     venteHt = marches.reduce((t: number, m: { total_ht: string }) => t + Number(m.total_ht), 0);
+
+    // Les frais du devis arrivent dans un bon à traiter : on les impute aux frais généraux et on
+    // traite, comme le ferait le conducteur avant de lire son budget.
+    const bon = (await as('get', `/chantiers/${chantierId}/budgets/bons`).expect(200)).body[0];
+    for (const ligne of bon.lignes) {
+      await as('patch', `/chantiers/${chantierId}/budgets/bons/lignes/${ligne.id}`)
+        .send({ codeAnalytiqueId: codeFg }).expect(200);
+      await as('post', `/chantiers/${chantierId}/budgets/bons/lignes/${ligne.id}/acceptation`)
+        .send({ accepte: true }).expect(201);
+    }
+    await as('post', `/chantiers/${chantierId}/budgets/bons/${bon.id}/traiter`).expect(201);
   });
 
   afterAll(async () => {
@@ -103,22 +110,24 @@ describe('Suivi de chantier — charges, frais généraux, produits et résultat
   it('le_budget_d_etude_se_lit_en_trois_blocs_charges_frais_generaux_produits', async () => {
     const b = await budgets();
     expect(Number(b.charges.total.etude)).toBeCloseTo(1000, 2);
-    // FG de la feuille de vente (10 % du déboursé = 100) + le frais annexe du devis (150) :
-    // repris, jamais ressaisis.
-    expect(Number(b.fraisGeneraux.total.etude)).toBeCloseTo(250, 2);
+    // FG de la feuille de vente (10 % du déboursé = 100) + frais annexe du devis (150), repris
+    // par le bon de budget puis traités : ils comptent dans le GLOBAL, pas dans la colonne
+    // d'étude, qui ne montre que ce que l'étude d'exécution calcule.
+    expect(Number(b.fraisGeneraux.total.global)).toBeCloseTo(250, 2);
     // La recette vient du marché : aucune saisie n'est nécessaire pour l'afficher.
     expect(Number(b.produits.total.etude)).toBeCloseTo(venteHt, 2);
     expect(Number(b.produits.marches.venteMarches)).toBeCloseTo(venteHt, 2);
   });
 
-  it('resultat_net_du_budget_d_etude_egale_le_benefice_du_devis', async () => {
+  it('resultat_net_du_chantier_egale_le_benefice_du_devis', async () => {
     const b = await budgets();
-    const charges = Number(b.charges.total.etude);
-    const fg = Number(b.fraisGeneraux.total.etude);
-    expect(Number(b.resultatBrut.etude)).toBeCloseTo(venteHt - charges, 2);
-    expect(Number(b.resultatNet.etude)).toBeCloseTo(venteHt - charges - fg, 2);
-    // Bénéfice du devis = 20 % du prix de revient (déboursé + FG) = 220 pour 1 100.
-    expect(Number(b.resultatNet.etude)).toBeCloseTo(220, 2);
+    const charges = Number(b.charges.total.global);
+    const fg = Number(b.fraisGeneraux.total.global);
+    expect(Number(b.resultatBrut.global)).toBeCloseTo(venteHt - charges, 2);
+    expect(Number(b.resultatNet.global)).toBeCloseTo(venteHt - charges - fg, 2);
+    // Bénéfice du devis = 20 % du prix de revient (déboursé + FG) = 220 pour 1 100. C'est LA
+    // règle de non-rupture : le chantier dit la même chose que le devis qui l'a vendu.
+    expect(Number(b.resultatNet.global)).toBeCloseTo(220, 2);
   });
 
   it('un_produit_negatif_prorata_ampute_les_deux_resultats_sans_toucher_aux_charges', async () => {
@@ -163,33 +172,6 @@ describe('Suivi de chantier — charges, frais généraux, produits et résultat
     const b = await budgets();
     expect(Number(b.produits.total.initial)).toBeCloseTo(Number(b.produits.total.global), 2);
     expect(Number(b.resultatNet.initial)).toBeCloseTo(Number(b.resultatNet.global), 2);
-  });
-
-  it('un_frais_du_devis_ventile_apparait_sous_son_code_et_non_dans_un_bloc_anonyme', async () => {
-    // Les frais annexes du devis (compte prorata, heures d'insertion…) arrivent sur la ligne non
-    // vendable « Frais de chantier ». Tant qu'ils n'ont pas de code, ils restent en frais généraux
-    // « non ventilés » ; dès qu'on leur en donne un, ils doivent se voir sous ce code.
-    const nomenclature = (await as('get', `/chantiers/${chantierId}/nomenclature`).expect(200)).body;
-    const frais = nomenclature.find((n: { nature: string }) => n.nature === 'site_overhead');
-    if (!frais) return; // ce devis n'a pas de frais annexes : rien à vérifier
-
-    const avant = await budgets();
-    expect(Number(avant.fraisGeneraux.fraisChantier.metrics.etude)).toBeGreaterThan(0);
-
-    await as('put', `/chantiers/${chantierId}/nomenclature/${frais.id}/code-analytique`)
-      .send({ codeAnalytiqueId: codeCharge })
-      .expect(200);
-
-    const apres = await budgets();
-    const ligne = apres.charges.natures
-      .flatMap((n: { lots: { familles: { codes: { code: string; metrics: Metriques }[] }[] }[] }) => n.lots)
-      .flatMap((l: { familles: { codes: { code: string; metrics: Metriques }[] }[] }) => l.familles)
-      .flatMap((f: { codes: { code: string; metrics: Metriques }[] }) => f.codes)
-      .find((c: { code: string }) => c.code === '250');
-    expect(Number(ligne.metrics.etude)).toBeGreaterThan(0);
-    // Le total ne bouge pas : le montant a changé de bloc, pas de valeur.
-    expect(Number(apres.total.global)).toBeCloseTo(Number(avant.total.global), 2);
-    expect(Number(apres.resultatNet.global)).toBeCloseTo(Number(avant.resultatNet.global), 2);
   });
 
   it('les_postes_de_produits_ne_polluent_pas_l_axe_analytique_des_charges', async () => {

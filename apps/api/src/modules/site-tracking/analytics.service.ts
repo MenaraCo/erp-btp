@@ -133,7 +133,7 @@ export class AnalyticsService {
         `SELECT CASE WHEN nature = 'frais_generaux' THEN 'site_overhead' ELSE nature END AS nature,
                 SUM(montant)::numeric(16,2) AS montant
            FROM chantier_budget_movement
-          WHERE chantier_id = $1 AND nature <> 'produit'
+          WHERE chantier_id = $1 AND nature <> 'produit' AND statut = 'traite'
           GROUP BY 1`,
         [chantierId],
       );

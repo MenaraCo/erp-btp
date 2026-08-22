@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import Decimal from 'decimal.js';
 import { DataSource } from 'typeorm';
 import { TenantContext } from '../../core/tenancy/tenant-context';
 import { runInTenant } from '../../core/tenancy/tenant-transaction';
@@ -39,7 +40,16 @@ export class FinancialForecastService {
           WHERE l.chantier_id = $1 AND l.parent_line_id IS NULL`,
         [chantierId],
       );
-      return row[0].total as string;
+      // Le prévisionnel ne connaît que les ouvrages ; les frais généraux et les dotations vivent
+      // en MOUVEMENTS de budget. Les oublier ferait un coût final estimé plus bas que le budget
+      // lui-même — l'écran annoncerait une marge que le chantier n'a pas.
+      const mvt = await em.query(
+        `SELECT COALESCE(SUM(montant), 0)::numeric(16,2) AS total
+           FROM chantier_budget_movement
+          WHERE chantier_id = $1 AND statut = 'traite' AND nature <> 'produit'`,
+        [chantierId],
+      );
+      return new Decimal(row[0].total).plus(mvt[0].total).toFixed(2);
     });
 
     const avancement = effectivePct;

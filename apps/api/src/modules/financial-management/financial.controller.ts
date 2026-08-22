@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query,
+} from '@nestjs/common';
 import { RequiresCapability } from '../../core/entitlements/requires-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { FinancialConfigService, FormulaSetInput } from './financial-config.service';
@@ -214,6 +216,60 @@ export class FinancialController {
   @RequiresPermission('site_tracking.write')
   fixerBudgetInitial(@Param('chantierId') chantierId: string) {
     return this.budget.fixerBudgetInitial(chantierId);
+  }
+
+  /* ─── Bons de budget : ce qui vient du devis attend d'être traité (guide §5.10) ─── */
+
+  @Get('chantiers/:chantierId/budgets/bons')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.read')
+  getBonsBudget(@Param('chantierId') chantierId: string) {
+    return this.budget.bons(chantierId);
+  }
+
+  @Patch('chantiers/:chantierId/budgets/bons/lignes/:ligneId')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  majLigneBon(
+    @Param('chantierId') chantierId: string,
+    @Param('ligneId') ligneId: string,
+    @Body() body: {
+      codeAnalytiqueId?: string | null; libelle?: string;
+      montant?: string | number; quantite?: string | number;
+    },
+  ) {
+    return this.budget.majLigneBon(chantierId, ligneId, body ?? {});
+  }
+
+  @Post('chantiers/:chantierId/budgets/bons/lignes/:ligneId/acceptation')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  accepterLigneBon(
+    @Param('chantierId') chantierId: string,
+    @Param('ligneId') ligneId: string,
+    @Body() body: { accepte?: boolean },
+  ) {
+    return this.budget.accepterLigneBon(chantierId, ligneId, body?.accepte !== false);
+  }
+
+  @Delete('chantiers/:chantierId/budgets/bons/lignes/:ligneId')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  supprimerLigneBon(
+    @Param('chantierId') chantierId: string,
+    @Param('ligneId') ligneId: string,
+  ) {
+    return this.budget.supprimerLigneBon(chantierId, ligneId);
+  }
+
+  @Post('chantiers/:chantierId/budgets/bons/:documentId/traiter')
+  @RequiresCapability('site_tracking.budget')
+  @RequiresPermission('site_tracking.write')
+  traiterBon(
+    @Param('chantierId') chantierId: string,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.budget.traiterBon(chantierId, documentId);
   }
 
   @Delete('chantiers/:chantierId/budgets/mouvements/:mouvementId')
