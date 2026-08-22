@@ -88,4 +88,35 @@ describe('Financial — avancement ouvrage par ouvrage', () => {
     expect(lines.length).toBe(2);
     expect(lines.every((l) => Number(l.pct) === 0.5)).toBe(true);
   });
+
+  it('avancement_prevu_se_saisit_par_periode_et_ne_touche_pas_au_constate', async () => {
+    const periode = { debut: '2026-09-01', fin: '2026-09-30' };
+    await as('post', `/chantiers/${chantierId}/avancement-prevu`)
+      .send({ executionLineId: lineA, pct: '0.4', ...periode }).expect(201);
+
+    const prevu = (await as('get',
+      `/chantiers/${chantierId}/avancement-prevu?debut=${periode.debut}&fin=${periode.fin}`)
+      .expect(200)).body;
+    expect(prevu).toHaveLength(1);
+    expect(Number(prevu[0].pct)).toBeCloseTo(0.4, 5);
+
+    // Une autre période ne voit pas cette prévision : chacune répond de la sienne.
+    const autre = (await as('get',
+      `/chantiers/${chantierId}/avancement-prevu?debut=2026-10-01&fin=2026-10-31`).expect(200)).body;
+    expect(autre).toHaveLength(0);
+
+    // Et le CONSTATÉ reste ce qu'il était : prévoir n'est pas constater.
+    const constate = (await as('get', `/chantiers/${chantierId}/line-advancement`).expect(200)).body;
+    const ligne = constate.find((r: { execution_line_id: string }) => r.execution_line_id === lineA);
+    expect(Number(ligne?.pct ?? 0)).not.toBeCloseTo(0.4, 5);
+  });
+
+  it('refuse_une_prevision_sans_periode_ou_hors_bornes', async () => {
+    await as('post', `/chantiers/${chantierId}/avancement-prevu`)
+      .send({ executionLineId: lineA, pct: '0.4' }).expect(400);
+    await as('post', `/chantiers/${chantierId}/avancement-prevu`)
+      .send({ executionLineId: lineA, pct: '1.5', debut: '2026-09-01', fin: '2026-09-30' }).expect(400);
+    await as('post', `/chantiers/${chantierId}/avancement-prevu`)
+      .send({ executionLineId: lineA, pct: '0.4', debut: '2026-09-30', fin: '2026-09-01' }).expect(400);
+  });
 });

@@ -67,6 +67,7 @@ const CONTEXT_ICONS: Record<string, React.ElementType> = {
   receptions: PackageCheck,
   factures: ReceiptText,
   avancement: ClipboardCheck,
+  'avancement-prevu': CalendarRange,
   mensuel: CalendarDays,
   pilotage: LayoutDashboard,
   situations: FileText,

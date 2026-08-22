@@ -177,6 +177,67 @@ export class AdvancementService {
     });
   }
 
+  /* ───────── Avancement PRÉVU : la période qui commence (guide §19) ───────── */
+
+  /**
+   * Enregistre ce qu'on prévoit de réaliser sur une période, ouvrage par ouvrage.
+   *
+   * Le prévu ne remplace jamais le constaté : il vit à côté, pour qu'on puisse confronter ce qu'on
+   * avait annoncé à ce qui s'est fait. Chaque saisie s'ajoute — la dernière pour une période fait
+   * foi, les précédentes racontent comment la prévision a bougé.
+   */
+  recordPrevu(
+    chantierId: string,
+    input: { executionLineId: string; pct: string | number; debut: string; fin: string },
+  ) {
+    const tenantId = this.context.requireTenantId();
+    const userId = this.context.getUserId() ?? null;
+    const p = Number(input.pct);
+    if (!(p >= 0 && p <= 1)) {
+      throw new BadRequestException('L’avancement prévu est une fraction entre 0 et 1.');
+    }
+    if (!input.debut || !input.fin) {
+      throw new BadRequestException('La période prévue (début et fin) est obligatoire.');
+    }
+    if (input.fin < input.debut) {
+      throw new BadRequestException('La fin de période précède son début.');
+    }
+    return runInTenant(this.dataSource, tenantId, async (em) => {
+      const line = await em.query(
+        `SELECT id FROM execution_line WHERE id = $1 AND chantier_id = $2`,
+        [input.executionLineId, chantierId],
+      );
+      if (line.length === 0) {
+        throw new NotFoundException(`Ouvrage introuvable sur ce chantier (${input.executionLineId}).`);
+      }
+      await em.query(
+        `INSERT INTO execution_line_prevu
+           (tenant_id, chantier_id, execution_line_id, pct, periode_debut, periode_fin, actor_user_id)
+         VALUES ($1, $2, $3, $4, $5::date, $6::date, $7)`,
+        [tenantId, chantierId, input.executionLineId, String(p), input.debut, input.fin, userId],
+      );
+      return this.currentPrevuInEm(em, chantierId, input.debut, input.fin);
+    });
+  }
+
+  /** Dernière prévision par ouvrage pour la période demandée. */
+  currentPrevu(chantierId: string, debut: string, fin: string) {
+    const tenantId = this.context.requireTenantId();
+    return runInTenant(this.dataSource, tenantId, (em) =>
+      this.currentPrevuInEm(em, chantierId, debut, fin));
+  }
+
+  private currentPrevuInEm(em: EntityManager, chantierId: string, debut: string, fin: string) {
+    return em.query(
+      `SELECT DISTINCT ON (execution_line_id) execution_line_id, pct,
+              periode_debut::text AS periode_debut, periode_fin::text AS periode_fin, recorded_at
+         FROM execution_line_prevu
+        WHERE chantier_id = $1 AND periode_debut = $2::date AND periode_fin = $3::date
+        ORDER BY execution_line_id, recorded_at DESC`,
+      [chantierId, debut, fin],
+    ) as Promise<Array<{ execution_line_id: string; pct: string; recorded_at: Date }>>;
+  }
+
   /** Dernier avancement par ligne, dans une transaction donnée (voit les écritures en cours). */
   private currentLinesInEm(em: EntityManager, chantierId: string) {
     return em.query(

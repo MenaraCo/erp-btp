@@ -100,6 +100,7 @@ export function contextualGroups(pathname: string): ContextGroup[] {
         features: [
           { href: `/chantiers/${id}/etude`, label: 'Étude d’exécution' },
           { href: `/chantiers/${id}/budgets`, label: 'Budgets' },
+          { href: `/chantiers/${id}/avancement-prevu`, label: 'Avancement prévu' },
           { href: `/chantiers/${id}/avancement`, label: 'Avancement constaté' },
         ],
       },

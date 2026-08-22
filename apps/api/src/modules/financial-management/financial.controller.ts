@@ -169,6 +169,37 @@ export class FinancialController {
     return this.advancement.applyFromSituations(chantierId);
   }
 
+  /* ─── Avancement PRÉVU : la période qui commence, et ce qu'elle demande (§19) ─── */
+
+  @Get('chantiers/:chantierId/avancement-prevu')
+  @RequiresCapability('financial.forecast')
+  @RequiresPermission('financial.read')
+  getAvancementPrevu(
+    @Param('chantierId') chantierId: string,
+    @Query('debut') debut: string,
+    @Query('fin') fin: string,
+  ) {
+    if (!debut || !fin) {
+      throw new BadRequestException('Indiquez la période : debut et fin.');
+    }
+    return this.advancement.currentPrevu(chantierId, debut, fin);
+  }
+
+  @Post('chantiers/:chantierId/avancement-prevu')
+  @RequiresCapability('financial.forecast')
+  @RequiresPermission('financial.write')
+  recordAvancementPrevu(
+    @Param('chantierId') chantierId: string,
+    @Body() body: { executionLineId?: string; pct?: string | number; debut?: string; fin?: string },
+  ) {
+    if (!body?.executionLineId || body?.pct == null || !body?.debut || !body?.fin) {
+      throw new BadRequestException('executionLineId, pct, debut et fin sont obligatoires.');
+    }
+    return this.advancement.recordPrevu(chantierId, {
+      executionLineId: body.executionLineId, pct: body.pct, debut: body.debut, fin: body.fin,
+    });
+  }
+
   /* ─── Budgets du chantier : étude / mouvements / global / initial (§17 à 20) ─── */
 
   @Get('chantiers/:chantierId/budgets')
