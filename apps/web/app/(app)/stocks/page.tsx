@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight, Boxes, Package, PackageMinus, PackagePlus, Warehouse } from 'lucide-react';
+import { ArrowLeftRight, Boxes, Download, Package, PackageMinus, PackagePlus, Warehouse } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
 import { Alerte, Badge, Bouton, CarteKpi, EtatVide } from '@/components/ui';
 import { Modale } from '@/components/Modale';
 import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
+import { exporterTableau } from '@/lib/export-tableau';
 
 interface Depot {
   id: string; code: string; label: string; type: 'principal' | 'chantier';
@@ -169,6 +170,47 @@ export default function StocksPage() {
             ))}
           </select>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <Bouton
+              variante="secondaire"
+              icone={Download}
+              disabled={lignes.length === 0}
+              onClick={() => exporterTableau({
+                fichier: 'etat_du_stock',
+                titre: 'État du stock',
+                sousTitre: `${depotFiltre
+                  ? (depots.data ?? []).find((d) => d.id === depotFiltre)?.label ?? ''
+                  : 'Tous les dépôts'} — au ${new Date().toLocaleDateString('fr-FR')}`,
+                onglet: 'Stock',
+                colonnes: [
+                  { label: 'Dépôt', type: 'texte', largeur: 22 },
+                  { label: 'Article', type: 'texte', largeur: 40 },
+                  { label: 'Poste analytique', type: 'texte', largeur: 18 },
+                  { label: 'Quantité', type: 'quantite' },
+                  { label: 'Unité', type: 'texte', largeur: 10 },
+                  { label: 'PMP', type: 'montant' },
+                  { label: 'Valeur', type: 'montant' },
+                ],
+                lignes: [
+                  ...lignes.map((l) => ({
+                    cellules: [
+                      `${l.depot_code} — ${l.depot_label}`,
+                      `${l.code} — ${l.label}`,
+                      l.code_analytique ?? '',
+                      Number(l.quantite),
+                      l.unit ?? '',
+                      Number(l.pmp),
+                      Number(l.valeur),
+                    ],
+                  })),
+                  {
+                    genre: 'total' as const,
+                    cellules: ['Valeur totale', null, null, null, null, null, valeurTotale],
+                  },
+                ],
+              })}
+            >
+              Excel
+            </Bouton>
             <Bouton variante="secondaire" onClick={() => { setErr(null); setNouvelArticle(true); }}>
               + Article
             </Bouton>

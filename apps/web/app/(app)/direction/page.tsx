@@ -4,10 +4,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Download } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
+import { exporterTableau } from '@/lib/export-tableau';
 import { Alerte, Badge, Bouton, CarteKpi, EtatVide } from '@/components/ui';
 import { BarresClassement, Camembert } from '@/components/Graphiques';
 
@@ -137,6 +138,59 @@ export default function DirectionPage() {
               titre="vente"
             />
           </div>
+        </div>
+      )}
+
+      {portfolio.data && portfolio.data.rows.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <Bouton
+            variante="secondaire"
+            icone={Download}
+            onClick={() => exporterTableau({
+              fichier: 'portefeuille_chantiers',
+              titre: 'Portefeuille de chantiers',
+              sousTitre: `${portfolio.data!.totals.chantiers} chantier(s), dont ${portfolio.data!.totals.aRisque} à risque — au ${new Date().toLocaleDateString('fr-FR')}`,
+              onglet: 'Portefeuille',
+              colonnes: [
+                { label: 'Chantier', type: 'texte', largeur: 40 },
+                { label: 'Avancement', type: 'nombre', largeur: 12 },
+                { label: 'Vente HT', type: 'montant' },
+                { label: 'Budget', type: 'montant' },
+                { label: 'Engagé', type: 'montant' },
+                { label: 'Réalisé', type: 'montant' },
+                { label: 'Coût final estimé', type: 'montant' },
+                { label: 'Marge prévisionnelle', type: 'montant' },
+                { label: 'Taux de marge', type: 'nombre', largeur: 13 },
+                { label: 'Alertes', type: 'texte', largeur: 44 },
+              ],
+              lignes: [
+                ...portfolio.data!.rows.map((r) => ({
+                  cellules: [
+                    `${r.code} — ${r.name ?? ''}`,
+                    `${(Number(r.avancement) * 100).toFixed(1)} %`,
+                    Number(r.vente), Number(r.budget), Number(r.engage), Number(r.realise),
+                    Number(r.eac ?? 0), Number(r.margePrevisionnelle ?? 0),
+                    r.margePrevisionnellePct != null ? `${Number(r.margePrevisionnellePct).toFixed(1)} %` : '',
+                    r.alerts.join(' · '),
+                  ],
+                })),
+                {
+                  genre: 'total' as const,
+                  cellules: [
+                    'Total portefeuille', null,
+                    Number(portfolio.data!.totals.vente), Number(portfolio.data!.totals.budget),
+                    Number(portfolio.data!.totals.engage), Number(portfolio.data!.totals.realise),
+                    Number(portfolio.data!.totals.eac), Number(portfolio.data!.totals.margePrevisionnelle),
+                    portfolio.data!.totals.margePrevisionnellePct != null
+                      ? `${Number(portfolio.data!.totals.margePrevisionnellePct).toFixed(1)} %` : '',
+                    null,
+                  ],
+                },
+              ],
+            })}
+          >
+            Excel
+          </Bouton>
         </div>
       )}
 

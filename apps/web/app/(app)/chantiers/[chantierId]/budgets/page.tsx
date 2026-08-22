@@ -4,7 +4,7 @@ import { Fragment, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight, Lock, Plus, Trash2, Wallet } from 'lucide-react';
+import { ArrowLeftRight, Download, Lock, Plus, Trash2, Wallet } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { euro } from '@/lib/format';
@@ -12,6 +12,7 @@ import { Alerte, Bouton, CarteKpi, EtatVide } from '@/components/ui';
 import { Modale } from '@/components/Modale';
 import { CodeAnalytique, SelectCodeAnalytique } from '@/components/SelectCodeAnalytique';
 import { PanneauVentilation } from '@/components/PanneauVentilation';
+import { exporterTableau, LigneExport } from '@/lib/export-tableau';
 import { BonsDeBudget } from '@/components/BonsDeBudget';
 
 /* ─────────── types ─────────── */
@@ -298,6 +299,10 @@ export default function BudgetsPage() {
               </Bouton>
               <Bouton variante={vue === 'axe' ? 'primaire' : 'secondaire'} onClick={() => setVue('axe')}>
                 Vue par axe analytique
+              </Bouton>
+              <Bouton variante="secondaire" icone={Download}
+                onClick={() => exporterBudgets(d, chantier.data?.code ?? '', vue === 'heures')}>
+                Excel
               </Bouton>
               {d.heures.lignes.length > 0 && (
                 <Bouton variante={vue === 'heures' ? 'primaire' : 'secondaire'} onClick={() => setVue('heures')}>
@@ -617,6 +622,105 @@ export default function BudgetsPage() {
       )}
     </div>
   );
+}
+
+/**
+ * Le budget tel qu'on le lit à l'écran, dans un classeur : mêmes blocs, mêmes totaux, mêmes
+ * résultats. Un export qui réorganise les chiffres oblige à les revérifier un par un.
+ */
+function exporterBudgets(d: TableauBudgets, chantierCode: string, heures: boolean): void {
+  if (heures) {
+    exporterTableau({
+      fichier: `budget_heures_${chantierCode || 'chantier'}`,
+      titre: `Budget d'heures — chantier ${chantierCode}`,
+      sousTitre: `Édité le ${new Date().toLocaleDateString('fr-FR')}`,
+      onglet: 'Heures',
+      colonnes: [
+        { label: 'Poste', type: 'texte' },
+        { label: "Heures d'étude", type: 'quantite' },
+        { label: 'Mouvements', type: 'quantite' },
+        { label: 'Heures budgétées', type: 'quantite' },
+      ],
+      lignes: [
+        ...d.heures.lignes.map((l) => ({
+          cellules: [
+            `${l.code} — ${l.label}`,
+            Number(l.metrics.heuresEtude ?? 0),
+            Number(l.metrics.heuresMouvements ?? 0),
+            Number(l.metrics.heuresGlobal ?? 0),
+          ],
+        })),
+        {
+          genre: 'total' as const,
+          cellules: [
+            'Total',
+            Number(d.heures.total.heuresEtude ?? 0),
+            Number(d.heures.total.heuresMouvements ?? 0),
+            Number(d.heures.total.heuresGlobal ?? 0),
+          ],
+        },
+      ],
+    });
+    return;
+  }
+
+  const cellules = (libelle: string, m: Metriques) => [
+    libelle,
+    Number(m.etude ?? 0), Number(m.mouvements ?? 0), Number(m.global ?? 0),
+    Number(m.initial ?? 0), ecart(m),
+  ];
+  const lignes: LigneExport[] = [];
+
+  lignes.push({ genre: 'section', cellules: ['CHARGES', null, null, null, null, null] });
+  for (const c of codesAPlat(d.charges.natures)) {
+    lignes.push({ niveau: 1, cellules: cellules(`${c.code} — ${c.label}`, c.metrics) });
+  }
+  for (const l of d.charges.horsPlan) {
+    lignes.push({ niveau: 1, cellules: cellules(`${l.code} — ${l.label} (sans famille)`, l.metrics) });
+  }
+  if (porteUneValeur(d.charges.aVentiler.metrics)) {
+    lignes.push({ niveau: 1, cellules: cellules(`${d.charges.aVentiler.code} — ${d.charges.aVentiler.label}`, d.charges.aVentiler.metrics) });
+  }
+  lignes.push({ genre: 'sousTotal', cellules: cellules('Total charges', d.charges.total) });
+
+  lignes.push({ genre: 'section', cellules: ['FRAIS GÉNÉRAUX', null, null, null, null, null] });
+  if (porteUneValeur(d.fraisGeneraux.fraisChantier.metrics)) {
+    lignes.push({ niveau: 1, cellules: cellules(d.fraisGeneraux.fraisChantier.label, d.fraisGeneraux.fraisChantier.metrics) });
+  }
+  for (const l of d.fraisGeneraux.lignes) {
+    lignes.push({ niveau: 1, cellules: cellules(`${l.code} — ${l.label}`, l.metrics) });
+  }
+  lignes.push({ genre: 'sousTotal', cellules: cellules('Total frais généraux', d.fraisGeneraux.total) });
+
+  lignes.push({ genre: 'section', cellules: ['PRODUITS', null, null, null, null, null] });
+  if (porteUneValeur(d.produits.marches.metrics)) {
+    lignes.push({ niveau: 1, cellules: cellules(d.produits.marches.label, d.produits.marches.metrics) });
+  }
+  for (const l of d.produits.lignes) {
+    lignes.push({ niveau: 1, cellules: cellules(`${l.code} — ${l.label}`, l.metrics) });
+  }
+  lignes.push({ genre: 'sousTotal', cellules: cellules('Total produits', d.produits.total) });
+
+  lignes.push({ genre: 'total', cellules: cellules('RÉSULTAT BRUT (produits − charges)', d.resultatBrut) });
+  lignes.push({ genre: 'total', cellules: cellules('RÉSULTAT NET (après frais généraux)', d.resultatNet) });
+
+  exporterTableau({
+    fichier: `budgets_${chantierCode || 'chantier'}`,
+    titre: `Budgets — chantier ${chantierCode}`,
+    sousTitre: d.reference
+      ? `Comparé à ${d.reference.label}, figé le ${dt(d.reference.fixedAt)}`
+      : `Édité le ${new Date().toLocaleDateString('fr-FR')} — aucune photo de budget figée`,
+    onglet: 'Budgets',
+    colonnes: [
+      { label: 'Poste', type: 'texte', largeur: 44 },
+      { label: "Budget d'étude", type: 'montant' },
+      { label: 'Mouvements', type: 'montant' },
+      { label: 'Budget global', type: 'montant' },
+      { label: 'Photo figée', type: 'montant' },
+      { label: 'Écart / photo', type: 'montant' },
+    ],
+    lignes,
+  });
 }
 
 /* ─────────── lignes du tableau ─────────── */

@@ -4,10 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, ShoppingCart } from 'lucide-react';
+import { Plus, ShoppingCart, Download } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, ApiError } from '@/lib/api';
 import { STATUT_COMMANDE, statut as resoudreStatut } from '@/lib/statuts';
+import { exporterTableau } from '@/lib/export-tableau';
 import { Alerte, Bouton, BadgeStatut, LigneVide } from '@/components/ui';
 import { euro } from '@/lib/format';
 
@@ -140,8 +141,49 @@ export default function AchatsChantierPage() {
           </select>
         </div>
         <Bouton
-          icone={Plus}
+          variante="secondaire"
+          icone={Download}
           style={{ marginLeft: 'auto' }}
+          disabled={(registre.data?.lignes ?? []).length === 0}
+          onClick={() => exporterTableau({
+            fichier: `commandes_${chantier.data?.chantier.code ?? 'chantier'}`,
+            titre: `Bons de commande — chantier ${chantier.data?.chantier.code ?? ''}`,
+            sousTitre: `${registre.data?.total ?? 0} commande(s) — ${euro(registre.data?.montantTotal ?? '0')} au total`,
+            onglet: 'Commandes',
+            colonnes: [
+              { label: 'N°', type: 'texte', largeur: 18 },
+              { label: 'Fournisseur', type: 'texte', largeur: 32 },
+              { label: 'Date', type: 'texte', largeur: 14 },
+              { label: 'Statut', type: 'texte', largeur: 16 },
+              { label: 'Lignes', type: 'nombre', largeur: 10 },
+              { label: 'Montant HT', type: 'montant' },
+              { label: 'Réceptions', type: 'nombre', largeur: 12 },
+              { label: 'Factures', type: 'nombre', largeur: 12 },
+            ],
+            lignes: [
+              ...(registre.data?.lignes ?? []).map((c) => ({
+                cellules: [
+                  c.code,
+                  c.fournisseur ?? '',
+                  new Date(c.valideLe ?? c.creeLe).toLocaleDateString('fr-FR'),
+                  resoudreStatut(STATUT_COMMANDE, c.statut).label,
+                  c.nbLignes,
+                  Number(c.totalHt),
+                  c.nbReceptions,
+                  c.nbFactures,
+                ],
+              })),
+              {
+                genre: 'total' as const,
+                cellules: ['Total', null, null, null, null, Number(registre.data?.montantTotal ?? 0), null, null],
+              },
+            ],
+          })}
+        >
+          Excel
+        </Bouton>
+        <Bouton
+          icone={Plus}
           chargement={creer.isPending}
           libelleChargement="Création…"
           onClick={() => { setErr(null); creer.mutate(); }}
