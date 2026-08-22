@@ -28,6 +28,17 @@ export interface FraisChantierInput {
   postes: { code: string; label: string; nature: string; montant: string }[];
 }
 
+/**
+ * Que faire des frais généraux et des frais annexes du devis au moment de l'acceptation ?
+ *
+ * Trois réponses, et aucune n'est bonne en général — cela dépend de l'entreprise et parfois du
+ * chantier. D'où un choix EXPLICITE au transfert, plutôt qu'une règle imposée :
+ *  - `ignorer`  : le chantier ne porte pas ces frais (ils restent au siège) ;
+ *  - `isoler`   : ils forment un bon de budget à traiter — on choisit poste et signe (défaut) ;
+ *  - `ventiler` : ils entrent tout de suite au budget des charges, à ranger ensuite.
+ */
+export type TraitementFrais = 'ignorer' | 'isoler' | 'ventiler';
+
 interface OuvrageComp {
   kind: string;
   child_resource_id: string | null;
@@ -149,6 +160,7 @@ export class ChantierService {
     tenantId: string,
     marcheId: string,
     frais?: FraisChantierInput | null,
+    traitementFrais: TraitementFrais = 'isoler',
   ): Promise<number> {
     {
       const marcheRows = await em.query(
@@ -431,7 +443,12 @@ export class ChantierService {
       // sort n'est pas décidé d'avance. Ils forment un BON DE BUDGET à traiter — poste analytique
       // et signe à renseigner — plutôt qu'une ligne « Frais de chantier » qui trancherait à la
       // place du conducteur (un compte prorata est souvent une recette en moins, pas un coût).
-      const postes = (frais?.postes ?? []).filter((p) => !new Decimal(p.montant).isZero());
+      // « Ne pas en tenir compte » : le chantier ne portera pas ces frais. C'est un choix
+      // légitime — une entreprise qui garde ses frais généraux au siège n'a pas à les voir
+      // apparaître sur chaque chantier — et il doit rester explicite, jamais par défaut.
+      const postes = traitementFrais === 'ignorer'
+        ? []
+        : (frais?.postes ?? []).filter((p) => !new Decimal(p.montant).isZero());
       if (postes.length > 0) {
         const [{ n }] = await em.query(
           `SELECT count(*)::int AS n FROM chantier_budget_document`,
@@ -445,13 +462,26 @@ export class ChantierService {
             [tenantId, chantier.id, marcheId, numero, 'Frais repris du devis'],
           )
         )[0].id as string;
+        // « Ventiler sur les charges » : les postes entrent DIRECTEMENT au budget, sans attendre
+        // de décision. Ils y sont sans poste analytique, donc visibles dans « à ventiler » —
+        // rangés plus tard, mais comptés tout de suite. « Isoler » les laisse en attente.
+        const ventile = traitementFrais === 'ventiler';
         for (const poste of postes) {
           await em.query(
             `INSERT INTO chantier_budget_movement
                (tenant_id, chantier_id, document_id, date, type, code_analytique_id,
                 nature, libelle, quantite, montant, statut, accepte)
-             VALUES ($1,$2,$3,CURRENT_DATE,'saisie',NULL,$4,$5,1,$6,'a_traiter',false)`,
-            [tenantId, chantier.id, documentId, poste.nature, poste.label, poste.montant],
+             VALUES ($1,$2,$3,CURRENT_DATE,'saisie',NULL,$4,$5,1,$6,$7,$8)`,
+            [
+              tenantId, chantier.id, documentId, poste.nature, poste.label, poste.montant,
+              ventile ? 'traite' : 'a_traiter', ventile,
+            ],
+          );
+        }
+        if (ventile) {
+          await em.query(
+            `UPDATE chantier_budget_document SET statut = 'traite', traite_at = now() WHERE id = $1`,
+            [documentId],
           );
         }
       }

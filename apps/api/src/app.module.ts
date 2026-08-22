@@ -22,6 +22,7 @@ import { DirectoryModule } from './modules/directory/directory.module';
 import { EstimatingModule } from './modules/estimating/estimating.module';
 import { InvoicingModule } from './modules/invoicing/invoicing.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
+import { StockModule } from './modules/stock/stock.module';
 import { SiteTrackingModule } from './modules/site-tracking/site-tracking.module';
 import { AnalyticalModule } from './modules/analytical/analytical.module';
 import { FinancialManagementModule } from './modules/financial-management/financial-management.module';
@@ -55,6 +56,7 @@ import { HealthModule } from './health/health.module';
     InvoicingModule,
     ComplianceModule,
     SiteTrackingModule,
+    StockModule,
     AnalyticalModule,
     FinancialManagementModule,
     ParamsModule,

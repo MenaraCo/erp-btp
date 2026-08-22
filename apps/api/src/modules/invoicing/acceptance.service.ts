@@ -11,7 +11,7 @@ import { runInTenant } from '../../core/tenancy/tenant-transaction';
 import { ActivityService } from '../../core/activity/activity.service';
 import { isTransferable } from '../estimating/devis-workflow';
 import { VenteService } from '../estimating/vente.service';
-import { ChantierService, FraisChantierInput } from '../site-tracking/chantier.service';
+import { ChantierService, FraisChantierInput, TraitementFrais } from '../site-tracking/chantier.service';
 import { VenteResult } from '../estimating/vente-calc';
 
 /** Intitulés des natures pour les postes de frais généraux repris au chantier. */
@@ -289,7 +289,11 @@ export class AcceptanceService {
    * Seul le tronc commun du devis entre au marché : les options et variantes s'arbitrent DANS le
    * devis, avant l'acceptation. Celle-ci ne rejoue pas ce choix.
    */
-  async accept(devisId: string, targetChantierId?: string | null) {
+  async accept(
+    devisId: string,
+    targetChantierId?: string | null,
+    traitementFrais: TraitementFrais = 'isoler',
+  ) {
     const tenantId = this.context.requireTenantId();
 
     const devisRows = await runInTenant(this.dataSource, tenantId, (em) =>
@@ -444,6 +448,7 @@ export class AcceptanceService {
         tenantId,
         m.id,
         await this.fraisChantierPostes(em, versionId, fv.fraisChantier),
+        traitementFrais,
       );
       // Même transaction que le marché et ses budgets : l'acceptation entre au fil seulement si
       // la commande est réellement passée.

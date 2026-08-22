@@ -35,6 +35,7 @@ describe('Suivi de chantier — reprise des frais de chantier (FG + frais annexe
   async function acceptDevis(
     code: string,
     frais: { designation: string; type: string; valeur: string; mode: string }[] = [],
+    traitementFrais?: 'ignorer' | 'isoler' | 'ventiler',
   ) {
     const created = (await as('post', '/affaires').send({ code, name: code }).expect(201)).body;
     const vId = created.version.id;
@@ -58,7 +59,9 @@ describe('Suivi de chantier — reprise des frais de chantier (FG + frais annexe
     for (const to of ['sent', 'won']) {
       await as('post', `/devis/${created.devis.id}/transition`).send({ to }).expect(201);
     }
-    return (await as('post', `/devis/${created.devis.id}/accept`).expect(201)).body;
+    return (await as('post', `/devis/${created.devis.id}/accept`)
+      .send(traitementFrais ? { traitementFrais } : {})
+      .expect(201)).body;
   }
 
   function budget(tree: { marches: { lines: { designation: string; vendable: boolean; budget: Record<string, string> }[] }[] }) {
@@ -219,5 +222,42 @@ describe('Suivi de chantier — reprise des frais de chantier (FG + frais annexe
     // Il attend, visible, dans son bon.
     const bon = (await as('get', `/chantiers/${acc.chantier.id}/budgets/bons`).expect(200)).body[0];
     expect(bon.lignes.map((l: { libelle: string }) => l.libelle)).toContain('Nettoyage');
+  });
+
+  it('au_transfert_on_choisit_ce_qu_on_fait_des_frais_du_devis', async () => {
+    // 1) Ne pas en tenir compte : le chantier ne porte rien, et aucun bon n'attend.
+    const ignore = await acceptDevis('FRC-7', [
+      { designation: 'Nettoyage', type: 'fixe', valeur: '150', mode: 'separe' },
+    ], 'ignorer');
+    expect((await as('get', `/chantiers/${ignore.chantier.id}/budgets/bons`).expect(200)).body)
+      .toHaveLength(0);
+    const rIgnore = (await as('get', `/chantiers/${ignore.chantier.id}/results`).expect(200)).body;
+    expect(Number(rIgnore.totals.budgetObjectif)).toBe(1000); // le déboursé seul
+
+    // 2) Ventiler sur les charges : compté tout de suite, à ranger ensuite.
+    const ventile = await acceptDevis('FRC-8', [
+      { designation: 'Nettoyage', type: 'fixe', valeur: '150', mode: 'separe' },
+    ], 'ventiler');
+    const bonsVentile = (await as('get', `/chantiers/${ventile.chantier.id}/budgets/bons`).expect(200)).body;
+    expect(bonsVentile[0].statut).toBe('traite');
+    const b = (await as('get', `/chantiers/${ventile.chantier.id}/budgets`).expect(200)).body;
+    // FG 100 + nettoyage 150 : dans le budget, sans attendre de décision.
+    expect(Number(b.total.global) - 1000).toBeCloseTo(250, 2);
+
+    // 3) Isoler (le défaut) : rien n'est compté tant que le bon n'est pas traité.
+    const isole = await acceptDevis('FRC-9', [
+      { designation: 'Nettoyage', type: 'fixe', valeur: '150', mode: 'separe' },
+    ]);
+    const bonsIsole = (await as('get', `/chantiers/${isole.chantier.id}/budgets/bons`).expect(200)).body;
+    expect(bonsIsole[0].statut).toBe('a_traiter');
+    const rIsole = (await as('get', `/chantiers/${isole.chantier.id}/results`).expect(200)).body;
+    expect(Number(rIsole.totals.budgetObjectif)).toBe(1000);
+  });
+
+  it('refuse_un_traitement_de_frais_inconnu', async () => {
+    const created = (await as('post', '/affaires').send({ code: 'FRC-10', name: 'FRC-10' }).expect(201)).body;
+    await as('post', `/devis/${created.devis.id}/accept`)
+      .send({ traitementFrais: 'brouillon' })
+      .expect(400);
   });
 });

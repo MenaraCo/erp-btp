@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { RequiresAnyCapability } from '../../core/entitlements/requires-any-capability.decorator';
 import { RequiresPermission } from '../../core/rbac/requires-permission.decorator';
 import { AcceptanceService } from './acceptance.service';
+import { TraitementFrais } from '../site-tracking/chantier.service';
 
 @Controller()
 export class AcceptanceController {
@@ -19,8 +20,17 @@ export class AcceptanceController {
   @Post('devis/:devisId/accept')
   @RequiresAnyCapability('invoicing.situations', 'site_tracking.budget')
   @RequiresPermission('invoicing.write')
-  accept(@Param('devisId') devisId: string, @Body() body?: { chantierId?: string | null }) {
-    return this.acceptance.accept(devisId, body?.chantierId ?? null);
+  accept(
+    @Param('devisId') devisId: string,
+    @Body() body?: { chantierId?: string | null; traitementFrais?: TraitementFrais },
+  ) {
+    const traitement = body?.traitementFrais ?? 'isoler';
+    if (!['ignorer', 'isoler', 'ventiler'].includes(traitement)) {
+      throw new BadRequestException(
+        'Traitement des frais inconnu : ignorer, isoler ou ventiler.',
+      );
+    }
+    return this.acceptance.accept(devisId, body?.chantierId ?? null, traitement);
   }
 
   /** File d'attente de l'écran : les commandes gagnées qui restent à accepter. */

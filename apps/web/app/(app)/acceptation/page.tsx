@@ -277,6 +277,14 @@ function AcceptanceModal({
   const [done, setDone] = useState<{ chantierId: string; marcheId: string } | null>(null);
   const router = useRouter();
 
+  /**
+   * Que faire des frais généraux et des frais annexes du devis ? Aucune réponse n'est bonne en
+   * général : une entreprise garde ses FG au siège, une autre veut les voir sur le chantier, et
+   * le compte prorata est tantôt un coût, tantôt une recette en moins. On demande donc, plutôt
+   * que d'imposer — et « les isoler » reste le défaut, celui qui ne décide rien à votre place.
+   */
+  const [traitementFrais, setTraitementFrais] = useState<'ignorer' | 'isoler' | 'ventiler'>('isoler');
+
   const { data: sheet, isLoading } = useQuery({
     queryKey: ['acceptance-sheet', devisId],
     enabled: Boolean(token),
@@ -288,7 +296,7 @@ function AcceptanceModal({
       apiFetch<{ chantier: { id: string }; marche: { id: string } }>(`/devis/${devisId}/accept`, {
         method: 'POST',
         token,
-        body: { chantierId: target === 'new' ? null : target },
+        body: { chantierId: target === 'new' ? null : target, traitementFrais },
       }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['chantiers'] });
@@ -426,6 +434,43 @@ function AcceptanceModal({
                 Un chantier porte plusieurs marchés (un par lot gagné) : les coûts s’agrègent au
                 chantier, la facturation reste propre à chaque marché.
               </p>
+            </div>
+
+            <div className="field" style={{ marginTop: 4 }}>
+              <label>Frais généraux et frais annexes du devis</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[
+                  {
+                    v: 'isoler' as const,
+                    t: 'Les isoler et choisir ensuite',
+                    d: 'Ils forment un bon de budget à traiter : vous choisissez leur poste et leur signe (un compte prorata est souvent une recette en moins). Ils ne comptent nulle part tant que ce n’est pas fait.',
+                  },
+                  {
+                    v: 'ventiler' as const,
+                    t: 'Les ventiler sur les charges',
+                    d: 'Ils entrent tout de suite au budget du chantier, sans poste analytique — à ranger ensuite depuis « à ventiler ».',
+                  },
+                  {
+                    v: 'ignorer' as const,
+                    t: 'Ne pas en tenir compte',
+                    d: 'Le chantier ne portera pas ces frais : ils restent au siège. Sa marge s’en trouvera flattée d’autant.',
+                  },
+                ].map((o) => (
+                  <label key={o.v} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+                    <input
+                      type="radio"
+                      name="traitement-frais"
+                      checked={traitementFrais === o.v}
+                      onChange={() => setTraitementFrais(o.v)}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      <strong>{o.t}</strong>
+                      <span className="muted" style={{ display: 'block', fontSize: 11 }}>{o.d}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div

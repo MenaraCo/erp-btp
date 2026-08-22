@@ -23,6 +23,7 @@ import { EstimatingModule } from '../../src/modules/estimating/estimating.module
 import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { ComplianceModule } from '../../src/modules/compliance/compliance.module';
 import { SiteTrackingModule } from '../../src/modules/site-tracking/site-tracking.module';
+import { StockModule } from '../../src/modules/stock/stock.module';
 import { AnalyticalModule } from '../../src/modules/analytical/analytical.module';
 import { FinancialManagementModule } from '../../src/modules/financial-management/financial-management.module';
 import { ParamsModule } from '../../src/modules/params/params.module';
@@ -44,6 +45,7 @@ import { createUser, activateModule } from './entitlements.helpers';
     InvoicingModule,
     ComplianceModule,
     SiteTrackingModule,
+    StockModule,
     AnalyticalModule,
     FinancialManagementModule,
     ParamsModule,
